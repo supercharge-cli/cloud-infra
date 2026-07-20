@@ -29,10 +29,14 @@ type DashboardInstance = Instance & {
 };
 
 type PlanInfo = {
+  priceInr: number;
   priceUsd: number;
   periodDays: number;
   label: string;
-  currency: string;
+  currencies?: {
+    INR: { priceLabel: string; buttonLabel: string; display: number };
+    USD: { priceLabel: string; buttonLabel: string; display: number };
+  };
 };
 
 declare global {
@@ -57,11 +61,12 @@ function loadRazorpayScript(): Promise<void> {
 export function Dashboard({ email }: { email: string }) {
   const [instances, setInstances] = useState<DashboardInstance[]>([]);
   const [plan, setPlan] = useState<PlanInfo>({
-    priceUsd: 4,
+    priceInr: 399,
+    priceUsd: 4.59,
     periodDays: 30,
-    label: '4 vCPU · 8 GB · $4/mo',
-    currency: 'USD',
+    label: '4 vCPU · 8 GB · ₹399 / $4.59 mo',
   });
+  const [currency, setCurrency] = useState<'INR' | 'USD'>('INR');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
@@ -95,8 +100,30 @@ export function Dashboard({ email }: { email: string }) {
   }, []);
 
   useEffect(() => {
+    // Default INR for India (timezone / language), else USD
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      const lang = navigator.language || '';
+      if (tz.includes('Kolkata') || tz.includes('Calcutta') || lang.toLowerCase().startsWith('hi')) {
+        setCurrency('INR');
+      } else if (!tz.includes('Kolkata') && !lang.toLowerCase().includes('IN')) {
+        // Keep INR as product default for this market; user can switch to USD
+        setCurrency('INR');
+      }
+    } catch {
+      setCurrency('INR');
+    }
     refresh().finally(() => setLoading(false));
   }, [refresh]);
+
+  const priceLabel =
+    currency === 'USD'
+      ? plan.currencies?.USD.priceLabel || `$${plan.priceUsd}/mo`
+      : plan.currencies?.INR.priceLabel || `₹${plan.priceInr}/mo`;
+  const buttonLabel =
+    currency === 'USD'
+      ? plan.currencies?.USD.buttonLabel || `Pay $${plan.priceUsd}`
+      : plan.currencies?.INR.buttonLabel || `Pay ₹${plan.priceInr}`;
 
   async function payWithRazorpay(opts: {
     purpose: 'new_instance' | 'renew';
@@ -114,12 +141,14 @@ export function Dashboard({ email }: { email: string }) {
         purpose: opts.purpose,
         name: opts.name,
         instanceId: opts.instanceId,
+        currency,
       }),
     });
     const order = await orderRes.json();
     if (!orderRes.ok) throw new Error(order.error || 'Could not create order');
 
     return new Promise<void>((resolve, reject) => {
+      const descPrice = order.plan?.priceLabel || priceLabel;
       const rzp = new window.Razorpay!({
         key: order.keyId,
         amount: order.amount,
@@ -127,8 +156,8 @@ export function Dashboard({ email }: { email: string }) {
         name: 'Vectra Cloud',
         description:
           opts.purpose === 'renew'
-            ? `Renew instance · $${order.plan.priceUsd}/mo`
-            : `New instance · $${order.plan.priceUsd}/mo`,
+            ? `Renew instance · ${descPrice}`
+            : `New instance · ${descPrice}`,
         order_id: order.orderId,
         prefill: { email },
         theme: { color: '#ea580c' },
@@ -372,9 +401,35 @@ export function Dashboard({ email }: { email: string }) {
       <div className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-white">Create sandbox</h2>
-          <span className="rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-xs font-medium text-orange-300">
-            ${plan.priceUsd}/{plan.periodDays}d · {plan.currency}
-          </span>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-full border border-zinc-700 p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setCurrency('INR')}
+                className={`rounded-full px-3 py-1 font-medium transition ${
+                  currency === 'INR'
+                    ? 'bg-orange-600 text-white'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                ₹399
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrency('USD')}
+                className={`rounded-full px-3 py-1 font-medium transition ${
+                  currency === 'USD'
+                    ? 'bg-orange-600 text-white'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                $4.59
+              </button>
+            </div>
+            <span className="rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-xs font-medium text-orange-300">
+              {priceLabel} · {plan.periodDays}d
+            </span>
+          </div>
         </div>
         <div className="flex flex-wrap gap-3">
           <input
@@ -389,12 +444,13 @@ export function Dashboard({ email }: { email: string }) {
             onClick={createInstance}
             className="rounded-lg bg-orange-600 px-5 py-2 font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
           >
-            {creating ? 'Opening checkout…' : `Pay $${plan.priceUsd} & create`}
+            {creating ? 'Opening checkout…' : `${buttonLabel} & create`}
           </button>
         </div>
         <p className="mt-2 text-xs text-zinc-500">
-          Razorpay checkout · ${plan.priceUsd} USD unlocks one instance for {plan.periodDays}{' '}
-          days ({plan.label}). Sandbox provisions only after payment succeeds.
+          Razorpay · India <strong className="text-zinc-400">₹399</strong> · International{' '}
+          <strong className="text-zinc-400">$4.59</strong> · {plan.periodDays} days access ·
+          sandbox only after payment.
         </p>
       </div>
 
@@ -461,7 +517,7 @@ export function Dashboard({ email }: { email: string }) {
                     }}
                     className="mt-3 w-full rounded-lg bg-orange-600 py-2 text-sm font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
                   >
-                    Renew ${plan.priceUsd}/mo
+                    Renew {priceLabel}
                   </button>
                 ) : isPaused && inst.resumable !== false ? (
                   <button
@@ -495,7 +551,8 @@ export function Dashboard({ email }: { email: string }) {
               {selectedInst.paidUntil
                 ? ` (${new Date(selectedInst.paidUntil).toLocaleDateString()})`
                 : ''}
-              . Renew for <strong>${plan.priceUsd}/mo</strong> to wake and use this instance.
+              . Renew for <strong>{priceLabel}</strong> (₹{plan.priceInr} / ${plan.priceUsd}) to
+              wake and use this instance.
               <button
                 type="button"
                 disabled={busy}
@@ -528,7 +585,7 @@ export function Dashboard({ email }: { email: string }) {
                   onClick={() => renewInstance(selectedInst.id)}
                   className="rounded-lg bg-orange-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
                 >
-                  Renew ${plan.priceUsd}
+                  Renew {buttonLabel}
                 </button>
               )}
               <button

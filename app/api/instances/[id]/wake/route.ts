@@ -21,7 +21,7 @@ export async function POST(_req: Request, ctx: Ctx) {
     return NextResponse.json(
       {
         error: 'Subscription expired',
-        message: `Renew for $${PLAN.priceUsd}/month to resume this instance.`,
+        message: `Renew for ₹${PLAN.priceInr} or $${PLAN.priceUsd}/month to resume this instance.`,
         code: 'PAYMENT_REQUIRED',
         paidUntil: inst.paidUntil || null,
       },

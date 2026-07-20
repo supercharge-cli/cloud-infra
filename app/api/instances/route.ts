@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
-import { billingStatusFromPaidUntil, isSubscriptionActive, PLAN } from '@/lib/billing';
+import { billingStatusFromPaidUntil, isSubscriptionActive, PLAN, priceForCurrency } from '@/lib/billing';
 import { getSandboxState } from '@/lib/gateway-client';
 import {
   listInstances,
@@ -78,23 +78,26 @@ export async function GET() {
   return NextResponse.json({
     instances,
     plan: {
+      priceInr: PLAN.priceInr,
       priceUsd: PLAN.priceUsd,
       periodDays: PLAN.periodDays,
       label: PLAN.label,
-      currency: PLAN.currency,
+      currencies: {
+        INR: priceForCurrency('INR'),
+        USD: priceForCurrency('USD'),
+      },
     },
   });
 }
 
 /**
- * Free create is disabled. Use POST /api/billing/create-order + verify
- * (Razorpay $4) which provisions the sandbox after payment.
+ * Free create is disabled. Use POST /api/billing/create-order + verify.
  */
 export async function POST() {
   return NextResponse.json(
     {
       error: 'Payment required',
-      message: `Each instance is $${PLAN.priceUsd}/month. Use billing checkout to create one.`,
+      message: `Each instance is ₹${PLAN.priceInr} or $${PLAN.priceUsd}/month. Use billing checkout to create one.`,
       plan: PLAN,
     },
     { status: 402 },

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { nanoid } from 'nanoid';
 import { getSessionUser } from '@/lib/auth';
-import { PLAN } from '@/lib/billing';
+import { normalizeCurrency, PLAN, priceForCurrency } from '@/lib/billing';
 import { createRazorpayOrder, publicRazorpayKeyId } from '@/lib/razorpay';
 import { getInstance, savePendingOrder } from '@/lib/store';
 
@@ -16,8 +16,12 @@ export async function POST(req: Request) {
       purpose?: 'new_instance' | 'renew';
       name?: string;
       instanceId?: string;
+      currency?: string;
     };
     const purpose = body.purpose === 'renew' ? 'renew' : 'new_instance';
+    const currency = normalizeCurrency(body.currency);
+    const price = priceForCurrency(currency);
+
     let instanceName = String(body.name || 'workspace').trim().slice(0, 64) || 'workspace';
     let instanceId: string | undefined;
 
@@ -36,6 +40,8 @@ export async function POST(req: Request) {
     const receipt = `vc_${purpose.slice(0, 4)}_${nanoid(8)}`;
     const order = await createRazorpayOrder({
       receipt,
+      amountMinor: price.amountMinor,
+      currency: price.currency,
       notes: {
         userId: user.id,
         email: user.email,
@@ -44,6 +50,8 @@ export async function POST(req: Request) {
         instanceId: instanceId || '',
         plan: PLAN.id,
         product: 'vectra-cloud',
+        currency: price.currency,
+        displayPrice: String(price.display),
       },
     });
 
@@ -78,9 +86,12 @@ export async function POST(req: Request) {
       instanceName,
       plan: {
         id: PLAN.id,
+        priceInr: PLAN.priceInr,
         priceUsd: PLAN.priceUsd,
         periodDays: PLAN.periodDays,
         label: PLAN.label,
+        priceLabel: price.priceLabel,
+        buttonLabel: price.buttonLabel,
       },
     });
   } catch (e) {

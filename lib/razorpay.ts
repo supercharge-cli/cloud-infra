@@ -26,8 +26,9 @@ function basicAuth(): string {
 export type CreateOrderInput = {
   receipt: string;
   notes: Record<string, string>;
-  amountCents?: number;
-  currency?: string;
+  /** Amount in smallest currency unit (paise / cents) */
+  amountMinor: number;
+  currency: 'INR' | 'USD';
 };
 
 export async function createRazorpayOrder(input: CreateOrderInput): Promise<{
@@ -35,8 +36,8 @@ export async function createRazorpayOrder(input: CreateOrderInput): Promise<{
   amount: number;
   currency: string;
 }> {
-  const amount = input.amountCents ?? PLAN.amountCents;
-  const currency = input.currency ?? PLAN.currency;
+  const amount = input.amountMinor;
+  const currency = input.currency;
 
   const response = await fetch('https://api.razorpay.com/v1/orders', {
     method: 'POST',

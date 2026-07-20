@@ -37,7 +37,7 @@ export type Instance = {
    * Daemon deletes webhooks on start (long-poll); host re-sets after wake.
    */
   telegramBotToken?: string;
-  /** ISO — access valid until this time ($4 / 30 days per payment). */
+  /** ISO — access valid until this time (₹399 / $4.59 for 30 days). */
   paidUntil?: string;
   billingStatus?: 'active' | 'past_due' | 'none';
   lastPaymentId?: string;
