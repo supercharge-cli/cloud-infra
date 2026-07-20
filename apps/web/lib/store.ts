@@ -2,12 +2,52 @@ import { nanoid } from 'nanoid';
 import { getDb } from './mongodb';
 import { hashPassword, verifyPassword } from './auth';
 
+export type UserRole = 'admin' | 'user';
+
 export type User = {
   id: string;
   email: string;
   passwordHash: string;
+  role?: UserRole;
   createdAt: string;
 };
+
+/** Public user shape (no password hash). */
+export type PublicUser = {
+  id: string;
+  email: string;
+  role: UserRole;
+  createdAt: string;
+};
+
+export function publicUser(u: User): PublicUser {
+  return {
+    id: u.id,
+    email: u.email,
+    role: resolveUserRole(u),
+    createdAt: u.createdAt,
+  };
+}
+
+/** Emails in ADMIN_EMAILS env are always treated as admin (comma-separated). */
+export function isAdminEmail(email: string): boolean {
+  const list = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return list.includes(email.trim().toLowerCase());
+}
+
+export function resolveUserRole(user: Pick<User, 'email' | 'role'>): UserRole {
+  if (user.role === 'admin') return 'admin';
+  if (isAdminEmail(user.email)) return 'admin';
+  return user.role === 'user' ? 'user' : 'user';
+}
+
+export function isAdminUser(user: Pick<User, 'email' | 'role'> | null | undefined): boolean {
+  if (!user) return false;
+  return resolveUserRole(user) === 'admin';
+}
 
 export type InstanceStatus = 'creating' | 'running' | 'paused' | 'error' | 'destroyed';
 
@@ -63,7 +103,11 @@ export type PendingOrder = {
   paymentId?: string;
 };
 
-export async function createUser(email: string, password: string): Promise<User> {
+export async function createUser(
+  email: string,
+  password: string,
+  opts?: { role?: UserRole },
+): Promise<User> {
   const db = await getDb();
   const normalized = email.trim().toLowerCase();
   if (!normalized || !normalized.includes('@')) {
@@ -74,10 +118,14 @@ export async function createUser(email: string, password: string): Promise<User>
   const existing = await db.collection<User>('users').findOne({ email: normalized });
   if (existing) throw new Error('Email already registered');
 
+  const role: UserRole =
+    opts?.role === 'admin' || isAdminEmail(normalized) ? 'admin' : 'user';
+
   const user: User = {
     id: nanoid(12),
     email: normalized,
     passwordHash: hashPassword(password),
+    role,
     createdAt: new Date().toISOString(),
   };
   await db.collection<User>('users').insertOne(user);
@@ -89,6 +137,11 @@ export async function findUserByEmail(email: string): Promise<User | null> {
   return db.collection<User>('users').findOne({ email: email.trim().toLowerCase() });
 }
 
+export async function findUserById(id: string): Promise<User | null> {
+  const db = await getDb();
+  return db.collection<User>('users').findOne({ id });
+}
+
 export async function authenticateUser(
   email: string,
   password: string,
@@ -96,6 +149,118 @@ export async function authenticateUser(
   const user = await findUserByEmail(email);
   if (!user || !verifyPassword(password, user.passwordHash)) return null;
   return user;
+}
+
+export async function listAllUsers(): Promise<PublicUser[]> {
+  const db = await getDb();
+  const rows = await db
+    .collection<User>('users')
+    .find({})
+    .sort({ createdAt: -1 })
+    .toArray();
+  return rows.map(publicUser);
+}
+
+export async function setUserRole(userId: string, role: UserRole): Promise<PublicUser | null> {
+  const db = await getDb();
+  const user = await findUserById(userId);
+  if (!user) return null;
+  await db.collection('users').updateOne({ id: userId }, { $set: { role } });
+  return publicUser({ ...user, role });
+}
+
+export async function listAllInstances(opts?: {
+  includeDestroyed?: boolean;
+  limit?: number;
+}): Promise<Instance[]> {
+  const db = await getDb();
+  const filter: Record<string, unknown> = {};
+  if (!opts?.includeDestroyed) {
+    filter.status = { $ne: 'destroyed' };
+  }
+  return db
+    .collection<Instance>('instances')
+    .find(filter)
+    .sort({ createdAt: -1 })
+    .limit(opts?.limit ?? 500)
+    .toArray();
+}
+
+export async function getInstanceById(id: string): Promise<Instance | null> {
+  const db = await getDb();
+  return db.collection<Instance>('instances').findOne({ id });
+}
+
+export async function adminUpdateInstance(
+  id: string,
+  patch: Partial<
+    Pick<
+      Instance,
+      | 'status'
+      | 'paidUntil'
+      | 'billingStatus'
+      | 'lastError'
+      | 'name'
+    >
+  >,
+): Promise<Instance | null> {
+  const db = await getDb();
+  const prev = await getInstanceById(id);
+  if (!prev) return null;
+  const next: Instance = {
+    ...prev,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  const { _id: _drop, ...clean } = next as Instance & { _id?: unknown };
+  await db.collection('instances').updateOne({ id }, { $set: clean });
+  return clean as Instance;
+}
+
+export async function listRecentOrders(limit = 100): Promise<PendingOrder[]> {
+  const db = await getDb();
+  return db
+    .collection<PendingOrder>('orders')
+    .find({})
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .toArray();
+}
+
+export async function adminStats(): Promise<{
+  users: number;
+  admins: number;
+  instances: number;
+  running: number;
+  paused: number;
+  paidActive: number;
+  ordersPaid: number;
+  ordersTotal: number;
+}> {
+  const db = await getDb();
+  const users = await db.collection('users').countDocuments();
+  const allUsers = await db.collection<User>('users').find({}).toArray();
+  const admins = allUsers.filter((u) => isAdminUser(u)).length;
+  const instances = await db.collection('instances').countDocuments({ status: { $ne: 'destroyed' } });
+  const running = await db.collection('instances').countDocuments({ status: 'running' });
+  const paused = await db.collection('instances').countDocuments({ status: 'paused' });
+  const now = new Date().toISOString();
+  const paidActive = await db.collection('instances').countDocuments({
+    status: { $ne: 'destroyed' },
+    paidUntil: { $gt: now },
+  });
+  const ordersPaid = await db.collection('orders').countDocuments({ status: 'paid' });
+  const ordersTotal = await db.collection('orders').countDocuments();
+  return {
+    users,
+    admins,
+    instances,
+    running,
+    paused,
+    paidActive,
+    ordersPaid,
+    ordersTotal,
+  };
 }
 
 export async function listInstances(

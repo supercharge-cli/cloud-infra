@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 export const SESSION_COOKIE = 'vectra_session';
 const MAX_AGE_SEC = 14 * 24 * 60 * 60;
 
-export type AuthUser = { id: string; email: string };
+export type AuthUser = { id: string; email: string; role?: 'admin' | 'user' };
 
 function secret(): string {
   const s = process.env.AUTH_SECRET?.trim();
@@ -43,6 +43,7 @@ export function createSessionToken(user: AuthUser): string {
   const payload = {
     sub: user.id,
     email: user.email,
+    role: user.role || 'user',
     exp: Math.floor(Date.now() / 1000) + MAX_AGE_SEC,
   };
   const body = b64url(JSON.stringify(payload));
@@ -60,13 +61,18 @@ export function verifySessionToken(token: string): AuthUser | null {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as {
       sub?: string;
       email?: string;
+      role?: 'admin' | 'user';
       exp?: number;
     };
     if (!payload.sub || !payload.email) return null;
     if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
       return null;
     }
-    return { id: payload.sub, email: payload.email };
+    return {
+      id: payload.sub,
+      email: payload.email,
+      role: payload.role === 'admin' ? 'admin' : 'user',
+    };
   } catch {
     return null;
   }
@@ -109,4 +115,42 @@ export async function requireSessionUser(): Promise<AuthUser> {
     throw err;
   }
   return user;
+}
+
+/** Session user with live role from DB (or ADMIN_EMAILS). */
+export async function getSessionUserWithRole(): Promise<
+  (AuthUser & { role: 'admin' | 'user' }) | null
+> {
+  const session = await getSessionUser();
+  if (!session) return null;
+  const { findUserById, resolveUserRole } = await import('./store');
+  const dbUser = await findUserById(session.id);
+  if (!dbUser) {
+    // fallback: email-only admin list
+    const { isAdminEmail } = await import('./store');
+    return {
+      ...session,
+      role: isAdminEmail(session.email) ? 'admin' : 'user',
+    };
+  }
+  return {
+    id: dbUser.id,
+    email: dbUser.email,
+    role: resolveUserRole(dbUser),
+  };
+}
+
+export async function requireAdmin(): Promise<AuthUser & { role: 'admin' }> {
+  const user = await getSessionUserWithRole();
+  if (!user) {
+    const err = new Error('Login required') as Error & { status: number };
+    err.status = 401;
+    throw err;
+  }
+  if (user.role !== 'admin') {
+    const err = new Error('Admin access required') as Error & { status: number };
+    err.status = 403;
+    throw err;
+  }
+  return { ...user, role: 'admin' };
 }

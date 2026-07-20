@@ -21,6 +21,7 @@ export const BRAND = {
   github: null as string | null,
   docsHome: '/docs',
   dashboard: '/dashboard',
+  admin: '/admin',
   login: '/login',
   signup: '/signup',
   terms: '/terms',

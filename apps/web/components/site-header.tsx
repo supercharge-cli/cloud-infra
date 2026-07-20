@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { BRAND } from '@/lib/brand';
 
-type Me = { id: string; email: string } | null;
+type Me = { id: string; email: string; role?: 'admin' | 'user' } | null;
 
 export function SiteHeader() {
   const [user, setUser] = useState<Me>(null);
@@ -45,6 +45,14 @@ export function SiteHeader() {
               >
                 Dashboard
               </Link>
+              {user.role === 'admin' ? (
+                <Link
+                  href={BRAND.admin}
+                  className="rounded-md px-3 py-2 text-orange-400 transition hover:bg-zinc-900 hover:text-orange-300"
+                >
+                  Admin
+                </Link>
+              ) : null}
               <span className="hidden px-2 text-zinc-600 sm:inline">{user.email}</span>
               <button
                 type="button"
