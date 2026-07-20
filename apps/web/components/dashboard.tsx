@@ -86,6 +86,25 @@ export function Dashboard({ email }: { email: string }) {
   const [allowAll, setAllowAll] = useState(false);
   const [pairCode, setPairCode] = useState('');
 
+  // Command pane (shell in sandbox)
+  const [cmdInput, setCmdInput] = useState('');
+  const [cmdCwd, setCmdCwd] = useState('/home/user/workspace');
+  const [cmdTimeout, setCmdTimeout] = useState(120);
+  const [cmdRunning, setCmdRunning] = useState(false);
+  const [cmdHistory, setCmdHistory] = useState<
+    Array<{
+      id: string;
+      command: string;
+      cwd: string;
+      exitCode: number | null;
+      stdout: string;
+      stderr: string;
+      at: string;
+      error?: string;
+    }>
+  >([]);
+  const [cmdHistIdx, setCmdHistIdx] = useState(-1);
+
   const refresh = useCallback(async () => {
     setError('');
     const res = await fetch('/api/instances');
@@ -224,6 +243,12 @@ export function Dashboard({ email }: { email: string }) {
   }
 
   async function loadDetail(id: string) {
+    if (selected !== id) {
+      setCmdHistory([]);
+      setCmdInput('');
+      setCmdHistIdx(-1);
+      setCmdCwd('/home/user/workspace');
+    }
     setSelected(id);
     setBusy(true);
     setLogs('');
@@ -359,6 +384,8 @@ export function Dashboard({ email }: { email: string }) {
         setSelected(null);
         setConfig(null);
         setPairing(null);
+        setCmdHistory([]);
+        setCmdInput('');
       }
       await refresh();
     } catch (e) {
@@ -367,6 +394,126 @@ export function Dashboard({ email }: { email: string }) {
       setBusy(false);
     }
   }
+
+  async function runCommand(raw?: string) {
+    if (!selected) return;
+    const command = (raw ?? cmdInput).trim();
+    if (!command || cmdRunning) return;
+
+    const entryId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setCmdRunning(true);
+    setError('');
+    setCmdHistIdx(-1);
+
+    // Optimistic pending row
+    setCmdHistory((h) => [
+      {
+        id: entryId,
+        command,
+        cwd: cmdCwd,
+        exitCode: null,
+        stdout: '',
+        stderr: 'Running…',
+        at: new Date().toISOString(),
+      },
+      ...h,
+    ].slice(0, 50));
+
+    try {
+      const res = await fetch(`/api/instances/${selected}/exec`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          command,
+          cwd: cmdCwd || '/home/user/workspace',
+          timeout: cmdTimeout,
+        }),
+      });
+      const data = await res.json();
+
+      if (res.status === 402) {
+        setError(data.message || data.error || 'Subscription expired — renew to run commands');
+        setCmdHistory((h) =>
+          h.map((e) =>
+            e.id === entryId
+              ? {
+                  ...e,
+                  exitCode: 1,
+                  stderr: data.message || data.error || 'Payment required',
+                  error: data.error,
+                }
+              : e,
+          ),
+        );
+        return;
+      }
+
+      if (!res.ok && data.exitCode === undefined) {
+        throw new Error(data.error || `Exec failed (${res.status})`);
+      }
+
+      setCmdHistory((h) =>
+        h.map((e) =>
+          e.id === entryId
+            ? {
+                ...e,
+                cwd: data.cwd || cmdCwd,
+                exitCode: typeof data.exitCode === 'number' ? data.exitCode : res.ok ? 0 : 1,
+                stdout: data.stdout || '',
+                stderr: data.stderr || data.message || data.error || '',
+                error: res.ok ? undefined : data.error,
+              }
+            : e,
+        ),
+      );
+
+      if (!raw) setCmdInput('');
+      // Soft-refresh status after shell activity (may wake paused sandbox)
+      void refresh();
+    } catch (e) {
+      const msg = (e as Error).message;
+      setError(msg);
+      setCmdHistory((h) =>
+        h.map((row) =>
+          row.id === entryId
+            ? { ...row, exitCode: 1, stderr: msg, error: msg }
+            : row,
+        ),
+      );
+    } finally {
+      setCmdRunning(false);
+    }
+  }
+
+  function onCmdKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void runCommand();
+      return;
+    }
+    // Up/down cycle previous commands
+    const prevCmds = cmdHistory.map((h) => h.command);
+    if (e.key === 'ArrowUp' && prevCmds.length) {
+      e.preventDefault();
+      const next = Math.min(cmdHistIdx + 1, prevCmds.length - 1);
+      setCmdHistIdx(next);
+      setCmdInput(prevCmds[next] || '');
+    } else if (e.key === 'ArrowDown' && cmdHistIdx >= 0) {
+      e.preventDefault();
+      const next = cmdHistIdx - 1;
+      setCmdHistIdx(next);
+      setCmdInput(next < 0 ? '' : prevCmds[next] || '');
+    }
+  }
+
+  const quickCmds = [
+    { label: 'pwd', cmd: 'pwd' },
+    { label: 'ls', cmd: 'ls -la' },
+    { label: 'disk', cmd: 'df -h /home/user 2>/dev/null; du -sh /home/user/workspace 2>/dev/null || true' },
+    { label: 'procs', cmd: 'ps aux --sort=-%mem | head -20' },
+    { label: 'daemon log', cmd: 'tail -n 80 /tmp/xibecode-daemon.log 2>/dev/null || echo "no daemon log yet"' },
+    { label: 'xibecode -v', cmd: 'xibecode --version 2>&1 || which xibecode || true' },
+  ];
 
   const selectedInst = instances.find((i) => i.id === selected);
 
@@ -697,6 +844,160 @@ export function Dashboard({ email }: { email: string }) {
               >
                 Save & restart
               </button>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="font-semibold text-white">Command pane</h3>
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  Run shell commands in this sandbox (wakes if paused). Working directory defaults to{' '}
+                  <span className="font-mono text-zinc-400">/home/user/workspace</span>.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={!cmdHistory.length}
+                onClick={() => setCmdHistory([])}
+                className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900 disabled:opacity-40"
+              >
+                Clear history
+              </button>
+            </div>
+
+            <div className="mb-3 flex flex-wrap gap-2">
+              {quickCmds.map((q) => (
+                <button
+                  key={q.label}
+                  type="button"
+                  disabled={
+                    cmdRunning ||
+                    busy ||
+                    selectedInst.paid === false ||
+                    selectedInst.billingStatus === 'past_due'
+                  }
+                  onClick={() => void runCommand(q.cmd)}
+                  className="rounded-full border border-zinc-700 bg-zinc-900/80 px-3 py-1 text-xs font-medium text-zinc-300 hover:border-orange-500/40 hover:text-orange-300 disabled:opacity-40"
+                >
+                  {q.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_100px]">
+              <Field label="Working directory (cwd)">
+                <input
+                  value={cmdCwd}
+                  onChange={(e) => setCmdCwd(e.target.value)}
+                  placeholder="/home/user/workspace"
+                  className="field font-mono text-sm"
+                  spellCheck={false}
+                />
+              </Field>
+              <Field label="Timeout (s)">
+                <input
+                  type="number"
+                  min={5}
+                  max={300}
+                  value={cmdTimeout}
+                  onChange={(e) => setCmdTimeout(Number(e.target.value) || 120)}
+                  className="field font-mono text-sm"
+                />
+              </Field>
+            </div>
+
+            <div className="flex gap-2">
+              <div className="relative min-w-0 flex-1">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm text-orange-500">
+                  $
+                </span>
+                <input
+                  value={cmdInput}
+                  onChange={(e) => {
+                    setCmdInput(e.target.value);
+                    setCmdHistIdx(-1);
+                  }}
+                  onKeyDown={onCmdKeyDown}
+                  disabled={
+                    cmdRunning ||
+                    selectedInst.paid === false ||
+                    selectedInst.billingStatus === 'past_due'
+                  }
+                  placeholder="ls -la · git status · npm install · …  (Enter to run, ↑↓ history)"
+                  className="field font-mono text-sm !pl-8"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={
+                  cmdRunning ||
+                  !cmdInput.trim() ||
+                  selectedInst.paid === false ||
+                  selectedInst.billingStatus === 'past_due'
+                }
+                onClick={() => void runCommand()}
+                className="shrink-0 rounded-lg bg-orange-600 px-5 py-2 text-sm font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
+              >
+                {cmdRunning ? 'Running…' : 'Run'}
+              </button>
+            </div>
+
+            <div className="mt-4 max-h-[28rem] space-y-3 overflow-auto rounded-xl border border-zinc-800 bg-black p-3">
+              {cmdHistory.length === 0 ? (
+                <p className="px-1 py-6 text-center text-xs text-zinc-600">
+                  No commands yet. Try a quick action or type a command above.
+                </p>
+              ) : (
+                cmdHistory.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="border-b border-zinc-900 pb-3 last:border-0 last:pb-0"
+                  >
+                    <div className="mb-1 flex flex-wrap items-center gap-2 font-mono text-xs">
+                      <span className="text-orange-500">$</span>
+                      <span className="text-zinc-100">{entry.command}</span>
+                      <span className="text-zinc-600">· {entry.cwd}</span>
+                      {entry.exitCode === null ? (
+                        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                          …
+                        </span>
+                      ) : (
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            entry.exitCode === 0
+                              ? 'bg-emerald-950 text-emerald-400'
+                              : 'bg-red-950 text-red-400'
+                          }`}
+                        >
+                          exit {entry.exitCode}
+                        </span>
+                      )}
+                      <span className="ml-auto text-[10px] text-zinc-600">
+                        {new Date(entry.at).toLocaleTimeString()}
+                      </span>
+                    </div>
+                    {entry.stdout ? (
+                      <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-zinc-300">
+                        {entry.stdout}
+                      </pre>
+                    ) : null}
+                    {entry.stderr ? (
+                      <pre
+                        className={`mt-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed ${
+                          entry.exitCode === 0 || entry.exitCode === null
+                            ? 'text-zinc-500'
+                            : 'text-red-400/90'
+                        }`}
+                      >
+                        {entry.stderr}
+                      </pre>
+                    ) : null}
+                  </div>
+                ))
+              )}
             </div>
           </div>
 

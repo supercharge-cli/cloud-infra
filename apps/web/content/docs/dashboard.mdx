@@ -30,6 +30,21 @@ Select an instance, then:
 
 Use **Save config** or **Save & restart** so the agent reloads settings.
 
+## Command pane
+
+Select an instance to open the **Command pane** — a remote shell in that sandbox.
+
+1. Set **cwd** (default `/home/user/workspace`) and optional **timeout** (5–300s).
+2. Type a command and press **Enter** or **Run** (↑/↓ for history).
+3. Use quick actions: `pwd`, `ls`, disk, processes, daemon log, `xibecode -v`.
+
+Requirements:
+
+- Active subscription (renew if payment expired).
+- Sandbox is woken automatically when you run a command if it was paused.
+
+Output is not a live interactive TTY (no `vim` / password prompts). Prefer non-interactive commands (`npm ci`, `git status`, `ls`, scripts with flags).
+
 ## Resume a paused instance
 
 If status is **paused**, the machine is idle but still yours.
