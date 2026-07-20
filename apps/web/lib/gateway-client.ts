@@ -763,6 +763,10 @@ export function compareSemverCore(a: string, b: string): number {
 /**
  * Opt-in upgrade of global xibecode inside the sandbox, then restart daemon.
  * Does not wipe ~/.xibecode or workspace.
+ *
+ * NOTE: do NOT pass `--version` to `xibecode update` — Commander treats
+ * global `--version` as "print CLI version and exit", so apply never runs.
+ * Use npm install -g as the reliable path; optional CLI apply without --version.
  */
 export async function updateCliInSandbox(
   sessionId: string,
@@ -777,29 +781,40 @@ export async function updateCliInSandbox(
   const sandboxId = opts?.sandboxId;
   const logs: string[] = [];
 
-  // Prefer first-class CLI command when available
   const target = (opts?.version || '').trim().replace(/^v/, '');
-  // --restart: CLI relaunches daemon after npm install; we still call restartDaemon
-  // below as a hard guarantee if relaunch fails.
-  const applyCmd = target
-    ? `xibecode update --apply --yes --restart --version ${target.replace(/[^0-9A-Za-z.+_-]/g, '')} --json 2>&1`
-    : `xibecode update --apply --yes --restart --json 2>&1`;
+  const safeTarget = target.replace(/[^0-9A-Za-z.+_-]/g, '');
+  const npmSpec = safeTarget ? `xibecode@${safeTarget}` : 'xibecode@latest';
 
-  // Fallback pure npm if older CLI lacks `update`
-  const fallbackSpec = target ? `xibecode@${target}` : 'xibecode@latest';
+  // Primary: npm -g (works on every template pin). Retry with sudo if EACCES.
+  // Do not rely on `xibecode update --version` (Commander --version bug).
   const shell = [
     'set +e',
     'echo "--- pre version ---"',
     'xibecode -v 2>&1 || true',
-    'echo "--- apply ---"',
-    applyCmd,
-    'APPLY_EC=$?',
-    'if [ "$APPLY_EC" -ne 0 ]; then',
-    '  echo "CLI update command failed or missing — npm install -g fallback"',
-    `  npm install -g ${fallbackSpec} --no-fund --no-audit 2>&1`,
+    'echo "--- npm install ---"',
+    `npm install -g ${npmSpec} --no-fund --no-audit 2>&1`,
+    'NPM_EC=$?',
+    'if [ "$NPM_EC" -ne 0 ]; then',
+    '  echo "npm -g failed (ec=$NPM_EC) — try prefix / sudo"',
+    '  if command -v sudo >/dev/null 2>&1; then',
+    `    sudo npm install -g ${npmSpec} --no-fund --no-audit 2>&1`,
+    '    NPM_EC=$?',
+    '  fi',
     'fi',
+    'if [ "$NPM_EC" -ne 0 ]; then',
+    '  # user-local global prefix (no root)',
+    '  mkdir -p "$HOME/.local"',
+    '  npm config set prefix "$HOME/.local" 2>/dev/null',
+    '  export PATH="$HOME/.local/bin:$PATH"',
+    `  npm install -g ${npmSpec} --no-fund --no-audit 2>&1`,
+    '  NPM_EC=$?',
+    '  # ensure next PATH lookup finds it',
+    '  hash -r 2>/dev/null || true',
+    'fi',
+    'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"',
     'echo "--- post version ---"',
     'xibecode -v 2>&1 || true',
+    'which xibecode 2>/dev/null || true',
     'echo UPDATE_DONE',
   ].join('\n');
 
@@ -811,30 +826,37 @@ export async function updateCliInSandbox(
   const out = `${r.stdout || ''}\n${r.stderr || ''}\n${r.message || ''}`;
   logs.push(redactSecrets(out.slice(0, 5000)));
 
-  // Parse JSON blob from update --json if present
-  let from: string | null = null;
-  let to: string | null = target || null;
-  let verified: string | null = parseXibecodeVersion(
-    out.split('--- post version ---').pop() || out,
-  );
   const pre = out.split('--- pre version ---')[1] || '';
-  from = parseXibecodeVersion(pre);
+  const post = out.split('--- post version ---').pop() || out;
+  const from = parseXibecodeVersion(pre);
+  let verified = parseXibecodeVersion(post);
+  // Prefer the last version line after post (in case npm also prints versions)
+  const postVers = [...post.matchAll(/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/g)].map(
+    (m) => m[1],
+  );
+  if (postVers.length) {
+    verified = postVers[postVers.length - 1] || verified;
+  }
 
-  try {
-    const jsonMatch = out.match(/\{[\s\S]*"ok"\s*:\s*(true|false)[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]) as {
-        ok?: boolean;
-        from?: string;
-        to?: string;
-        verified?: string;
-      };
-      if (parsed.from) from = parsed.from;
-      if (parsed.to) to = parsed.to;
-      if (parsed.verified) verified = parsed.verified;
-    }
-  } catch {
-    /* ignore */
+  const to = safeTarget || verified;
+  const versionOk = Boolean(
+    verified &&
+      (!safeTarget ||
+        verified === safeTarget ||
+        compareSemverCore(verified, safeTarget) >= 0),
+  );
+
+  if (!versionOk) {
+    logs.push(
+      `VERSION_MISMATCH: wanted ${safeTarget || 'latest'} got ${verified || 'unknown'} — skip restart`,
+    );
+    return {
+      ok: false,
+      from,
+      to: safeTarget || to,
+      verified,
+      logs,
+    };
   }
 
   // Restart daemon so channels use new binary
@@ -842,15 +864,12 @@ export async function updateCliInSandbox(
   const restart = await restartDaemon(sessionId, sandboxId);
   logs.push(...restart.logs);
 
-  const ok =
-    Boolean(verified) &&
-    restart.ok &&
-    (!to || compareSemverCore(verified!, to) >= 0 || verified === to);
+  const ok = versionOk && restart.ok && out.includes('UPDATE_DONE');
 
   return {
-    ok: Boolean(ok || (verified && restart.ok && out.includes('UPDATE_DONE'))),
+    ok,
     from,
-    to: to || verified,
+    to: safeTarget || verified,
     verified,
     logs,
   };

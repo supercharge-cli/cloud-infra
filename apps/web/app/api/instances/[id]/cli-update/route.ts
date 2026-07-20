@@ -74,14 +74,22 @@ export async function POST(req: Request, ctx: Ctx) {
         : logs.join('\n').slice(0, 500),
     }).catch(() => undefined);
 
-    return NextResponse.json({
-      ok: result.ok,
-      from: result.from,
-      to: result.to,
-      verified: result.verified,
-      logs,
-      instance: publicInstance(inst),
-    });
+    return NextResponse.json(
+      {
+        ok: result.ok,
+        from: result.from,
+        to: result.to,
+        verified: result.verified,
+        logs,
+        instance: publicInstance(inst),
+        ...(result.ok
+          ? {}
+          : {
+              error: `CLI update did not reach target (from ${result.from || '?'} verified ${result.verified || '?'} wanted ${version || result.to || 'latest'})`,
+            }),
+      },
+      { status: result.ok ? 200 : 502 },
+    );
   } catch (e) {
     const msg = (e as Error).message.slice(0, 500);
     await updateInstance(user.id, inst.id, {

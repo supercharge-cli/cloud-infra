@@ -372,7 +372,8 @@ export function Dashboard({ email }: { email: string }) {
         [
           data.ok
             ? `CLI update OK · ${data.from || '?'} → ${data.verified || data.to || '?'}`
-            : data.error || 'CLI update failed',
+            : data.error ||
+              `CLI update failed · ${data.from || '?'} → ${data.verified || data.to || '?'} (wanted ${cliUpdate.latest})`,
           ...(data.logs || []),
         ].join('\n'),
       );
@@ -380,7 +381,12 @@ export function Dashboard({ email }: { email: string }) {
         setError(data.message || data.error || 'Subscription expired');
         return;
       }
-      if (!res.ok) throw new Error(data.error || 'CLI update failed');
+      if (!res.ok || !data.ok) {
+        throw new Error(
+          data.error ||
+            `CLI still ${data.verified || data.from || 'unknown'} after update (wanted ${cliUpdate.latest})`,
+        );
+      }
       setCliUpdate((prev) =>
         prev
           ? {
