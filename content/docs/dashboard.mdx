@@ -1,0 +1,32 @@
+---
+title: Dashboard
+description: Create sandboxes, edit config, restart daemons
+---
+
+# Dashboard
+
+After login you land on `/dashboard`.
+
+## Create instance
+
+Enter a workspace name and click **Create instance**. The server:
+
+1. Authenticates your session cookie
+2. `POST`s to e2b-gateway `/sessions` with `strategy: sandbox_full`
+3. Stores `sessionId` + `sandboxId` in MongoDB under your user
+
+## AI + Telegram config
+
+Fields:
+
+- **Provider** — `openai` (OpenAI-compatible) or `anthropic`
+- **Model** / **Base URL** — optional
+- **API key** — leave blank to keep the value already on the sandbox
+- **Telegram bot token** — same merge behavior
+- **Allow all users** — if checked, pairing is disabled (`GATEWAY_ALLOW_ALL_USERS=true`)
+
+**Save config** writes `daemon.env`, `gateway.env`, and `profile-default.json` inside the sandbox. **Save & restart** also starts `xibecode daemon`.
+
+## Destroy
+
+Deletes the gateway session (best-effort) and removes the MongoDB instance document.

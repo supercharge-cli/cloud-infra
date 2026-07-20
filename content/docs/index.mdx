@@ -1,0 +1,42 @@
+---
+title: Getting started
+description: Provision managed AI coding sandboxes with Vectra Cloud
+---
+
+# Vectra Cloud
+
+**Vectra Cloud** is managed infrastructure for AI coding agents: 4 vCPU / 8 GB E2B sandboxes with [XibeCode](https://github.com/iotserver24/Xibecode) preinstalled, plus a dashboard for AI keys, Telegram, and pairing.
+
+This site is **not** the XibeCode CLI documentation. CLI docs live on the separate product site.
+
+## What you get
+
+| Resource | Spec |
+| --- | --- |
+| CPU | 4 vCPU |
+| Memory | 8 GB |
+| Agent | XibeCode (daemon + tools) |
+| Chat | Telegram bot (pairing or open) |
+
+## Quick path
+
+1. [Sign up](/signup) with email + password (stored in MongoDB).
+2. Open the [dashboard](/dashboard).
+3. **Create instance** — calls your e2b-gateway to boot a sandbox.
+4. Paste **API key** + **Telegram bot token** → **Save & restart**.
+5. DM the bot, copy the pairing code, **Approve** in the dashboard.
+
+## Operator requirements
+
+The app talks to an **e2b-gateway** you run (API key stays on the gateway, not in the browser):
+
+```bash
+# example env for this Next.js app
+MONGODB_URI=mongodb+srv://...
+MONGODB_DB=vectra_cloud
+AUTH_SECRET=long-random-string
+XIBECODE_SANDBOX_GATEWAY_URL=http://127.0.0.1:8787
+XIBECODE_GATEWAY_TOKEN=optional-bearer
+```
+
+See [Self-hosting](/docs/self-host) for a full checklist.

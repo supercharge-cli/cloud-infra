@@ -1,0 +1,26 @@
+---
+title: Telegram pairing
+description: Approve bot users securely from the dashboard
+---
+
+# Telegram pairing
+
+By default sandboxes run with **pairing on** (`GATEWAY_ALLOW_ALL_USERS=false`).
+
+## Flow
+
+1. User opens your bot and sends `/start` or any message.
+2. Bot replies with a short **pairing code**.
+3. In the dashboard, open the instance → **Telegram pairing**.
+4. Paste the code → **Approve**.
+5. User can chat; unapproved users stay blocked.
+
+## Open access
+
+Check **Allow all Telegram users** when saving config if you want anyone who finds the bot to talk to it (not recommended for production).
+
+## Tips
+
+- Codes are alphanumeric; paste them exactly.
+- Use **Refresh** if a code does not appear yet (daemon may still be starting).
+- After changing tokens, **Save & restart** so the daemon reloads env.

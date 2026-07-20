@@ -1,0 +1,55 @@
+---
+title: Self-host
+description: Run Vectra Cloud with MongoDB and e2b-gateway
+---
+
+# Self-host Vectra Cloud
+
+## Stack
+
+- **Next.js app** (this repo) — marketing, docs, auth, dashboard APIs
+- **MongoDB** — users + instances
+- **e2b-gateway** — holds `E2B_API_KEY`, creates sandboxes, exec/file APIs
+- **Custom template** (optional) — e.g. `xibecode-full-sandbox` with 4c/8GB
+
+## Environment
+
+```bash
+MONGODB_URI=mongodb+srv://user:pass@cluster/…
+MONGODB_DB=vectra_cloud
+AUTH_SECRET=replace-me
+
+XIBECODE_SANDBOX_GATEWAY_URL=http://127.0.0.1:8787
+XIBECODE_GATEWAY_TOKEN=
+
+# optional docs AI chat
+LLM_BASE_URL=
+LLM_API_KEY=
+LLM_MODEL=
+```
+
+## Dev
+
+```bash
+pnpm install
+pnpm dev   # http://127.0.0.1:3001
+```
+
+Ensure e2b-gateway is up on `8787` before creating instances.
+
+## API surface
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| POST | `/api/auth/register` | public |
+| POST | `/api/auth/login` | public |
+| POST | `/api/auth/logout` | session |
+| GET | `/api/me` | session |
+| GET/POST | `/api/instances` | session |
+| DELETE | `/api/instances/:id` | session |
+| GET/PUT | `/api/instances/:id/config` | session |
+| GET/POST | `/api/instances/:id/pairing` | session |
+| POST | `/api/instances/:id/restart` | session |
+| POST | `/api/instances/:id/setup` | session |
+
+Session cookie: `vectra_session` (HTTP-only, 14 days).
