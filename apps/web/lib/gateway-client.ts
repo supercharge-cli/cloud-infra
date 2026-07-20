@@ -670,6 +670,192 @@ export async function approvePairingCode(
   return { ok, logs: [out.slice(0, 800)] };
 }
 
+/** Parse `xibecode -v` / package version from shell output. */
+export function parseXibecodeVersion(text: string): string | null {
+  const m = String(text || '').match(/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/);
+  return m ? m[1] : null;
+}
+
+/** Current CLI version inside the sandbox (+ npm latest from host when possible). */
+export async function getCliVersionInfo(
+  sessionId: string,
+  sandboxId?: string,
+): Promise<{
+  current: string | null;
+  latest: string | null;
+  updateAvailable: boolean;
+  logs: string[];
+}> {
+  const logs: string[] = [];
+  let current: string | null = null;
+
+  const r = await execInSession(
+    sessionId,
+    [
+      'set +e',
+      'echo "--- xibecode -v ---"',
+      'xibecode -v 2>&1 || xibecode --version 2>&1 || true',
+      'echo "--- which ---"',
+      'which xibecode 2>/dev/null || true',
+      'echo VERSION_DONE',
+    ].join('\n'),
+    { timeout: 60, sandboxId },
+  );
+  const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+  logs.push(redactSecrets(out.slice(0, 1200)));
+  current = parseXibecodeVersion(out);
+
+  let latest: string | null = null;
+  try {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 5000);
+    const res = await fetch('https://registry.npmjs.org/xibecode/latest', {
+      signal: ac.signal,
+      headers: { Accept: 'application/json' },
+    });
+    clearTimeout(t);
+    if (res.ok) {
+      const data = (await res.json()) as { version?: string };
+      if (data.version) latest = String(data.version).trim();
+    }
+  } catch {
+    logs.push('npm registry latest: unreachable (host)');
+  }
+
+  // Optional: try sandbox-side check if host registry failed
+  if (!latest) {
+    const r2 = await execInSession(
+      sessionId,
+      `xibecode update --check --json 2>/dev/null || true`,
+      { timeout: 30, sandboxId },
+    );
+    const j = `${r2.stdout || ''}`;
+    try {
+      const parsed = JSON.parse(j) as { latest?: string; current?: string };
+      if (parsed.latest) latest = String(parsed.latest);
+      if (!current && parsed.current) current = String(parsed.current);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const updateAvailable = Boolean(
+    current &&
+      latest &&
+      compareSemverCore(latest, current) > 0,
+  );
+
+  return { current, latest, updateAvailable, logs };
+}
+
+/** Semver core compare (positive if a > b). */
+export function compareSemverCore(a: string, b: string): number {
+  const coreA = a.split('-')[0].split('.').map((n) => parseInt(n, 10) || 0);
+  const coreB = b.split('-')[0].split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    const x = coreA[i] ?? 0;
+    const y = coreB[i] ?? 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
+/**
+ * Opt-in upgrade of global xibecode inside the sandbox, then restart daemon.
+ * Does not wipe ~/.xibecode or workspace.
+ */
+export async function updateCliInSandbox(
+  sessionId: string,
+  opts?: { sandboxId?: string; version?: string },
+): Promise<{
+  ok: boolean;
+  from: string | null;
+  to: string | null;
+  verified: string | null;
+  logs: string[];
+}> {
+  const sandboxId = opts?.sandboxId;
+  const logs: string[] = [];
+
+  // Prefer first-class CLI command when available
+  const target = (opts?.version || '').trim().replace(/^v/, '');
+  // --restart: CLI relaunches daemon after npm install; we still call restartDaemon
+  // below as a hard guarantee if relaunch fails.
+  const applyCmd = target
+    ? `xibecode update --apply --yes --restart --version ${target.replace(/[^0-9A-Za-z.+_-]/g, '')} --json 2>&1`
+    : `xibecode update --apply --yes --restart --json 2>&1`;
+
+  // Fallback pure npm if older CLI lacks `update`
+  const fallbackSpec = target ? `xibecode@${target}` : 'xibecode@latest';
+  const shell = [
+    'set +e',
+    'echo "--- pre version ---"',
+    'xibecode -v 2>&1 || true',
+    'echo "--- apply ---"',
+    applyCmd,
+    'APPLY_EC=$?',
+    'if [ "$APPLY_EC" -ne 0 ]; then',
+    '  echo "CLI update command failed or missing — npm install -g fallback"',
+    `  npm install -g ${fallbackSpec} --no-fund --no-audit 2>&1`,
+    'fi',
+    'echo "--- post version ---"',
+    'xibecode -v 2>&1 || true',
+    'echo UPDATE_DONE',
+  ].join('\n');
+
+  const r = await execInSession(sessionId, shell, {
+    timeout: 300,
+    sandboxId,
+    cwd: '/home/user',
+  });
+  const out = `${r.stdout || ''}\n${r.stderr || ''}\n${r.message || ''}`;
+  logs.push(redactSecrets(out.slice(0, 5000)));
+
+  // Parse JSON blob from update --json if present
+  let from: string | null = null;
+  let to: string | null = target || null;
+  let verified: string | null = parseXibecodeVersion(
+    out.split('--- post version ---').pop() || out,
+  );
+  const pre = out.split('--- pre version ---')[1] || '';
+  from = parseXibecodeVersion(pre);
+
+  try {
+    const jsonMatch = out.match(/\{[\s\S]*"ok"\s*:\s*(true|false)[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        ok?: boolean;
+        from?: string;
+        to?: string;
+        verified?: string;
+      };
+      if (parsed.from) from = parsed.from;
+      if (parsed.to) to = parsed.to;
+      if (parsed.verified) verified = parsed.verified;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Restart daemon so channels use new binary
+  logs.push('--- restart daemon ---');
+  const restart = await restartDaemon(sessionId, sandboxId);
+  logs.push(...restart.logs);
+
+  const ok =
+    Boolean(verified) &&
+    restart.ok &&
+    (!to || compareSemverCore(verified!, to) >= 0 || verified === to);
+
+  return {
+    ok: Boolean(ok || (verified && restart.ok && out.includes('UPDATE_DONE'))),
+    from,
+    to: to || verified,
+    verified,
+    logs,
+  };
+}
+
 /** Restart (or start) xibecode daemon inside the sandbox using saved env. */
 export async function restartDaemon(
   sessionId: string,

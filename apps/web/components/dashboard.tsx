@@ -93,6 +93,14 @@ export function Dashboard({ email }: { email: string }) {
   const [pairing, setPairing] = useState<PairingView | null>(null);
   const [logs, setLogs] = useState('');
   const [busy, setBusy] = useState(false);
+  /** Opt-in CLI update offer (E2B / Vectra Cloud sandboxes). */
+  const [cliUpdate, setCliUpdate] = useState<{
+    current: string | null;
+    latest: string | null;
+    updateAvailable: boolean;
+  } | null>(null);
+  /** Dismissed latest version per instance (session memory). */
+  const [cliDismissed, setCliDismissed] = useState<Record<string, string>>({});
 
   // form fields
   const [provider, setProvider] = useState('openai');
@@ -309,14 +317,16 @@ export function Dashboard({ email }: { email: string }) {
       setCmdInput('');
       setCmdHistIdx(-1);
       setCmdCwd('/home/user/workspace');
+      setCliUpdate(null);
     }
     setSelected(id);
     setBusy(true);
     setLogs('');
     try {
-      const [cRes, pRes] = await Promise.all([
+      const [cRes, pRes, vRes] = await Promise.all([
         fetch(`/api/instances/${id}/config`),
         fetch(`/api/instances/${id}/pairing`),
+        fetch(`/api/instances/${id}/cli-version`),
       ]);
       const cData = await cRes.json();
       const pData = await pRes.json();
@@ -331,9 +341,69 @@ export function Dashboard({ email }: { email: string }) {
       }
       if (pRes.ok) setPairing(pData.pairing);
       else setPairing({ pending: [], approved: [] });
+
+      if (vRes.ok) {
+        const vData = await vRes.json();
+        setCliUpdate({
+          current: vData.current || null,
+          latest: vData.latest || null,
+          updateAvailable: Boolean(vData.updateAvailable),
+        });
+      } else {
+        setCliUpdate(null);
+      }
     } finally {
       setBusy(false);
     }
+  }
+
+  async function applyCliUpdate() {
+    if (!selected || !cliUpdate?.latest) return;
+    setBusy(true);
+    setLogs('');
+    try {
+      const res = await fetch(`/api/instances/${selected}/cli-update`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ version: cliUpdate.latest }),
+      });
+      const data = await res.json();
+      setLogs(
+        [
+          data.ok
+            ? `CLI update OK · ${data.from || '?'} → ${data.verified || data.to || '?'}`
+            : data.error || 'CLI update failed',
+          ...(data.logs || []),
+        ].join('\n'),
+      );
+      if (res.status === 402) {
+        setError(data.message || data.error || 'Subscription expired');
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || 'CLI update failed');
+      setCliUpdate((prev) =>
+        prev
+          ? {
+              ...prev,
+              current: data.verified || data.to || prev.current,
+              updateAvailable: false,
+            }
+          : prev,
+      );
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function dismissCliUpdate() {
+    if (!selected || !cliUpdate?.latest) {
+      setCliUpdate(null);
+      return;
+    }
+    setCliDismissed((m) => ({ ...m, [selected]: cliUpdate.latest! }));
   }
 
   async function saveConfig(restart: boolean) {
@@ -834,6 +904,46 @@ export function Dashboard({ email }: { email: string }) {
               click <strong>Wake / resume</strong> to continue. Config and files are preserved.
             </div>
           )}
+          {cliUpdate?.updateAvailable &&
+            cliUpdate.latest &&
+            cliDismissed[selectedInst.id] !== cliUpdate.latest && (
+              <div className="rounded-xl border border-sky-800/50 bg-sky-950/30 px-4 py-3 text-sm text-sky-50">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <strong className="text-white">XibeCode update available</strong>
+                    <p className="mt-1 text-sky-100/90">
+                      {cliUpdate.latest} available
+                      {cliUpdate.current ? (
+                        <>
+                          {' '}
+                          (you have <code className="text-sky-200">{cliUpdate.current}</code>)
+                        </>
+                      ) : null}
+                      . Opt-in only — installs on this sandbox and restarts the daemon. Workspace
+                      and <code className="text-sky-200">~/.xibecode</code> secrets are kept.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void applyCliUpdate()}
+                      className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
+                    >
+                      Update &amp; restart
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={dismissCliUpdate}
+                      className="rounded-lg border border-sky-800/60 px-3 py-1.5 text-xs text-sky-100 hover:bg-sky-950/50 disabled:opacity-50"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-semibold text-white">
               Manage · {selectedInst.name}{' '}

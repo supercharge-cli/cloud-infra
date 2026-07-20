@@ -69,6 +69,24 @@ Env from `apps/gateway/.env.example` (provider API key, template, lifecycle, gat
 
 After the gateway has a public URL, put it in Vercel as `XIBECODE_SANDBOX_GATEWAY_URL`.
 
+### CLI updates on existing sandboxes
+
+New sandboxes get the CLI version pinned in the E2B template (`XIBECODE_E2B_TEMPLATE`,
+e.g. `xibecode-full-sandbox`). **Rebuilding/republishing that template** is still how you
+raise the baseline for *new* instances.
+
+For **existing** instances, the dashboard offers an **opt-in** upgrade when npm has a
+newer `xibecode` than `xibecode -v` inside the sandbox:
+
+1. Open the instance → banner *Update available: X.Y.Z (you have A.B.C)*.
+2. **Update & restart** runs `npm install -g xibecode@X.Y.Z` (via `xibecode update --apply`
+   when the sandbox CLI supports it), then restarts the daemon.
+3. **Dismiss** hides the offer until the next version / session.
+4. Never auto-updates silently. Disable checks with
+   `XIBECODE_DISABLE_UPDATE_CHECK=1` (or `XIBECODE_DISABLE_AUTO_UPDATE=1`) in the sandbox env.
+
+APIs: `GET /api/instances/:id/cli-version`, `POST /api/instances/:id/cli-update`.
+
 ## Local dev
 
 ```bash
