@@ -64,7 +64,7 @@ export function Dashboard({ email }: { email: string }) {
     priceInr: 0,
     priceUsd: 0,
     periodDays: 30,
-    label: BRAND.plan.label,
+    label: `${BRAND.plan.label} sandboxes`,
   });
   const [currency, setCurrency] = useState<'INR' | 'USD'>('INR');
   const [loading, setLoading] = useState(true);

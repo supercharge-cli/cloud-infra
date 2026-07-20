@@ -91,7 +91,7 @@ export default function HomePage() {
           </div>
 
           <p className="mt-6 text-sm text-zinc-600">
-            Plan: <span className="text-zinc-400">{BRAND.plan.label}</span>
+            Plan: <span className="text-zinc-400">{BRAND.plan.label} · pay as you go</span>
           </p>
         </div>
       </section>
