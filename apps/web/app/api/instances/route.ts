@@ -12,6 +12,7 @@ import {
   destroyGatewaySession,
   getSandboxState,
 } from '@/lib/gateway-client';
+import { syncTelegramWakeWebhook } from '@/lib/telegram-webhook';
 import {
   countFreeInstancesForUser,
   createInstanceRecord,
@@ -73,6 +74,20 @@ export async function GET() {
                     : inst.lastError,
             });
             if (updated) Object.assign(inst, updated);
+          }
+
+          // Arm host Telegram webhook only while paused so the next DM can
+          // auto-resume via E2B connect. Clear it while running so daemon long-poll works.
+          if (
+            inst.telegramBotToken &&
+            (live.state === 'paused' || live.state === 'running')
+          ) {
+            void syncTelegramWakeWebhook({
+              botToken: inst.telegramBotToken,
+              instanceId: inst.id,
+              wakeSecret: inst.wakeSecret,
+              sandboxState: live.state,
+            }).catch(() => undefined);
           }
         } catch {
           liveState = 'unknown';

@@ -924,8 +924,9 @@ export function Dashboard({ email }: { email: string }) {
           {(selectedInst.liveState === 'paused' || selectedInst.status === 'paused') &&
             selectedInst.paid !== false && (
             <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/90">
-              This sandbox is <strong>paused</strong> (saved securely). It still belongs to you —
-              click <strong>Wake / resume</strong> to continue. Config and files are preserved.
+              This sandbox is <strong>paused</strong> (saved securely). Click{' '}
+              <strong>Wake / resume</strong>, or DM the Telegram bot (first message wakes the VM —
+              send again after the bot replies). Config and files are preserved.
             </div>
           )}
           {cliUpdate?.updateAvailable &&

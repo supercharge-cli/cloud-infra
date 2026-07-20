@@ -3,6 +3,7 @@ import { getSessionUser } from '@/lib/auth';
 import { getPlan, hasInstanceAccess } from '@/lib/billing';
 import { wakeSession } from '@/lib/gateway-client';
 import { getInstance, updateInstance } from '@/lib/store';
+import { syncTelegramWakeWebhook } from '@/lib/telegram-webhook';
 
 export const maxDuration = 120;
 
@@ -37,9 +38,23 @@ export async function POST(_req: Request, ctx: Ctx) {
       sandboxId: inst.sandboxId,
       restartDaemon: true,
     });
+    const logs = [...(result.logs || [])];
+
+    // Running → clear host webhook so daemon long-poll owns Telegram.
+    // Failed wake → keep/arm host webhook for next attempt.
+    if (inst.telegramBotToken) {
+      const tg = await syncTelegramWakeWebhook({
+        botToken: inst.telegramBotToken,
+        instanceId: inst.id,
+        wakeSecret: inst.wakeSecret,
+        sandboxState: result.ok ? 'running' : 'paused',
+      });
+      if (tg) logs.push(tg);
+    }
+
     const next = await updateInstance(user.id, inst.id, {
       status: result.ok ? 'running' : 'error',
-      lastError: result.ok ? undefined : (result.message || result.logs.join('\n')).slice(0, 500),
+      lastError: result.ok ? undefined : (result.message || logs.join('\n')).slice(0, 500),
     });
     const { publicInstance } = await import('@/lib/store');
     return NextResponse.json(
@@ -47,7 +62,7 @@ export async function POST(_req: Request, ctx: Ctx) {
         ok: result.ok,
         state: result.state || (result.ok ? 'running' : undefined),
         resumed: result.resumed,
-        logs: result.logs,
+        logs,
         instance: next ? publicInstance(next) : null,
       },
       { status: result.ok ? 200 : 502 },

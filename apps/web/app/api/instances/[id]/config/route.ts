@@ -3,8 +3,8 @@ import { getSessionUser } from '@/lib/auth';
 import { readSandboxConfig, writeSandboxConfig, restartDaemon } from '@/lib/gateway-client';
 import { ensureWakeSecret, getInstance, updateInstance } from '@/lib/store';
 import {
+  deleteTelegramWebhook,
   publicBaseUrl,
-  setTelegramWebhook,
   wakeWebhookUrl,
 } from '@/lib/telegram-webhook';
 
@@ -99,21 +99,24 @@ export async function PUT(req: Request, ctx: Ctx) {
     const anyChannel =
       result.meta.hasTelegramToken || result.meta.hasDiscordToken || result.meta.hasSlackToken;
 
-    // Host webhook = Telegram DM can trigger SDK activity → auto-resume
-    // (Discord/Slack use in-sandbox websockets — resume from dashboard after pause.)
+    // While running, daemon long-polls Telegram. Host webhook is armed only when
+    // paused (see instances list sync) — never re-set it here or getUpdates dies.
     if (token || result.meta.hasTelegramToken) {
       const tgToken = token || inst.telegramBotToken || '';
       if (tgToken) {
+        if (body.restart) {
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        const cleared = await deleteTelegramWebhook(tgToken);
         const url = wakeWebhookUrl(inst.id, wakeSecret);
+        logs.push(
+          cleared.ok
+            ? 'Telegram: host webhook cleared so daemon long-poll works while running'
+            : `Telegram deleteWebhook failed: ${cleared.description || 'unknown'}`,
+        );
         if (url) {
-          if (body.restart) {
-            await new Promise((r) => setTimeout(r, 2500));
-          }
-          const wh = await setTelegramWebhook(tgToken, url);
           logs.push(
-            wh.ok
-              ? `Telegram host webhook set (auto-resume on DM): ${url}`
-              : `Telegram setWebhook failed: ${wh.description || 'unknown'}`,
+            `Telegram auto-resume: host webhook re-arms when sandbox pauses (wake URL ready: ${url})`,
           );
         } else {
           logs.push(

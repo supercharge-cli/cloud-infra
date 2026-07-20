@@ -1,16 +1,23 @@
 import { NextResponse } from 'next/server';
 import { wakeSession } from '@/lib/gateway-client';
 import { getInstanceByWake, updateInstance } from '@/lib/store';
-import { setTelegramWebhook, wakeWebhookUrl } from '@/lib/telegram-webhook';
+import {
+  deleteTelegramWebhook,
+  sendTelegramMessage,
+  syncTelegramWakeWebhook,
+} from '@/lib/telegram-webhook';
 
 type Ctx = { params: Promise<{ instanceId: string; secret: string }> };
 
+export const maxDuration = 120;
+
 /**
- * Telegram calls this when the user DMs the bot.
- * 1) Gateway resume (paused sandbox)
- * 2) Restart daemon (stale long-poll after pause)
- * 3) Re-register webhook (daemon deletes webhooks so long-poll works while running;
- *    after pause we need host webhook again for the next wake)
+ * Telegram calls this when the user DMs the bot *and* the host webhook is armed
+ * (sandbox was paused). Flow:
+ * 1) Gateway Sandbox.connect / auto-resume (E2B)
+ * 2) Restart xibecode daemon (stale long-poll after memory freeze)
+ * 3) Clear host webhook so daemon getUpdates works while running
+ * 4) Tell the user to resend (this update was consumed by the webhook, not the daemon)
  */
 export async function POST(req: Request, ctx: Ctx) {
   const { instanceId, secret } = await ctx.params;
@@ -29,10 +36,11 @@ export async function POST(req: Request, ctx: Ctx) {
   }
 
   const text = update.message?.text?.trim() || '';
+  const chatId = update.message?.chat?.id;
   const logs: string[] = [];
 
   try {
-    // Official auto-resume path: any gateway exec → commands.run → activity
+    // E2B: connect/SDK activity resumes paused sandbox (autoResume + connect fallback)
     const result = await wakeSession(inst.sessionId, {
       sandboxId: inst.sandboxId,
       restartDaemon: true,
@@ -47,19 +55,22 @@ export async function POST(req: Request, ctx: Ctx) {
       lastError: result.ok ? undefined : (result.message || '').slice(0, 500),
     });
 
-    // Daemon deletes webhooks on start — put host webhook back so the *next*
-    // pause cycle can still receive DMs for wake-up.
     if (inst.telegramBotToken) {
-      const url = wakeWebhookUrl(inst.id, inst.wakeSecret || secret);
-      if (url) {
-        // Small delay so daemon's deleteWebhook finishes first
-        await new Promise((r) => setTimeout(r, 2500));
-        const wh = await setTelegramWebhook(inst.telegramBotToken, url);
-        logs.push(`re-setWebhook ok=${wh.ok} ${wh.description || ''} url=${url}`);
-      } else {
-        logs.push(
-          'PUBLIC_BASE_URL not set (or localhost) — cannot re-set Telegram webhook; set PUBLIC_BASE_URL to a public HTTPS URL',
+      // Critical: do NOT re-arm host webhook while running — that steals getUpdates.
+      const cleared = await deleteTelegramWebhook(inst.telegramBotToken);
+      logs.push(
+        cleared.ok
+          ? 'host webhook cleared — daemon owns Telegram while running'
+          : `deleteWebhook failed: ${cleared.description || 'unknown'}`,
+      );
+
+      if (result.ok && chatId != null) {
+        await sendTelegramMessage(
+          inst.telegramBotToken,
+          chatId,
+          'Sandbox is waking up — please send your message again in a few seconds.',
         );
+        logs.push('notified user to resend (webhook consumed first update)');
       }
     }
 
@@ -71,6 +82,16 @@ export async function POST(req: Request, ctx: Ctx) {
     return NextResponse.json({ ok: true, logs });
   } catch (e) {
     console.error('[telegram-wake]', e);
+    // Still paused / failed — keep host webhook armed for the next attempt
+    if (inst.telegramBotToken) {
+      const arm = await syncTelegramWakeWebhook({
+        botToken: inst.telegramBotToken,
+        instanceId: inst.id,
+        wakeSecret: inst.wakeSecret || secret,
+        sandboxState: 'paused',
+      });
+      if (arm) logs.push(arm);
+    }
     return NextResponse.json(
       { ok: false, error: (e as Error).message, logs },
       { status: 200 },

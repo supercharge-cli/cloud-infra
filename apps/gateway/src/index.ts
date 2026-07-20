@@ -235,12 +235,14 @@ async function resetContinuousRunCycle(session: SessionRecord, reason: string): 
       // 2) Resume — resets E2B continuous runtime window (Pro ~24h)
       const resumed = await Sandbox.connect(session.sandboxId, {
         timeoutMs: sandboxTimeoutMs,
+        requestTimeoutMs: 120_000,
       });
       session.sandbox = resumed as unknown as SandboxLike;
       session.continuousRunStartedAt = Date.now();
       session.cycleCount += 1;
       session.lastCycleResetAt = Date.now();
       session.updatedAt = Date.now();
+      await refreshSandboxTimeout(session);
       console.log(
         `[xibecode-e2b-gateway] continuous-run cycle #${session.cycleCount} done sandbox=${session.sandboxId}`,
       );
@@ -263,23 +265,45 @@ async function resetContinuousRunCycle(session: SessionRecord, reason: string): 
 /**
  * Ensure sandbox is running before any op.
  *
- * Paused VMs: always prefer Sandbox.connect(). Relying only on a stale in-memory
- * client's commands.run often fails for dashboard exec while Telegram wake
- * (which reconnects) succeeds — that mismatch is what users hit.
+ * E2B auto-resume docs (lifecycle.autoResume=true):
+ * - Paused sandboxes wake on SDK ops (commands.run / files.*) or HTTP traffic.
+ * - You do not need connect() first when autoResume is enabled *and* you still
+ *   hold a live client from create.
+ * - After gateway restart the in-memory client is gone → Sandbox.connect().
+ * - setTimeout() fails with "not found" while paused — only call it when running.
  *
- * Telegram long-poll *inside* a paused VM cannot wake it — host must call this
- * (or any gateway exec/wake) when a Telegram message arrives.
+ * Telegram long-poll inside a paused VM cannot wake it; the host webhook must
+ * call gateway wake/exec so SDK activity resumes the VM.
  */
 async function reconnectSandbox(session: SessionRecord, reason: string): Promise<void> {
+  // requestTimeoutMs: memory restore can exceed the default 60s handshake.
   const connected = await Sandbox.connect(session.sandboxId, {
     timeoutMs: Math.max(sandboxTimeoutMs, 120_000),
+    requestTimeoutMs: 120_000,
   });
   session.sandbox = connected as unknown as SandboxLike;
   session.continuousRunStartedAt = Date.now();
   session.updatedAt = Date.now();
+  // Fresh idle window after resume (docs: auto-resume restarts timeout countdown)
+  await refreshSandboxTimeout(session);
   console.log(
     `[xibecode-e2b-gateway] reconnected sandbox=${session.sandboxId} via Sandbox.connect (${reason})`,
   );
+}
+
+/** setTimeout only works while running; paused → "Sandbox not found". */
+async function refreshSandboxTimeout(session: SessionRecord): Promise<void> {
+  try {
+    if (typeof session.sandbox.setTimeout === 'function') {
+      await session.sandbox.setTimeout(sandboxTimeoutMs);
+    } else {
+      await Sandbox.setTimeout(session.sandboxId, sandboxTimeoutMs);
+    }
+  } catch (err) {
+    console.warn(
+      `[xibecode-e2b-gateway] setTimeout failed sandbox=${session.sandboxId}: ${(err as Error).message}`,
+    );
+  }
 }
 
 function isResumeRelatedError(msg: string): boolean {
@@ -306,11 +330,15 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
 }> {
   let state = 'unknown';
   let resumed = false;
+  let sandboxAutoResume = lifecycleAutoResume;
 
   try {
     const info = await Sandbox.getInfo(session.sandboxId);
     state = String((info as { state?: string }).state || 'unknown');
     const life = (info as { lifecycle?: { onTimeout?: string; autoResume?: boolean } }).lifecycle;
+    if (typeof life?.autoResume === 'boolean') {
+      sandboxAutoResume = life.autoResume;
+    }
     if (life?.onTimeout && life.onTimeout !== 'pause' && lifecycleOnTimeout === 'pause') {
       console.warn(
         `[xibecode-e2b-gateway] sandbox=${session.sandboxId} lifecycle.onTimeout=${life.onTimeout} (wanted pause)`,
@@ -328,37 +356,55 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
     state = 'unknown';
   }
 
-  // Paused / unknown → always connect (fresh client + resume). Do not rely on
-  // stale session.sandbox.commands.run — that path is flaky after idle pause.
-  if (state === 'paused' || state === 'unknown') {
+  if (state === 'running') {
+    // Probe first (also covers mid-pause race). setTimeout only after probe succeeds.
     try {
-      await reconnectSandbox(session, `state=${state}`);
-      resumed = true;
-      state = 'running';
-    } catch (err) {
-      throw new Error(
-        `Sandbox ${session.sandboxId} unavailable (killed or missing?). ${(err as Error).message}`,
-      );
-    }
-  } else if (state === 'running') {
-    // Refresh idle TTL; if the in-memory client is stale, reconnect.
-    try {
-      if (typeof session.sandbox.setTimeout === 'function') {
-        await session.sandbox.setTimeout(sandboxTimeoutMs);
-      } else {
-        await Sandbox.setTimeout(session.sandboxId, sandboxTimeoutMs);
-      }
-      // Cheap probe so we discover a dead handle before the real command
       if (session.sandbox?.commands?.run) {
         await session.sandbox.commands.run('true', { timeoutMs: 30_000 });
       }
+      await refreshSandboxTimeout(session);
+      session.updatedAt = Date.now();
+      return { state: 'running', resumed: false };
     } catch (err) {
       console.warn(
         `[xibecode-e2b-gateway] running-handle stale sandbox=${session.sandboxId}: ${(err as Error).message} — reconnecting`,
       );
       await reconnectSandbox(session, 'stale running handle');
       resumed = true;
+      session.updatedAt = Date.now();
+      return { state: 'running', resumed };
     }
+  }
+
+  // Paused / unknown
+  // 1) Official auto-resume: next SDK op wakes the VM when autoResume=true
+  //    (works when we still hold the create-time client).
+  if (state === 'paused' && sandboxAutoResume && session.sandbox?.commands?.run) {
+    try {
+      await session.sandbox.commands.run('true', { timeoutMs: 60_000 });
+      await refreshSandboxTimeout(session);
+      session.continuousRunStartedAt = Date.now();
+      session.updatedAt = Date.now();
+      console.log(
+        `[xibecode-e2b-gateway] auto-resumed sandbox=${session.sandboxId} via commands.run`,
+      );
+      return { state: 'running', resumed: true };
+    } catch (err) {
+      console.warn(
+        `[xibecode-e2b-gateway] auto-resume via commands.run failed sandbox=${session.sandboxId}: ${(err as Error).message} — connect()`,
+      );
+    }
+  }
+
+  // 2) Explicit resume (always works for paused; required after gateway restart)
+  try {
+    await reconnectSandbox(session, `state=${state}`);
+    resumed = true;
+    state = 'running';
+  } catch (err) {
+    throw new Error(
+      `Sandbox ${session.sandboxId} unavailable (killed or missing?). ${(err as Error).message}`,
+    );
   }
 
   session.updatedAt = Date.now();
@@ -415,6 +461,7 @@ async function createSession(input: {
     // connect() resumes if paused; sets a fresh timeout window.
     sandbox = (await Sandbox.connect(wantSandbox, {
       timeoutMs: sandboxTimeoutMs,
+      requestTimeoutMs: 120_000,
     })) as unknown as SandboxLike;
     sandboxId = sandbox.sandboxId || wantSandbox;
     console.log(`[xibecode-e2b-gateway] reattached sandbox=${sandboxId} as session=${sessionId}`);

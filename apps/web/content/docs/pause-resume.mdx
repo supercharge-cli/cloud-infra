@@ -7,18 +7,36 @@ description: What happens when your sandbox goes idle
 
 ## Idle pause
 
-After about **15 minutes** without activity, your sandbox **pauses** automatically to save cost.
+After about **15 minutes** without activity, your sandbox **pauses** automatically to save cost (E2B lifecycle: `onTimeout: pause`, `autoResume: true`).
 
 - It is **not deleted**.
 - It still appears on **your** dashboard.
-- Files and config are kept.
+- Files, config, and memory snapshot are kept.
 
 ## How to resume
 
+### Dashboard
+
 1. Open [Dashboard](/dashboard).
 2. Find the instance (status **paused**).
-3. Click **Resume sandbox**.
-4. Wait a few seconds, then use Telegram / Discord / Slack or the dashboard as usual.
+3. Click **Wake / resume**.
+4. Wait a few seconds, then use Telegram / Discord / Slack as usual.
+
+### Telegram (auto-resume)
+
+When the sandbox is paused, Vectra arms a **host wake webhook**. The next DM:
+
+1. Resumes the sandbox via the E2B SDK (`Sandbox.connect` / auto-resume).
+2. Restarts the coding daemon (long-poll freezes across pause).
+3. Replies asking you to **send the message again** (Telegram delivered the first update to the wake webhook, not the bot).
+
+While the sandbox is **running**, the host webhook is cleared so the bot’s normal long-poll works.
+
+Discord / Slack do not use a host wake webhook — use **Wake / resume** on the dashboard after idle pause.
+
+### Commands & config
+
+Any dashboard shell command or config save also resumes a paused sandbox (gateway ensures the sandbox is running before work).
 
 If payment has expired, renew first, then resume.
 
@@ -26,3 +44,4 @@ If payment has expired, renew first, then resume.
 
 - Resume is free while your current paid period is active.
 - Destroy is permanent; pause is not.
+- Set `PUBLIC_BASE_URL` to your public HTTPS app URL so Telegram can reach the wake webhook.
