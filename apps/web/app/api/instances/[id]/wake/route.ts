@@ -4,6 +4,8 @@ import { getPlan, isSubscriptionActive } from '@/lib/billing';
 import { wakeSession } from '@/lib/gateway-client';
 import { getInstance, updateInstance } from '@/lib/store';
 
+export const maxDuration = 120;
+
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function POST(_req: Request, ctx: Ctx) {

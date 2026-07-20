@@ -4,6 +4,9 @@ import { getPlan, isSubscriptionActive } from '@/lib/billing';
 import { execInSession, redactSecrets } from '@/lib/gateway-client';
 import { getInstance, publicInstance, updateInstance } from '@/lib/store';
 
+/** Resume + long shell can exceed default serverless window */
+export const maxDuration = 300;
+
 type Ctx = { params: Promise<{ id: string }> };
 
 const MAX_COMMAND_LEN = 8_000;
@@ -73,6 +76,7 @@ export async function POST(req: Request, ctx: Ctx) {
     : DEFAULT_TIMEOUT_SEC;
 
   try {
+    // Gateway will reattach + Sandbox.connect when paused (same path as Telegram wake).
     const result = await execInSession(inst.sessionId, command, {
       timeout,
       cwd,

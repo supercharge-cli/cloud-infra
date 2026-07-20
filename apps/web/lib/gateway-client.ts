@@ -189,6 +189,16 @@ export async function execInSession(
   command: string,
   opts?: { timeout?: number; cwd?: string; sandboxId?: string },
 ): Promise<ExecResult> {
+  // Always pass sandboxId so gateway can reattach after restart / pause
+  // (same contract as /wake — fixes "command doesn't resume, telegram does").
+  if (opts?.sandboxId) {
+    try {
+      await ensureGatewaySession(sessionId, opts.sandboxId);
+    } catch {
+      /* exec body still carries sandboxId for server-side reattach */
+    }
+  }
+
   const doExec = async () =>
     gwFetch(`/sessions/${encodeURIComponent(sessionId)}/exec`, {
       method: 'POST',
@@ -196,14 +206,20 @@ export async function execInSession(
         command,
         timeout: opts?.timeout ?? 120,
         cwd: opts?.cwd,
+        sandboxId: opts?.sandboxId,
       }),
     });
 
   let res = await doExec();
-  // Session lost after gateway restart → reattach sandbox and retry once
-  if (res.status === 404 && opts?.sandboxId) {
+  // Session lost / reattach race → ensure + retry once
+  if ((res.status === 404 || res.status === 502) && opts?.sandboxId) {
     try {
       await ensureGatewaySession(sessionId, opts.sandboxId);
+      // Explicit wake/reconnect path (connect + optional no daemon restart)
+      await wakeSession(sessionId, {
+        sandboxId: opts.sandboxId,
+        restartDaemon: false,
+      }).catch(() => undefined);
       res = await doExec();
     } catch (e) {
       return {
@@ -219,7 +235,7 @@ export async function execInSession(
   try {
     data = JSON.parse(text) as ExecResult;
   } catch {
-    data = { message: text.slice(0, 400) };
+    data = { message: explainGatewayFailure(res.status, text, `${gatewayBase()}/sessions/.../exec`) };
   }
   if (!res.ok) {
     return {

@@ -263,14 +263,43 @@ async function resetContinuousRunCycle(session: SessionRecord, reason: string): 
 /**
  * Ensure sandbox is running before any op.
  *
- * Per sandbox auto-resume docs:
- * - onTimeout: 'pause' + autoResume: true at create
- * - Any SDK op (commands.run, files.read/write) auto-resumes a paused sandbox
- * - connect() is also fine after gateway restart (no live client object)
+ * Paused VMs: always prefer Sandbox.connect(). Relying only on a stale in-memory
+ * client's commands.run often fails for dashboard exec while Telegram wake
+ * (which reconnects) succeeds — that mismatch is what users hit.
  *
  * Telegram long-poll *inside* a paused VM cannot wake it — host must call this
- * (or any gateway exec) when a Telegram message arrives.
+ * (or any gateway exec/wake) when a Telegram message arrives.
  */
+async function reconnectSandbox(session: SessionRecord, reason: string): Promise<void> {
+  const connected = await Sandbox.connect(session.sandboxId, {
+    timeoutMs: Math.max(sandboxTimeoutMs, 120_000),
+  });
+  session.sandbox = connected as unknown as SandboxLike;
+  session.continuousRunStartedAt = Date.now();
+  session.updatedAt = Date.now();
+  console.log(
+    `[xibecode-e2b-gateway] reconnected sandbox=${session.sandboxId} via Sandbox.connect (${reason})`,
+  );
+}
+
+function isResumeRelatedError(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    m.includes('paused') ||
+    m.includes('not running') ||
+    m.includes('sandbox is not') ||
+    m.includes('unavailable') ||
+    m.includes('connection') ||
+    m.includes('econnreset') ||
+    m.includes('socket') ||
+    m.includes('timeout') ||
+    m.includes('404') ||
+    m.includes('not found') ||
+    m.includes('dead') ||
+    m.includes('killed')
+  );
+}
+
 async function ensureSandboxRunning(session: SessionRecord): Promise<{
   state: string;
   resumed: boolean;
@@ -299,56 +328,35 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
     state = 'unknown';
   }
 
-  // Prefer official auto-resume: SDK activity on the live client object
-  if (state === 'paused' && session.sandbox?.commands?.run) {
-    try {
-      await session.sandbox.commands.run('true', { timeoutMs: 60_000 });
-      session.continuousRunStartedAt = Date.now();
-      resumed = true;
-      state = 'running';
-      console.log(
-        `[xibecode-e2b-gateway] auto-resumed sandbox=${session.sandboxId} via commands.run (lifecycle.autoResume)`,
-      );
-    } catch (err) {
-      console.warn(
-        `[xibecode-e2b-gateway] auto-resume via commands.run failed, falling back to connect: ${(err as Error).message}`,
-      );
-    }
-  }
-
+  // Paused / unknown → always connect (fresh client + resume). Do not rely on
+  // stale session.sandbox.commands.run — that path is flaky after idle pause.
   if (state === 'paused' || state === 'unknown') {
     try {
-      const connected = await Sandbox.connect(session.sandboxId, {
-        timeoutMs: sandboxTimeoutMs,
-      });
-      session.sandbox = connected as unknown as SandboxLike;
-      session.continuousRunStartedAt = Date.now();
+      await reconnectSandbox(session, `state=${state}`);
       resumed = true;
       state = 'running';
-      console.log(
-        `[xibecode-e2b-gateway] resumed sandbox=${session.sandboxId} via Sandbox.connect`,
-      );
     } catch (err) {
       throw new Error(
         `Sandbox ${session.sandboxId} unavailable (killed or missing?). ${(err as Error).message}`,
       );
     }
   } else if (state === 'running') {
+    // Refresh idle TTL; if the in-memory client is stale, reconnect.
     try {
       if (typeof session.sandbox.setTimeout === 'function') {
         await session.sandbox.setTimeout(sandboxTimeoutMs);
       } else {
         await Sandbox.setTimeout(session.sandboxId, sandboxTimeoutMs);
       }
+      // Cheap probe so we discover a dead handle before the real command
+      if (session.sandbox?.commands?.run) {
+        await session.sandbox.commands.run('true', { timeoutMs: 30_000 });
+      }
     } catch (err) {
       console.warn(
-        `[xibecode-e2b-gateway] setTimeout failed, reconnecting sandbox=${session.sandboxId}: ${(err as Error).message}`,
+        `[xibecode-e2b-gateway] running-handle stale sandbox=${session.sandboxId}: ${(err as Error).message} — reconnecting`,
       );
-      const connected = await Sandbox.connect(session.sandboxId, {
-        timeoutMs: sandboxTimeoutMs,
-      });
-      session.sandbox = connected as unknown as SandboxLike;
-      session.continuousRunStartedAt = Date.now();
+      await reconnectSandbox(session, 'stale running handle');
       resumed = true;
     }
   }
@@ -515,18 +523,17 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
       workspaceRoot: session.workspaceRoot,
     };
   }
-  try {
+
+  const runOnce = async () => {
     const result = await session.sandbox.commands?.run(input.command, {
       cwd,
       timeoutMs,
       stdin: input.input,
     });
-
     const stdout = String((result as any)?.stdout ?? '');
     const stderr = String((result as any)?.stderr ?? '');
     const exitCodeRaw = (result as any)?.exitCode;
     const exitCode = typeof exitCodeRaw === 'number' ? exitCodeRaw : 0;
-
     session.updatedAt = Date.now();
     return {
       success: exitCode === 0,
@@ -538,13 +545,63 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
       sandboxId: session.sandboxId,
       strategy: session.strategy,
       workspaceRoot: session.workspaceRoot,
+      resumed: false as boolean | undefined,
     };
+  };
+
+  try {
+    return await runOnce();
   } catch (err: any) {
-    // E2B SDK may throw on non-zero exit ("exit status 2") instead of returning exitCode.
-    // Surface as a normal exec result so callers (hosting setup) can show logs.
     const msg = String(err?.message || err || 'command failed');
+    // Non-zero exit from the shell is not a resume problem — surface as-is
     const exitMatch = msg.match(/exit status (\d+)/i);
-    const exitCode = exitMatch ? Number(exitMatch[1]) : 1;
+    if (exitMatch) {
+      session.updatedAt = Date.now();
+      return {
+        success: false,
+        error: true,
+        message: msg,
+        stdout: String(err?.stdout ?? ''),
+        stderr: String(err?.stderr ?? msg),
+        exitCode: Number(exitMatch[1]),
+        timedOut: false,
+        platform: 'cloud',
+        sandboxId: session.sandboxId,
+        strategy: session.strategy,
+        workspaceRoot: session.workspaceRoot,
+      };
+    }
+
+    // Stale handle / still paused → reconnect once and retry the real command
+    if (isResumeRelatedError(msg)) {
+      console.warn(
+        `[xibecode-e2b-gateway] exec failed (likely paused/stale) sandbox=${session.sandboxId}: ${msg} — reconnect+retry`,
+      );
+      try {
+        await reconnectSandbox(session, 'exec retry after failure');
+        const retried = await runOnce();
+        retried.resumed = true;
+        return retried;
+      } catch (retryErr: any) {
+        const rmsg = String(retryErr?.message || retryErr || 'retry failed');
+        const rExit = rmsg.match(/exit status (\d+)/i);
+        session.updatedAt = Date.now();
+        return {
+          success: false,
+          error: true,
+          message: rmsg,
+          stdout: String(retryErr?.stdout ?? ''),
+          stderr: String(retryErr?.stderr ?? rmsg),
+          exitCode: rExit ? Number(rExit[1]) : 1,
+          timedOut: /timeout/i.test(rmsg),
+          platform: 'cloud',
+          sandboxId: session.sandboxId,
+          strategy: session.strategy,
+          workspaceRoot: session.workspaceRoot,
+        };
+      }
+    }
+
     session.updatedAt = Date.now();
     return {
       success: false,
@@ -552,7 +609,7 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
       message: msg,
       stdout: String(err?.stdout ?? ''),
       stderr: String(err?.stderr ?? msg),
-      exitCode,
+      exitCode: 1,
       timedOut: /timeout/i.test(msg),
       platform: 'cloud',
       sandboxId: session.sandboxId,
@@ -1033,18 +1090,48 @@ const server = createServer(async (req, res) => {
     const execMatch = url.pathname.match(/^\/sessions\/([^/]+)\/exec$/);
     if (method === 'POST' && execMatch) {
       const sessionId = decodeURIComponent(execMatch[1] || '');
-      const session = sessions.get(sessionId);
-      if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
-        return;
-      }
-      const body = await readJson<ExecRequest>(req);
+      const body = await readJson<ExecRequest & { sandboxId?: string }>(req);
       if (!body.command || typeof body.command !== 'string') {
         sendJson(res, 400, { success: false, error: true, message: 'Missing required field: command' });
         return;
       }
-      const result = await runInSession(session, body);
-      sendJson(res, 200, result);
+      // Same reattach path as /wake — session map is memory-only after gateway restart
+      let session = sessions.get(sessionId);
+      if (!session && body.sandboxId) {
+        try {
+          session = await createSession({
+            sessionId,
+            sandboxId: String(body.sandboxId),
+            strategy: 'sandbox_full',
+          });
+        } catch (e) {
+          sendJson(res, 502, {
+            success: false,
+            error: true,
+            message: `reattach failed: ${(e as Error).message}`,
+          });
+          return;
+        }
+      }
+      if (!session) {
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId} (pass sandboxId to reattach)`,
+        });
+        return;
+      }
+      try {
+        const result = await runInSession(session, body);
+        sendJson(res, 200, result);
+      } catch (e) {
+        sendJson(res, 502, {
+          success: false,
+          error: true,
+          message: (e as Error).message,
+          exitCode: 1,
+        });
+      }
       return;
     }
 
