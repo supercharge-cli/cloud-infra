@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
-import { createGatewaySession, getSandboxState } from '@/lib/gateway-client';
+import { billingStatusFromPaidUntil, isSubscriptionActive, PLAN } from '@/lib/billing';
+import { getSandboxState } from '@/lib/gateway-client';
 import {
-  createInstanceRecord,
   listInstances,
   publicInstance,
   updateInstance,
@@ -31,6 +31,13 @@ export async function GET() {
       let resumable = true;
       let liveMessage: string | undefined;
 
+      // Sync billing status from paidUntil
+      const billingStatus = billingStatusFromPaidUntil(inst.paidUntil);
+      if (inst.billingStatus !== billingStatus) {
+        const u = await updateInstance(user.id, inst.id, { billingStatus });
+        if (u) Object.assign(inst, u);
+      }
+
       if (inst.sandboxId && inst.status !== 'destroyed') {
         try {
           const live = await getSandboxState(inst.sandboxId);
@@ -50,12 +57,8 @@ export async function GET() {
                     : inst.lastError,
             });
             if (updated) Object.assign(inst, updated);
-          } else if (live.state === 'paused' && inst.status !== 'paused') {
-            await updateInstance(user.id, inst.id, { status: 'paused' });
-            inst.status = 'paused';
           }
         } catch {
-          // Gateway down — still return Mongo row so UI stays populated
           liveState = 'unknown';
           resumable = true;
         }
@@ -66,36 +69,34 @@ export async function GET() {
         liveState: liveState || inst.status,
         resumable,
         liveMessage,
+        paid: isSubscriptionActive(inst.paidUntil),
+        billingStatus: billingStatusFromPaidUntil(inst.paidUntil),
       };
     }),
   );
 
-  return NextResponse.json({ instances });
+  return NextResponse.json({
+    instances,
+    plan: {
+      priceUsd: PLAN.priceUsd,
+      periodDays: PLAN.periodDays,
+      label: PLAN.label,
+      currency: PLAN.currency,
+    },
+  });
 }
 
-export async function POST(req: Request) {
-  const user = await getSessionUser();
-  if (!user) {
-    return NextResponse.json({ error: 'Login required' }, { status: 401 });
-  }
-  try {
-    const body = (await req.json().catch(() => ({}))) as { name?: string };
-    const name = String(body.name || 'workspace').slice(0, 64);
-    const session = await createGatewaySession({ strategy: 'sandbox_full' });
-    const instance = await createInstanceRecord({
-      userId: user.id,
-      name,
-      sessionId: session.sessionId,
-      sandboxId: session.sandboxId,
-    });
-    return NextResponse.json(
-      { instance: publicInstance(instance) },
-      { status: 201 },
-    );
-  } catch (e) {
-    return NextResponse.json(
-      { error: `Failed to provision sandbox: ${(e as Error).message}` },
-      { status: 502 },
-    );
-  }
+/**
+ * Free create is disabled. Use POST /api/billing/create-order + verify
+ * (Razorpay $4) which provisions the sandbox after payment.
+ */
+export async function POST() {
+  return NextResponse.json(
+    {
+      error: 'Payment required',
+      message: `Each instance is $${PLAN.priceUsd}/month. Use billing checkout to create one.`,
+      plan: PLAN,
+    },
+    { status: 402 },
+  );
 }

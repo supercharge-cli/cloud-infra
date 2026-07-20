@@ -24,10 +24,44 @@ type DashboardInstance = Instance & {
   liveState?: string;
   resumable?: boolean;
   liveMessage?: string;
+  paid?: boolean;
+  billingStatus?: string;
 };
+
+type PlanInfo = {
+  priceUsd: number;
+  periodDays: number;
+  label: string;
+  currency: string;
+};
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
+  }
+}
+
+function loadRazorpayScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') return reject(new Error('No window'));
+    if (window.Razorpay) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load Razorpay'));
+    document.body.appendChild(s);
+  });
+}
 
 export function Dashboard({ email }: { email: string }) {
   const [instances, setInstances] = useState<DashboardInstance[]>([]);
+  const [plan, setPlan] = useState<PlanInfo>({
+    priceUsd: 4,
+    periodDays: 30,
+    label: '4 vCPU · 8 GB · $4/mo',
+    currency: 'USD',
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
@@ -57,30 +91,106 @@ export function Dashboard({ email }: { email: string }) {
       return;
     }
     setInstances(data.instances || []);
+    if (data.plan) setPlan(data.plan);
   }, []);
 
   useEffect(() => {
     refresh().finally(() => setLoading(false));
   }, [refresh]);
 
+  async function payWithRazorpay(opts: {
+    purpose: 'new_instance' | 'renew';
+    name?: string;
+    instanceId?: string;
+  }) {
+    setError('');
+    await loadRazorpayScript();
+    if (!window.Razorpay) throw new Error('Razorpay unavailable');
+
+    const orderRes = await fetch('/api/billing/create-order', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        purpose: opts.purpose,
+        name: opts.name,
+        instanceId: opts.instanceId,
+      }),
+    });
+    const order = await orderRes.json();
+    if (!orderRes.ok) throw new Error(order.error || 'Could not create order');
+
+    return new Promise<void>((resolve, reject) => {
+      const rzp = new window.Razorpay!({
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: 'Vectra Cloud',
+        description:
+          opts.purpose === 'renew'
+            ? `Renew instance · $${order.plan.priceUsd}/mo`
+            : `New instance · $${order.plan.priceUsd}/mo`,
+        order_id: order.orderId,
+        prefill: { email },
+        theme: { color: '#ea580c' },
+        handler: async (response: {
+          razorpay_order_id: string;
+          razorpay_payment_id: string;
+          razorpay_signature: string;
+        }) => {
+          try {
+            const vRes = await fetch('/api/billing/verify', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(response),
+            });
+            const v = await vRes.json();
+            if (!vRes.ok) throw new Error(v.error || 'Payment verify failed');
+            await refresh();
+            if (v.instance?.id) {
+              setSelected(v.instance.id);
+              setLogs(
+                `Payment OK · ${opts.purpose} · paid until ${v.paidUntil || v.instance.paidUntil || '—'}`,
+              );
+              if (opts.purpose === 'new_instance') {
+                await loadDetail(v.instance.id);
+              }
+            }
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        },
+        modal: {
+          ondismiss: () => reject(new Error('Payment cancelled')),
+        },
+      });
+      rzp.open();
+    });
+  }
+
   async function createInstance() {
     setCreating(true);
     setError('');
     try {
-      const res = await fetch('/api/instances', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Create failed');
-      await refresh();
-      setSelected(data.instance.id);
-      await loadDetail(data.instance.id);
+      await payWithRazorpay({ purpose: 'new_instance', name });
     } catch (e) {
-      setError((e as Error).message);
+      const msg = (e as Error).message;
+      if (msg !== 'Payment cancelled') setError(msg);
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function renewInstance(id: string) {
+    setBusy(true);
+    setError('');
+    try {
+      await payWithRazorpay({ purpose: 'renew', instanceId: id });
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg !== 'Payment cancelled') setError(msg);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -175,6 +285,10 @@ export function Dashboard({ email }: { email: string }) {
           ...(data.logs || []),
         ].join('\n'),
       );
+      if (res.status === 402) {
+        setError(data.message || data.error || 'Subscription expired — renew to resume');
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Wake failed');
       await refresh();
       await loadDetail(target);
@@ -256,7 +370,12 @@ export function Dashboard({ email }: { email: string }) {
       ) : null}
 
       <div className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
-        <h2 className="mb-3 text-lg font-semibold text-white">Create sandbox</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold text-white">Create sandbox</h2>
+          <span className="rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-xs font-medium text-orange-300">
+            ${plan.priceUsd}/{plan.periodDays}d · {plan.currency}
+          </span>
+        </div>
         <div className="flex flex-wrap gap-3">
           <input
             value={name}
@@ -270,12 +389,12 @@ export function Dashboard({ email }: { email: string }) {
             onClick={createInstance}
             className="rounded-lg bg-orange-600 px-5 py-2 font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
           >
-            {creating ? 'Provisioning…' : 'Create instance'}
+            {creating ? 'Opening checkout…' : `Pay $${plan.priceUsd} & create`}
           </button>
         </div>
         <p className="mt-2 text-xs text-zinc-500">
-          Provisions a full sandbox via your e2b-gateway (XibeCode preinstalled). Gateway must be
-          running.
+          Razorpay checkout · ${plan.priceUsd} USD unlocks one instance for {plan.periodDays}{' '}
+          days ({plan.label}). Sandbox provisions only after payment succeeds.
         </p>
       </div>
 
@@ -320,12 +439,31 @@ export function Dashboard({ email }: { email: string }) {
                   <p className="mt-2 text-xs text-zinc-400">
                     AI {inst.aiConfigured ? '✓' : '—'} · Telegram{' '}
                     {inst.telegramConfigured ? '✓' : '—'}
+                    {inst.paid === false || inst.billingStatus === 'past_due' ? (
+                      <span className="ml-2 text-red-400">· payment expired</span>
+                    ) : inst.paidUntil ? (
+                      <span className="ml-2 text-zinc-500">
+                        · paid until {new Date(inst.paidUntil).toLocaleDateString()}
+                      </span>
+                    ) : null}
                     {isPaused ? (
                       <span className="ml-2 text-amber-400">· idle paused — still yours</span>
                     ) : null}
                   </p>
                 </button>
-                {isPaused && inst.resumable !== false ? (
+                {inst.paid === false || inst.billingStatus === 'past_due' ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void renewInstance(inst.id);
+                    }}
+                    className="mt-3 w-full rounded-lg bg-orange-600 py-2 text-sm font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
+                  >
+                    Renew ${plan.priceUsd}/mo
+                  </button>
+                ) : isPaused && inst.resumable !== false ? (
                   <button
                     type="button"
                     disabled={busy}
@@ -351,7 +489,25 @@ export function Dashboard({ email }: { email: string }) {
 
       {selectedInst ? (
         <div className="mt-8 space-y-6">
-          {(selectedInst.liveState === 'paused' || selectedInst.status === 'paused') && (
+          {(selectedInst.paid === false || selectedInst.billingStatus === 'past_due') && (
+            <div className="rounded-xl border border-red-900/40 bg-red-950/20 px-4 py-3 text-sm text-red-100/90">
+              Subscription expired
+              {selectedInst.paidUntil
+                ? ` (${new Date(selectedInst.paidUntil).toLocaleDateString()})`
+                : ''}
+              . Renew for <strong>${plan.priceUsd}/mo</strong> to wake and use this instance.
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => renewInstance(selectedInst.id)}
+                className="ml-3 rounded-lg bg-orange-600 px-3 py-1 text-xs font-semibold text-white"
+              >
+                Renew now
+              </button>
+            </div>
+          )}
+          {(selectedInst.liveState === 'paused' || selectedInst.status === 'paused') &&
+            selectedInst.paid !== false && (
             <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/90">
               This sandbox is <strong>paused</strong> (saved on E2B). It still belongs to you —
               click <strong>Wake / resume</strong> to continue. Config and files are preserved.
@@ -365,6 +521,16 @@ export function Dashboard({ email }: { email: string }) {
               </span>
             </h2>
             <div className="flex flex-wrap gap-2">
+              {(selectedInst.paid === false || selectedInst.billingStatus === 'past_due') && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => renewInstance(selectedInst.id)}
+                  className="rounded-lg bg-orange-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
+                >
+                  Renew ${plan.priceUsd}
+                </button>
+              )}
               <button
                 type="button"
                 disabled={busy}

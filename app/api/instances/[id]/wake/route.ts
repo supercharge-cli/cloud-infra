@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
+import { isSubscriptionActive, PLAN } from '@/lib/billing';
 import { wakeSession } from '@/lib/gateway-client';
 import { getInstance, updateInstance } from '@/lib/store';
 
@@ -14,6 +15,18 @@ export async function POST(_req: Request, ctx: Ctx) {
   const inst = await getInstance(user.id, id);
   if (!inst) {
     return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+  }
+
+  if (!isSubscriptionActive(inst.paidUntil)) {
+    return NextResponse.json(
+      {
+        error: 'Subscription expired',
+        message: `Renew for $${PLAN.priceUsd}/month to resume this instance.`,
+        code: 'PAYMENT_REQUIRED',
+        paidUntil: inst.paidUntil || null,
+      },
+      { status: 402 },
+    );
   }
 
   try {

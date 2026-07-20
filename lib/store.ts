@@ -37,9 +37,30 @@ export type Instance = {
    * Daemon deletes webhooks on start (long-poll); host re-sets after wake.
    */
   telegramBotToken?: string;
+  /** ISO — access valid until this time ($4 / 30 days per payment). */
+  paidUntil?: string;
+  billingStatus?: 'active' | 'past_due' | 'none';
+  lastPaymentId?: string;
+  lastOrderId?: string;
   createdAt: string;
   updatedAt: string;
   lastError?: string;
+};
+
+export type PendingOrder = {
+  id: string;
+  userId: string;
+  email: string;
+  purpose: 'new_instance' | 'renew';
+  instanceId?: string;
+  instanceName: string;
+  razorpayOrderId: string;
+  amountCents: number;
+  currency: string;
+  status: 'created' | 'paid' | 'failed';
+  createdAt: string;
+  paidAt?: string;
+  paymentId?: string;
 };
 
 export async function createUser(email: string, password: string): Promise<User> {
@@ -160,6 +181,10 @@ export async function updateInstance(
       | 'config'
       | 'wakeSecret'
       | 'telegramBotToken'
+      | 'paidUntil'
+      | 'billingStatus'
+      | 'lastPaymentId'
+      | 'lastOrderId'
     >
   >,
 ): Promise<Instance | null> {
@@ -201,4 +226,38 @@ export async function ensureWakeSecret(userId: string, id: string): Promise<stri
   const wakeSecret = nanoid(24);
   await updateInstance(userId, id, { wakeSecret });
   return wakeSecret;
+}
+
+export async function savePendingOrder(order: PendingOrder): Promise<void> {
+  const db = await getDb();
+  await db.collection<PendingOrder>('orders').insertOne(order);
+}
+
+export async function findPendingOrderByRazorpayId(
+  razorpayOrderId: string,
+): Promise<PendingOrder | null> {
+  const db = await getDb();
+  return db.collection<PendingOrder>('orders').findOne({ razorpayOrderId });
+}
+
+export async function markOrderPaid(
+  razorpayOrderId: string,
+  paymentId: string,
+): Promise<PendingOrder | null> {
+  const db = await getDb();
+  const prev = await findPendingOrderByRazorpayId(razorpayOrderId);
+  if (!prev) return null;
+  if (prev.status === 'paid') return prev;
+  const next: PendingOrder = {
+    ...prev,
+    status: 'paid',
+    paymentId,
+    paidAt: new Date().toISOString(),
+  };
+  const { _id: _drop, ...clean } = next as PendingOrder & { _id?: unknown };
+  await db.collection('orders').updateOne(
+    { razorpayOrderId },
+    { $set: clean },
+  );
+  return clean as PendingOrder;
 }
