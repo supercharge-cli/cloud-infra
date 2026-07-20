@@ -7,7 +7,7 @@ type Ctx = { params: Promise<{ instanceId: string; secret: string }> };
 
 /**
  * Telegram calls this when the user DMs the bot.
- * 1) SDK activity via gateway → E2B auto-resume (paused sandbox)
+ * 1) Gateway resume (paused sandbox)
  * 2) Restart daemon (stale long-poll after pause)
  * 3) Re-register webhook (daemon deletes webhooks so long-poll works while running;
  *    after pause we need host webhook again for the next wake)

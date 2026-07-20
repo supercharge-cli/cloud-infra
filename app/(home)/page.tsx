@@ -19,7 +19,7 @@ const features = [
   {
     icon: Cpu,
     title: '4 vCPU · 8 GB sandboxes',
-    desc: 'Dedicated E2B VMs with XibeCode preinstalled — ready for real coding agents, not toy containers.',
+    desc: 'Dedicated 4 vCPU / 8 GB machines with XibeCode preinstalled — ready for real coding agents, not toy containers.',
   },
   {
     icon: Bot,

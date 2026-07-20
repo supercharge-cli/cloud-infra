@@ -38,7 +38,7 @@ export async function GET(_req: Request, ctx: Ctx) {
         instance =
           (await updateInstance(user.id, id, {
             status: 'error',
-            lastError: (live.message || 'Sandbox missing on E2B').slice(0, 500),
+            lastError: (live.message || 'Sandbox missing on the cloud provider').slice(0, 500),
           })) || instance;
       }
     } catch {

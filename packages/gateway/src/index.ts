@@ -95,7 +95,7 @@ const lifecycleOnTimeout =
     ? ('kill' as const)
     : ('pause' as const);
 /**
- * Official auto-resume (https://e2b.dev/docs/sandbox/auto-resume):
+ * Official auto-resume (sandbox auto-resume docs):
  * any SDK op / sandbox HTTP traffic wakes a paused sandbox when true.
  * Only valid with onTimeout: 'pause' + full memory snapshot.
  */
@@ -263,7 +263,7 @@ async function resetContinuousRunCycle(session: SessionRecord, reason: string): 
 /**
  * Ensure sandbox is running before any op.
  *
- * Per https://e2b.dev/docs/sandbox/auto-resume:
+ * Per sandbox auto-resume docs:
  * - onTimeout: 'pause' + autoResume: true at create
  * - Any SDK op (commands.run, files.read/write) auto-resumes a paused sandbox
  * - connect() is also fine after gateway restart (no live client object)
@@ -411,7 +411,7 @@ async function createSession(input: {
     sandboxId = sandbox.sandboxId || wantSandbox;
     console.log(`[xibecode-e2b-gateway] reattached sandbox=${sandboxId} as session=${sessionId}`);
   } else {
-    // Exact docs shape: https://e2b.dev/docs/sandbox/auto-resume
+    // Exact docs shape: sandbox auto-resume docs
     // Default onTimeout is 'kill' — we must pass lifecycle or sandboxes die.
     sandbox = (await Sandbox.create({
       template: sandboxTemplate,
@@ -509,7 +509,7 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
       stderr: `[invalid_argument] cwd '${cwd}' is outside sandbox workspace`,
       exitCode: 2,
       timedOut: false,
-      platform: 'e2b',
+      platform: 'cloud',
       sandboxId: session.sandboxId,
       strategy: session.strategy,
       workspaceRoot: session.workspaceRoot,
@@ -534,7 +534,7 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
       stderr,
       exitCode,
       timedOut: false,
-      platform: 'e2b',
+      platform: 'cloud',
       sandboxId: session.sandboxId,
       strategy: session.strategy,
       workspaceRoot: session.workspaceRoot,
@@ -554,7 +554,7 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
       stderr: String(err?.stderr ?? msg),
       exitCode,
       timedOut: /timeout/i.test(msg),
-      platform: 'e2b',
+      platform: 'cloud',
       sandboxId: session.sandboxId,
       strategy: session.strategy,
       workspaceRoot: session.workspaceRoot,
@@ -828,7 +828,7 @@ const server = createServer(async (req, res) => {
     if (method === 'GET' && url.pathname === '/health') {
       sendJson(res, 200, {
         success: true,
-        service: 'xibecode-e2b-gateway',
+        service: 'vectra-gateway',
         sessions: sessions.size,
         hasE2BKey: Boolean(process.env.E2B_API_KEY),
         authRequired: Boolean(authToken),

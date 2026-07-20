@@ -2,8 +2,8 @@
  * Host-side Telegram webhook helpers.
  *
  * Why: in-sandbox long-poll freezes when the VM is paused, so a Telegram DM
- * never becomes E2B "activity". The host receives the update, then runs an
- * SDK op via the gateway (auto-resume per e2b.dev/docs/sandbox/auto-resume).
+ * cannot wake it alone. The host receives the update, then asks the gateway
+ * to resume the sandbox.
  */
 
 export function publicBaseUrl(): string {

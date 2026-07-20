@@ -1,9 +1,9 @@
 {
-  "name": "@xibecode/e2b-gateway",
+  "name": "@vectra/gateway",
   "version": "1.3.3",
   "private": true,
   "type": "module",
-  "description": "Team-hosted gateway for running XibeCode commands on E2B sandboxes",
+  "description": "Vectra Cloud sandbox control plane",
   "scripts": {
     "build": "rm -rf dist && tsc",
     "dev": "bun --env-file=.env --hot src/index.ts",

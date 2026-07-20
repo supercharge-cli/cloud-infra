@@ -51,7 +51,7 @@ export async function GET() {
               status: nextStatus,
               lastError:
                 live.state === 'missing'
-                  ? (live.message || 'Sandbox no longer exists on E2B').slice(0, 500)
+                  ? (live.message || 'Sandbox no longer exists on the cloud provider').slice(0, 500)
                   : nextStatus === 'paused'
                     ? undefined
                     : inst.lastError,

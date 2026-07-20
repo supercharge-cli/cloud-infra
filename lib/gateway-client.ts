@@ -1,6 +1,6 @@
 /**
- * Thin HTTP client for packages/e2b-gateway.
- * Hosting never holds E2B_API_KEY — the gateway does.
+ * Thin HTTP client for packages/gateway (sandbox control plane).
+ * API keys for the cloud provider stay on the gateway, not in the browser.
  */
 
 function gatewayBase(): string {
@@ -55,7 +55,7 @@ export async function createGatewaySession(opts?: {
   return (await res.json()) as GatewaySession;
 }
 
-/** Re-attach after e2b-gateway restart (session map is memory-only). */
+/** Re-attach after gateway restart (session map is memory-only). */
 export async function ensureGatewaySession(
   sessionId: string,
   sandboxId?: string,
@@ -568,7 +568,7 @@ export type SandboxLiveState = {
   lifecycle?: { onTimeout?: string; autoResume?: boolean };
 };
 
-/** Query E2B state for a sandbox (paused still exists and is resumable). */
+/** Query live sandbox state (paused still exists and is resumable). */
 export async function getSandboxState(sandboxId: string): Promise<SandboxLiveState> {
   const res = await gwFetch(`/sandboxes/${encodeURIComponent(sandboxId)}`);
   const text = await res.text();
