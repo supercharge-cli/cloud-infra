@@ -1,0 +1,12 @@
+# Railway: set Root Directory = apps/gateway
+# Or deploy this service with config path apps/gateway/railway.toml
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

@@ -31,7 +31,7 @@ export function priceForCurrency(currency: BillingCurrency): {
   display: number;
   /** Razorpay amount in smallest unit */
   amountMinor: number;
-  symbolLabel: string;
+  priceLabel: string;
   buttonLabel: string;
 } {
   if (currency === 'USD') {
@@ -39,7 +39,7 @@ export function priceForCurrency(currency: BillingCurrency): {
       currency: 'USD',
       display: PLAN.priceUsd,
       amountMinor: PLAN.amountCents,
-      symbolLabel: `$${PLAN.priceUsd}/mo`,
+      priceLabel: `$${PLAN.priceUsd}/mo`,
       buttonLabel: `Pay $${PLAN.priceUsd}`,
     };
   }

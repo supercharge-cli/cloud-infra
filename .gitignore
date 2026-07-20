@@ -1,13 +1,12 @@
 # deps
 node_modules/
-packages/*/node_modules/
+**/node_modules/
 
 # secrets
 .env
 .env.*
 !.env.example
 !**/.env.example
-packages/gateway/.env
 
 # Next / Fumadocs
 .source/
@@ -17,11 +16,14 @@ build/
 coverage/
 *.tsbuildinfo
 next-env.d.ts
-public/search-index.json
+apps/web/public/search-index.json
+
+# gateway
+apps/gateway/dist/
 
 # misc
 .DS_Store
 *.pem
 .vercel
 .turbo
-packages/gateway/dist/
+apps/web/app/node_modules/

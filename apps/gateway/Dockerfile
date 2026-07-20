@@ -1,13 +1,12 @@
 # syntax=docker/dockerfile:1
 #
-# Build (from this directory):
-#   docker build -t xibecode-e2b-gateway .
+# Coolify / Railway Docker deploy:
+#   Build context: apps/gateway  (or repo root with Dockerfile path apps/gateway/Dockerfile)
+#   Port: 8787
 #
-# Run:
-#   docker run --env-file .env -p 8787:8787 xibecode-e2b-gateway
-#
-# Coolify: set build context to `packages/e2b-gateway` (or repo root with context
-# `packages/e2b-gateway` and Dockerfile path `packages/e2b-gateway/Dockerfile`).
+# Local:
+#   docker build -t vectra-gateway ./apps/gateway
+#   docker run --env-file apps/gateway/.env -p 8787:8787 vectra-gateway
 
 FROM node:20-alpine AS builder
 
@@ -26,8 +25,9 @@ ENV NODE_ENV=production
 
 COPY package.json ./
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
 
-RUN npm install --omit=dev && chown -R node:node /app
+RUN chown -R node:node /app
 
 USER node
 

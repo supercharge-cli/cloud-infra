@@ -117,16 +117,13 @@ export async function listInstances(
 
 /** Strip secrets before sending instance JSON to the browser. */
 export function publicInstance(inst: Instance): Omit<Instance, 'telegramBotToken' | 'wakeSecret'> & {
-  wakeSecret?: undefined;
-  telegramBotToken?: undefined;
   hasWakeSecret?: boolean;
 } {
-  const { telegramBotToken: _t, wakeSecret: _w, ...rest } = inst as Instance & {
+  const { telegramBotToken: _t, wakeSecret: _w, _id: _drop, ...rest } = inst as Instance & {
     _id?: unknown;
   };
-  const { _id: _drop, ...clean } = rest as Instance & { _id?: unknown };
   return {
-    ...(clean as Instance),
+    ...rest,
     hasWakeSecret: Boolean(_w),
   };
 }
