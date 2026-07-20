@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
-import { billingStatusFromPaidUntil, isSubscriptionActive, PLAN, priceForCurrency } from '@/lib/billing';
+import { billingStatusFromPaidUntil, getPlan, isSubscriptionActive, priceForCurrency } from '@/lib/billing';
 import { getSandboxState } from '@/lib/gateway-client';
 import {
   listInstances,
@@ -75,13 +75,14 @@ export async function GET() {
     }),
   );
 
+  const plan = getPlan();
   return NextResponse.json({
     instances,
     plan: {
-      priceInr: PLAN.priceInr,
-      priceUsd: PLAN.priceUsd,
-      periodDays: PLAN.periodDays,
-      label: PLAN.label,
+      priceInr: plan.priceInr,
+      priceUsd: plan.priceUsd,
+      periodDays: plan.periodDays,
+      label: plan.label,
       currencies: {
         INR: priceForCurrency('INR'),
         USD: priceForCurrency('USD'),
@@ -94,11 +95,12 @@ export async function GET() {
  * Free create is disabled. Use POST /api/billing/create-order + verify.
  */
 export async function POST() {
+  const plan = getPlan();
   return NextResponse.json(
     {
       error: 'Payment required',
-      message: `Each instance is ₹${PLAN.priceInr} or $${PLAN.priceUsd}/month. Use billing checkout to create one.`,
-      plan: PLAN,
+      message: `Each instance is ₹${plan.priceInr} or $${plan.priceUsd}/month. Use billing checkout to create one.`,
+      plan,
     },
     { status: 402 },
   );

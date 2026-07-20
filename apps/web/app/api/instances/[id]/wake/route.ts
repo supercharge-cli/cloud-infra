@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
-import { isSubscriptionActive, PLAN } from '@/lib/billing';
+import { getPlan, isSubscriptionActive } from '@/lib/billing';
 import { wakeSession } from '@/lib/gateway-client';
 import { getInstance, updateInstance } from '@/lib/store';
 
@@ -18,10 +18,11 @@ export async function POST(_req: Request, ctx: Ctx) {
   }
 
   if (!isSubscriptionActive(inst.paidUntil)) {
+    const plan = getPlan();
     return NextResponse.json(
       {
         error: 'Subscription expired',
-        message: `Renew for ₹${PLAN.priceInr} or $${PLAN.priceUsd}/month to resume this instance.`,
+        message: `Renew for ₹${plan.priceInr} or $${plan.priceUsd}/month to resume this instance.`,
         code: 'PAYMENT_REQUIRED',
         paidUntil: inst.paidUntil || null,
       },

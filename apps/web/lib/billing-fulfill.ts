@@ -2,7 +2,7 @@
  * Shared fulfillment after a Razorpay payment is confirmed
  * (client checkout signature OR server webhook).
  */
-import { addBillingPeriod, PLAN } from './billing';
+import { addBillingPeriod, getPlan, type Plan } from './billing';
 import { createGatewaySession } from './gateway-client';
 import { getDb } from './mongodb';
 import {
@@ -23,7 +23,7 @@ export type FulfillResult =
       purpose: 'new_instance' | 'renew';
       instance: ReturnType<typeof publicInstance> | null;
       paidUntil?: string;
-      plan: typeof PLAN;
+      plan: Plan;
     }
   | { ok: false; error: string; status: number };
 
@@ -56,7 +56,7 @@ export async function fulfillPaidOrder(input: {
           purpose: 'new_instance',
           instance: publicInstance(existing),
           paidUntil: existing.paidUntil,
-          plan: PLAN,
+          plan: getPlan(),
         };
       }
     }
@@ -69,7 +69,7 @@ export async function fulfillPaidOrder(input: {
           purpose: 'renew',
           instance: publicInstance(existing),
           paidUntil: existing.paidUntil,
-          plan: PLAN,
+          plan: getPlan(),
         };
       }
     }
@@ -88,7 +88,7 @@ export async function fulfillPaidOrder(input: {
         purpose: again.purpose,
         instance: existing ? publicInstance(existing) : null,
         paidUntil: existing?.paidUntil,
-        plan: PLAN,
+        plan: getPlan(),
       };
     }
     if (claimed.order?.status === 'paid' && claimed.order.purpose === 'renew' && claimed.order.instanceId) {
@@ -99,7 +99,7 @@ export async function fulfillPaidOrder(input: {
         purpose: 'renew',
         instance: existing ? publicInstance(existing) : null,
         paidUntil: existing?.paidUntil,
-        plan: PLAN,
+        plan: getPlan(),
       };
     }
   }
@@ -129,7 +129,7 @@ export async function fulfillPaidOrder(input: {
       purpose: 'renew',
       instance: updated ? publicInstance(updated) : publicInstance(inst),
       paidUntil,
-      plan: PLAN,
+      plan: getPlan(),
     };
   }
 
@@ -160,7 +160,7 @@ export async function fulfillPaidOrder(input: {
     purpose: 'new_instance',
     instance: publicInstance(withBilling || instance),
     paidUntil,
-    plan: PLAN,
+    plan: getPlan(),
   };
 }
 

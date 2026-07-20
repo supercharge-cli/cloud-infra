@@ -61,10 +61,10 @@ function loadRazorpayScript(): Promise<void> {
 export function Dashboard({ email }: { email: string }) {
   const [instances, setInstances] = useState<DashboardInstance[]>([]);
   const [plan, setPlan] = useState<PlanInfo>({
-    priceInr: 399,
-    priceUsd: 4.59,
+    priceInr: 0,
+    priceUsd: 0,
     periodDays: 30,
-    label: '4 vCPU · 8 GB · ₹399 / $4.59 mo',
+    label: BRAND.plan.label,
   });
   const [currency, setCurrency] = useState<'INR' | 'USD'>('INR');
   const [loading, setLoading] = useState(true);
@@ -412,7 +412,7 @@ export function Dashboard({ email }: { email: string }) {
                     : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                ₹399
+                ₹{plan.priceInr || '—'}
               </button>
               <button
                 type="button"
@@ -423,7 +423,7 @@ export function Dashboard({ email }: { email: string }) {
                     : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                $4.59
+                ${plan.priceUsd || '—'}
               </button>
             </div>
             <span className="rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-xs font-medium text-orange-300">
@@ -448,9 +448,9 @@ export function Dashboard({ email }: { email: string }) {
           </button>
         </div>
         <p className="mt-2 text-xs text-zinc-500">
-          Razorpay · India <strong className="text-zinc-400">₹399</strong> · International{' '}
-          <strong className="text-zinc-400">$4.59</strong> · {plan.periodDays} days access ·
-          sandbox only after payment.
+          Razorpay · India <strong className="text-zinc-400">₹{plan.priceInr || '—'}</strong> ·
+          International <strong className="text-zinc-400">${plan.priceUsd || '—'}</strong> ·{' '}
+          {plan.periodDays} days access · sandbox only after payment.
         </p>
       </div>
 

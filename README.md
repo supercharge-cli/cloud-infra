@@ -32,6 +32,9 @@ cloud-infra/
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | server keys |
 | `NEXT_PUBLIC_RAZORPAY_KEY_ID` | client key |
 | `RAZORPAY_WEBHOOK_SECRET` | Razorpay dashboard webhook secret |
+| `BILLING_PRICE_INR` | e.g. `399` (rupees) |
+| `BILLING_PRICE_USD` | e.g. `4.59` (dollars) |
+| `BILLING_PERIOD_DAYS` | e.g. `30` |
 
 Production example:
 

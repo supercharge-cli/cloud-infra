@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { nanoid } from 'nanoid';
 import { getSessionUser } from '@/lib/auth';
-import { normalizeCurrency, PLAN, priceForCurrency } from '@/lib/billing';
+import { getPlan, normalizeCurrency, priceForCurrency } from '@/lib/billing';
 import { createRazorpayOrder, publicRazorpayKeyId } from '@/lib/razorpay';
 import { getInstance, savePendingOrder } from '@/lib/store';
 
@@ -21,6 +21,7 @@ export async function POST(req: Request) {
     const purpose = body.purpose === 'renew' ? 'renew' : 'new_instance';
     const currency = normalizeCurrency(body.currency);
     const price = priceForCurrency(currency);
+    const plan = getPlan();
 
     let instanceName = String(body.name || 'workspace').trim().slice(0, 64) || 'workspace';
     let instanceId: string | undefined;
@@ -48,7 +49,7 @@ export async function POST(req: Request) {
         purpose,
         instanceName,
         instanceId: instanceId || '',
-        plan: PLAN.id,
+        plan: plan.id,
         product: 'vectra-cloud',
         currency: price.currency,
         displayPrice: String(price.display),
@@ -85,11 +86,11 @@ export async function POST(req: Request) {
       purpose,
       instanceName,
       plan: {
-        id: PLAN.id,
-        priceInr: PLAN.priceInr,
-        priceUsd: PLAN.priceUsd,
-        periodDays: PLAN.periodDays,
-        label: PLAN.label,
+        id: plan.id,
+        priceInr: plan.priceInr,
+        priceUsd: plan.priceUsd,
+        periodDays: plan.periodDays,
+        label: plan.label,
         priceLabel: price.priceLabel,
         buttonLabel: price.buttonLabel,
       },

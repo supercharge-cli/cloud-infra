@@ -1,22 +1,23 @@
 import { NextResponse } from 'next/server';
-import { PLAN, priceForCurrency } from '@/lib/billing';
+import { getPlan, priceForCurrency } from '@/lib/billing';
 import { publicRazorpayKeyId } from '@/lib/razorpay';
 
 /** Public pricing + whether checkout keys are configured. */
 export async function GET() {
   const keyId = publicRazorpayKeyId();
+  const plan = getPlan();
   const inr = priceForCurrency('INR');
   const usd = priceForCurrency('USD');
   return NextResponse.json({
     plan: {
-      id: PLAN.id,
-      name: PLAN.name,
-      priceInr: PLAN.priceInr,
-      priceUsd: PLAN.priceUsd,
-      amountPaise: PLAN.amountPaise,
-      amountCents: PLAN.amountCents,
-      periodDays: PLAN.periodDays,
-      label: PLAN.label,
+      id: plan.id,
+      name: plan.name,
+      priceInr: plan.priceInr,
+      priceUsd: plan.priceUsd,
+      amountPaise: plan.amountPaise,
+      amountCents: plan.amountCents,
+      periodDays: plan.periodDays,
+      label: plan.label,
       currencies: {
         INR: inr,
         USD: usd,
