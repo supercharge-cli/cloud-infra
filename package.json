@@ -5,17 +5,16 @@
   "description": "Vectra Cloud monorepo — apps/web (Vercel) + apps/gateway (Railway/Coolify)",
   "license": "UNLICENSED",
   "scripts": {
-    "dev": "bun run dev:web",
-    "dev:web": "bun run --cwd apps/web dev",
-    "dev:gateway": "bun run --cwd apps/gateway dev",
-    "dev:all": "bun run dev:gateway & bun run dev:web",
-    "build": "bun run build:web",
-    "build:web": "bun run --cwd apps/web build",
-    "build:gateway": "bun run --cwd apps/gateway build",
-    "start:web": "bun run --cwd apps/web start",
-    "start:gateway": "bun run --cwd apps/gateway start"
+    "dev": "npm run dev:web",
+    "dev:web": "npm run dev --prefix apps/web",
+    "dev:gateway": "npm run dev --prefix apps/gateway",
+    "dev:all": "npm run dev:gateway & npm run dev:web",
+    "build": "npm run build:web",
+    "build:web": "npm run build --prefix apps/web",
+    "build:gateway": "npm run build --prefix apps/gateway",
+    "start:web": "npm run start --prefix apps/web",
+    "start:gateway": "npm run start --prefix apps/gateway"
   },
-  "packageManager": "bun@1.3.11",
   "engines": {
     "node": ">=20"
   }
