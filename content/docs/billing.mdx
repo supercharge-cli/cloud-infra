@@ -1,0 +1,44 @@
+---
+title: Billing & Razorpay
+description: ₹399 / $4.59 per instance, checkout and webhooks
+---
+
+# Billing
+
+Each sandbox is **₹399** (India) or **$4.59** (USD) for **30 days**.
+
+## Payment flow
+
+1. Dashboard creates a Razorpay **order** (`POST /api/billing/create-order`).
+2. Customer pays in Checkout.
+3. Confirmation can arrive via:
+   - **Client** `POST /api/billing/verify` (HMAC of `order_id|payment_id` with API secret)
+   - **Webhook** `POST /api/billing/webhook` (HMAC of raw body with **webhook secret**)
+
+Both call the same `fulfillPaidOrder` (idempotent — safe if both fire).
+
+## Configure webhook (required in production)
+
+1. Razorpay Dashboard → **Account & Settings → Webhooks**
+2. **URL:** `https://YOUR_PUBLIC_DOMAIN/api/billing/webhook`
+3. **Secret:** generate and set as `RAZORPAY_WEBHOOK_SECRET` in `.env.local`
+4. Enable events:
+   - `payment.captured`
+   - `order.paid` (optional fallback)
+5. Save and use **Test** webhooks when on `rzp_test_` keys
+
+```bash
+RAZORPAY_WEBHOOK_SECRET=whsec_or_dashboard_secret
+PUBLIC_BASE_URL=https://your-domain.com
+```
+
+Local testing: tunnel (ngrok/cloudflared) → point webhook URL at the tunnel.
+
+## Env checklist
+
+```bash
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+NEXT_PUBLIC_RAZORPAY_KEY_ID=
+RAZORPAY_WEBHOOK_SECRET=
+```

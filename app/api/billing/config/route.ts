@@ -24,5 +24,7 @@ export async function GET() {
     },
     razorpayConfigured: Boolean(keyId && process.env.RAZORPAY_KEY_SECRET),
     keyId: keyId || null,
+    webhookConfigured: Boolean(process.env.RAZORPAY_WEBHOOK_SECRET?.trim()),
+    webhookPath: '/api/billing/webhook',
   });
 }
