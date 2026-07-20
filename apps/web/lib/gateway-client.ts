@@ -761,12 +761,7 @@ export function compareSemverCore(a: string, b: string): number {
 }
 
 /**
- * Opt-in upgrade of global xibecode inside the sandbox, then restart daemon.
- * Does not wipe ~/.xibecode or workspace.
- *
- * NOTE: do NOT pass `--version` to `xibecode update` — Commander treats
- * global `--version` as "print CLI version and exit", so apply never runs.
- * Use npm install -g as the reliable path; optional CLI apply without --version.
+ * Opt-in upgrade: sudo npm install -g xibecode@latest && xibecode -v, then restart daemon.
  */
 export async function updateCliInSandbox(
   sessionId: string,
@@ -781,40 +776,14 @@ export async function updateCliInSandbox(
   const sandboxId = opts?.sandboxId;
   const logs: string[] = [];
 
-  const target = (opts?.version || '').trim().replace(/^v/, '');
-  const safeTarget = target.replace(/[^0-9A-Za-z.+_-]/g, '');
-  const npmSpec = safeTarget ? `xibecode@${safeTarget}` : 'xibecode@latest';
-
-  // Primary: npm -g (works on every template pin). Retry with sudo if EACCES.
-  // Do not rely on `xibecode update --version` (Commander --version bug).
   const shell = [
     'set +e',
     'echo "--- pre version ---"',
     'xibecode -v 2>&1 || true',
-    'echo "--- npm install ---"',
-    `npm install -g ${npmSpec} --no-fund --no-audit 2>&1`,
-    'NPM_EC=$?',
-    'if [ "$NPM_EC" -ne 0 ]; then',
-    '  echo "npm -g failed (ec=$NPM_EC) — try prefix / sudo"',
-    '  if command -v sudo >/dev/null 2>&1; then',
-    `    sudo npm install -g ${npmSpec} --no-fund --no-audit 2>&1`,
-    '    NPM_EC=$?',
-    '  fi',
-    'fi',
-    'if [ "$NPM_EC" -ne 0 ]; then',
-    '  # user-local global prefix (no root)',
-    '  mkdir -p "$HOME/.local"',
-    '  npm config set prefix "$HOME/.local" 2>/dev/null',
-    '  export PATH="$HOME/.local/bin:$PATH"',
-    `  npm install -g ${npmSpec} --no-fund --no-audit 2>&1`,
-    '  NPM_EC=$?',
-    '  # ensure next PATH lookup finds it',
-    '  hash -r 2>/dev/null || true',
-    'fi',
-    'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"',
+    'echo "--- install ---"',
+    'sudo npm install -g xibecode@latest 2>&1 || npm install -g xibecode@latest 2>&1',
     'echo "--- post version ---"',
     'xibecode -v 2>&1 || true',
-    'which xibecode 2>/dev/null || true',
     'echo UPDATE_DONE',
   ].join('\n');
 
@@ -826,50 +795,17 @@ export async function updateCliInSandbox(
   const out = `${r.stdout || ''}\n${r.stderr || ''}\n${r.message || ''}`;
   logs.push(redactSecrets(out.slice(0, 5000)));
 
-  const pre = out.split('--- pre version ---')[1] || '';
-  const post = out.split('--- post version ---').pop() || out;
-  const from = parseXibecodeVersion(pre);
-  let verified = parseXibecodeVersion(post);
-  // Prefer the last version line after post (in case npm also prints versions)
-  const postVers = [...post.matchAll(/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/g)].map(
-    (m) => m[1],
-  );
-  if (postVers.length) {
-    verified = postVers[postVers.length - 1] || verified;
-  }
+  const from = parseXibecodeVersion(out.split('--- pre version ---')[1] || '');
+  const verified = parseXibecodeVersion(out.split('--- post version ---').pop() || '');
 
-  const to = safeTarget || verified;
-  const versionOk = Boolean(
-    verified &&
-      (!safeTarget ||
-        verified === safeTarget ||
-        compareSemverCore(verified, safeTarget) >= 0),
-  );
-
-  if (!versionOk) {
-    logs.push(
-      `VERSION_MISMATCH: wanted ${safeTarget || 'latest'} got ${verified || 'unknown'} — skip restart`,
-    );
-    return {
-      ok: false,
-      from,
-      to: safeTarget || to,
-      verified,
-      logs,
-    };
-  }
-
-  // Restart daemon so channels use new binary
   logs.push('--- restart daemon ---');
   const restart = await restartDaemon(sessionId, sandboxId);
   logs.push(...restart.logs);
 
-  const ok = versionOk && restart.ok && out.includes('UPDATE_DONE');
-
   return {
-    ok,
+    ok: Boolean(verified && out.includes('UPDATE_DONE') && restart.ok),
     from,
-    to: safeTarget || verified,
+    to: verified,
     verified,
     logs,
   };
