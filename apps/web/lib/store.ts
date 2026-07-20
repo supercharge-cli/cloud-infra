@@ -169,6 +169,62 @@ export async function setUserRole(userId: string, role: UserRole): Promise<Publi
   return publicUser({ ...user, role });
 }
 
+/** Permanently remove user row. Call after handling their instances. */
+export async function deleteUserById(userId: string): Promise<boolean> {
+  const db = await getDb();
+  const r = await db.collection('users').deleteOne({ id: userId });
+  return r.deletedCount > 0;
+}
+
+export async function countInstancesForUser(userId: string): Promise<number> {
+  const db = await getDb();
+  return db.collection('instances').countDocuments({
+    userId,
+    status: { $ne: 'destroyed' },
+  });
+}
+
+export async function listInstancesForUser(userId: string): Promise<Instance[]> {
+  const db = await getDb();
+  return db
+    .collection<Instance>('instances')
+    .find({ userId })
+    .sort({ createdAt: -1 })
+    .toArray();
+}
+
+/** Hard-delete instance document from Mongo (after sandbox destroyed). */
+export async function hardDeleteInstance(id: string): Promise<boolean> {
+  const db = await getDb();
+  const r = await db.collection('instances').deleteOne({ id });
+  return r.deletedCount > 0;
+}
+
+export async function reassignInstance(
+  instanceId: string,
+  newUserId: string,
+): Promise<Instance | null> {
+  const db = await getDb();
+  const prev = await getInstanceById(instanceId);
+  if (!prev) return null;
+  const owner = await findUserById(newUserId);
+  if (!owner) throw new Error('Target user not found');
+  const next: Instance = {
+    ...prev,
+    userId: newUserId,
+    updatedAt: new Date().toISOString(),
+  };
+  const { _id: _drop, ...clean } = next as Instance & { _id?: unknown };
+  await db.collection('instances').updateOne({ id: instanceId }, { $set: clean });
+  return clean as Instance;
+}
+
+export async function deleteOrdersForUser(userId: string): Promise<number> {
+  const db = await getDb();
+  const r = await db.collection('orders').deleteMany({ userId });
+  return r.deletedCount || 0;
+}
+
 export async function listAllInstances(opts?: {
   includeDestroyed?: boolean;
   limit?: number;
