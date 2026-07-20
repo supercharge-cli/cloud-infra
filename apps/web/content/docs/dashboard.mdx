@@ -18,7 +18,7 @@ Every account includes **1 free instance** (no payment, no expiry).
 
 You only see **your** instances. Paused ones stay in the list so you can resume them.
 
-## Configure AI + Telegram
+## Configure AI + chat channels
 
 Select an instance, then:
 
@@ -27,10 +27,12 @@ Select an instance, then:
 | Provider | OpenAI-compatible or Anthropic |
 | Model / Base URL | Optional |
 | API key | Your LLM key (leave blank to keep the current one) |
-| Telegram bot token | From [@BotFather](https://t.me/BotFather) |
-| Allow all users | Off = pairing (recommended); on = anyone can talk to the bot |
+| Telegram bot token | From [@BotFather](https://t.me/BotFather) — optional if you use another channel |
+| Discord bot token | Discord bot + Message Content Intent |
+| Slack bot + app tokens | `xoxb-…` and `xapp-…` (Socket Mode) |
+| Allow all users | Off = pairing (recommended); on = anyone can talk |
 
-Use **Save config** or **Save & restart** so the agent reloads settings.
+Set **at least one** channel. Use **Save config** or **Save & restart** so the agent reloads settings.
 
 ## Command pane
 

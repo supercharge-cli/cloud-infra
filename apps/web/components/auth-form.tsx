@@ -21,7 +21,7 @@ import { BRAND } from '@/lib/brand';
 const perks = [
   { icon: Zap, text: `${BRAND.plan.label} sandboxes` },
   { icon: Cloud, text: 'XibeCode agent preinstalled' },
-  { icon: Shield, text: 'Telegram pairing by default' },
+  { icon: Shield, text: 'Telegram / Discord / Slack pairing' },
   { icon: Sparkles, text: 'Dashboard config in under a minute' },
 ];
 
@@ -126,8 +126,8 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
           </h2>
           <p className="mb-8 max-w-md text-base leading-relaxed text-zinc-400">
             {isSignup
-              ? `Create an account and provision a ${BRAND.plan.label} sandbox with AI + Telegram in one dashboard.`
-              : 'Pick up where you left off — manage sandboxes, keys, and Telegram pairing.'}
+              ? `Create an account and provision a ${BRAND.plan.label} sandbox with AI + chat channels in one dashboard.`
+              : 'Pick up where you left off — manage sandboxes, keys, and channel pairing.'}
           </p>
           <ul className="space-y-3">
             {perks.map((p) => (

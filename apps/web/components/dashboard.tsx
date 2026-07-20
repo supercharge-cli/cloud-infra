@@ -11,8 +11,12 @@ type ConfigView = {
   baseUrl?: string;
   hasApiKey: boolean;
   hasTelegramToken: boolean;
+  hasDiscordToken?: boolean;
+  hasSlackToken?: boolean;
   apiKeyHint?: string;
   telegramHint?: string;
+  discordHint?: string;
+  slackHint?: string;
 };
 
 type PairingView = {
@@ -96,6 +100,9 @@ export function Dashboard({ email }: { email: string }) {
   const [baseUrl, setBaseUrl] = useState('');
   const [model, setModel] = useState('');
   const [telegramToken, setTelegramToken] = useState('');
+  const [discordToken, setDiscordToken] = useState('');
+  const [slackBotToken, setSlackBotToken] = useState('');
+  const [slackAppToken, setSlackAppToken] = useState('');
   const [allowAll, setAllowAll] = useState(false);
   const [pairCode, setPairCode] = useState('');
 
@@ -129,12 +136,22 @@ export function Dashboard({ email }: { email: string }) {
     }
     setInstances(data.instances || []);
     if (data.plan) setPlan(data.plan);
-    if (data.freeQuota) {
+    // Default 1 free if API omits freeQuota (old deploy) — never silently zero it.
+    if (data.freeQuota && typeof data.freeQuota === 'object') {
+      const limit = Math.max(0, Math.floor(Number(data.freeQuota.limit)));
+      const used = Math.max(0, Math.floor(Number(data.freeQuota.used)));
+      const availRaw = data.freeQuota.available;
+      const available =
+        availRaw === undefined || availRaw === null
+          ? Math.max(0, (Number.isFinite(limit) ? limit : 1) - (Number.isFinite(used) ? used : 0))
+          : Math.max(0, Math.floor(Number(availRaw)));
       setFreeQuota({
-        limit: Number(data.freeQuota.limit) || 0,
-        used: Number(data.freeQuota.used) || 0,
-        available: Number(data.freeQuota.available) || 0,
+        limit: Number.isFinite(limit) ? limit : 1,
+        used: Number.isFinite(used) ? used : 0,
+        available: Number.isFinite(available) ? available : 1,
       });
+    } else {
+      setFreeQuota({ limit: 1, used: 0, available: 1 });
     }
   }, []);
 
@@ -250,7 +267,7 @@ export function Dashboard({ email }: { email: string }) {
       await refresh();
       if (data.instance?.id) {
         setSelected(data.instance.id);
-        setLogs('Free instance created — configure AI + Telegram below.');
+        setLogs('Free instance created — configure AI + chat channels below.');
         await loadDetail(data.instance.id);
       }
     } catch (e) {
@@ -333,6 +350,9 @@ export function Dashboard({ email }: { email: string }) {
           baseUrl,
           model,
           telegramBotToken: telegramToken || undefined,
+          discordBotToken: discordToken || undefined,
+          slackBotToken: slackBotToken || undefined,
+          slackAppToken: slackAppToken || undefined,
           restart,
           allowAllUsers: allowAll,
         }),
@@ -342,6 +362,9 @@ export function Dashboard({ email }: { email: string }) {
       if (!res.ok) throw new Error(data.error || 'Save failed');
       setApiKey('');
       setTelegramToken('');
+      setDiscordToken('');
+      setSlackBotToken('');
+      setSlackAppToken('');
       await refresh();
       await loadDetail(selected);
     } catch (e) {
@@ -397,14 +420,19 @@ export function Dashboard({ email }: { email: string }) {
     }
   }
 
-  async function approvePair() {
-    if (!selected || !pairCode.trim()) return;
+  async function approvePair(opts?: { platform?: string; code?: string }) {
+    const code = (opts?.code || pairCode).trim();
+    if (!selected || !code) return;
     setBusy(true);
     try {
+      const match = pairing?.pending.find(
+        (p) => p.code.toUpperCase() === code.toUpperCase(),
+      );
+      const platform = opts?.platform || match?.platform || 'telegram';
       const res = await fetch(`/api/instances/${selected}/pairing`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code: pairCode.trim() }),
+        body: JSON.stringify({ code, platform }),
       });
       const data = await res.json();
       setLogs((data.logs || [data.error || JSON.stringify(data)]).join('\n'));
@@ -711,8 +739,16 @@ export function Dashboard({ email }: { email: string }) {
                     {inst.sandboxId ? ` · ${inst.sandboxId.slice(0, 12)}…` : ''}
                   </p>
                   <p className="mt-2 text-xs text-zinc-400">
-                    AI {inst.aiConfigured ? '✓' : '—'} · Telegram{' '}
-                    {inst.telegramConfigured ? '✓' : '—'}
+                    AI {inst.aiConfigured ? '✓' : '—'} · Chat{' '}
+                    {inst.telegramConfigured
+                      ? [
+                          inst.config?.hasTelegramToken ? 'TG' : null,
+                          inst.config?.hasDiscordToken ? 'DC' : null,
+                          inst.config?.hasSlackToken ? 'SL' : null,
+                        ]
+                          .filter(Boolean)
+                          .join('+') || '✓'
+                      : '—'}
                     {inst.isFree ? (
                       <span className="ml-2 text-emerald-400">· free tier</span>
                     ) : inst.paid === false || inst.billingStatus === 'past_due' ? (
@@ -845,14 +881,20 @@ export function Dashboard({ email }: { email: string }) {
           </div>
 
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
-            <h3 className="mb-3 font-semibold text-white">AI + Telegram config</h3>
+            <h3 className="mb-3 font-semibold text-white">AI + chat channels</h3>
             {config ? (
               <p className="mb-4 text-xs text-zinc-500">
-                On sandbox: API {config.hasApiKey ? config.apiKeyHint : 'none'} · Telegram{' '}
-                {config.hasTelegramToken ? config.telegramHint : 'none'} ·{' '}
-                {config.provider || '?'} / {config.model || 'no model'}
+                On sandbox: API {config.hasApiKey ? config.apiKeyHint : 'none'} · TG{' '}
+                {config.hasTelegramToken ? config.telegramHint : '—'} · DC{' '}
+                {config.hasDiscordToken ? config.discordHint : '—'} · SL{' '}
+                {config.hasSlackToken ? config.slackHint : '—'} · {config.provider || '?'} /{' '}
+                {config.model || 'no model'}
               </p>
             ) : null}
+            <p className="mb-3 text-xs text-zinc-500">
+              XibeCode supports Telegram, Discord, and Slack — set any one (or several). Leave a
+              field blank to keep the current token.
+            </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Provider">
                 <select
@@ -890,14 +932,44 @@ export function Dashboard({ email }: { email: string }) {
                   className="field"
                 />
               </Field>
-              <Field label="Telegram bot token (leave blank to keep)">
+              <Field label="Telegram bot token">
                 <input
                   value={telegramToken}
                   onChange={(e) => setTelegramToken(e.target.value)}
                   type="text"
                   autoComplete="off"
-                  placeholder="123456:ABC…"
-                  className="field sm:col-span-2"
+                  placeholder="123456:ABC… (BotFather)"
+                  className="field"
+                />
+              </Field>
+              <Field label="Discord bot token">
+                <input
+                  value={discordToken}
+                  onChange={(e) => setDiscordToken(e.target.value)}
+                  type="text"
+                  autoComplete="off"
+                  placeholder="Discord bot token · Message Content Intent on"
+                  className="field"
+                />
+              </Field>
+              <Field label="Slack bot token (xoxb-)">
+                <input
+                  value={slackBotToken}
+                  onChange={(e) => setSlackBotToken(e.target.value)}
+                  type="text"
+                  autoComplete="off"
+                  placeholder="xoxb-…"
+                  className="field"
+                />
+              </Field>
+              <Field label="Slack app token (xapp-)">
+                <input
+                  value={slackAppToken}
+                  onChange={(e) => setSlackAppToken(e.target.value)}
+                  type="text"
+                  autoComplete="off"
+                  placeholder="xapp-… (Socket Mode)"
+                  className="field"
                 />
               </Field>
             </div>
@@ -907,7 +979,7 @@ export function Dashboard({ email }: { email: string }) {
                 checked={allowAll}
                 onChange={(e) => setAllowAll(e.target.checked)}
               />
-              Allow all Telegram users (disable pairing)
+              Allow all users on every channel (disable pairing)
             </label>
             <div className="mt-4 flex flex-wrap gap-2">
               <button
@@ -1084,9 +1156,9 @@ export function Dashboard({ email }: { email: string }) {
           </div>
 
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
-            <h3 className="mb-3 font-semibold text-white">Telegram pairing</h3>
+            <h3 className="mb-3 font-semibold text-white">Channel pairing</h3>
             <p className="mb-3 text-sm text-zinc-400">
-              User DMs the bot → gets a code → paste here to approve.
+              User messages Telegram / Discord / Slack → gets a code → approve here.
             </p>
             <div className="mb-4 flex flex-wrap gap-2">
               <input
@@ -1098,7 +1170,7 @@ export function Dashboard({ email }: { email: string }) {
               <button
                 type="button"
                 disabled={busy || !pairCode.trim()}
-                onClick={approvePair}
+                onClick={() => void approvePair()}
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
               >
                 Approve
@@ -1121,8 +1193,16 @@ export function Dashboard({ email }: { email: string }) {
                   ) : (
                     <ul className="space-y-1">
                       {pairing.pending.map((p) => (
-                        <li key={p.code} className="font-mono text-amber-300">
-                          {p.code}{' '}
+                        <li key={`${p.platform}-${p.code}`} className="font-mono text-amber-300">
+                          <button
+                            type="button"
+                            className="underline decoration-amber-700/50 hover:text-amber-200"
+                            onClick={() =>
+                              void approvePair({ code: p.code, platform: p.platform })
+                            }
+                          >
+                            {p.code}
+                          </button>{' '}
                           <span className="text-zinc-500">
                             ({p.platform} {p.userId})
                           </span>

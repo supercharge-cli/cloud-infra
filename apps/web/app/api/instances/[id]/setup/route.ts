@@ -22,14 +22,26 @@ export async function POST(req: Request, ctx: Ctx) {
     baseUrl?: string;
     model?: string;
     telegramBotToken?: string;
+    discordBotToken?: string;
+    slackBotToken?: string;
+    slackAppToken?: string;
   };
   const apiKey = String(body.apiKey || '').trim();
   const telegramBotToken = String(body.telegramBotToken || '').trim();
+  const discordBotToken = String(body.discordBotToken || '').trim();
+  const slackBotToken = String(body.slackBotToken || '').trim();
+  const slackAppToken = String(body.slackAppToken || '').trim();
   if (!apiKey) {
     return NextResponse.json({ error: 'apiKey is required' }, { status: 400 });
   }
-  if (!telegramBotToken) {
-    return NextResponse.json({ error: 'telegramBotToken is required' }, { status: 400 });
+  if (!telegramBotToken && !discordBotToken && !(slackBotToken && slackAppToken)) {
+    return NextResponse.json(
+      {
+        error:
+          'At least one channel required: telegramBotToken, discordBotToken, or slackBotToken+slackAppToken',
+      },
+      { status: 400 },
+    );
   }
 
   try {
@@ -38,7 +50,10 @@ export async function POST(req: Request, ctx: Ctx) {
       apiKey,
       baseUrl: String(body.baseUrl || ''),
       model: String(body.model || ''),
-      telegramBotToken,
+      telegramBotToken: telegramBotToken || undefined,
+      discordBotToken: discordBotToken || undefined,
+      slackBotToken: slackBotToken || undefined,
+      slackAppToken: slackAppToken || undefined,
       sandboxId: inst.sandboxId,
     });
     const instance = await updateInstance(user.id, inst.id, {
@@ -51,7 +66,9 @@ export async function POST(req: Request, ctx: Ctx) {
         model: String(body.model || ''),
         baseUrl: String(body.baseUrl || ''),
         hasApiKey: true,
-        hasTelegramToken: true,
+        hasTelegramToken: Boolean(telegramBotToken),
+        hasDiscordToken: Boolean(discordBotToken),
+        hasSlackToken: Boolean(slackBotToken && slackAppToken),
       },
     });
     return NextResponse.json({ ok: result.ok, logs: result.logs, instance });

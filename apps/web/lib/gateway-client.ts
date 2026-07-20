@@ -316,6 +316,8 @@ export function redactSecrets(text: string, secrets: string[] = []): string {
   out = out.replace(/\brk_[a-f0-9]{20,}\b/gi, 'rk_…[redacted]');
   out = out.replace(/\bsk-[A-Za-z0-9_\-]{10,}\b/g, 'sk-…[redacted]');
   out = out.replace(/\b\d{6,}:[A-Za-z0-9_\-]{20,}\b/g, 'telegram:…[redacted]');
+  out = out.replace(/\bxoxb-[A-Za-z0-9\-]+/g, 'xoxb-…[redacted]');
+  out = out.replace(/\bxapp-[A-Za-z0-9\-]+/g, 'xapp-…[redacted]');
   return out;
 }
 
@@ -337,8 +339,12 @@ export type SandboxConfigView = {
   baseUrl?: string;
   hasApiKey: boolean;
   hasTelegramToken: boolean;
+  hasDiscordToken: boolean;
+  hasSlackToken: boolean;
   apiKeyHint?: string;
   telegramHint?: string;
+  discordHint?: string;
+  slackHint?: string;
 };
 
 function hint(secret: string | undefined): string | undefined {
@@ -346,12 +352,20 @@ function hint(secret: string | undefined): string | undefined {
   return `${secret.slice(0, 4)}…${secret.slice(-4)}`;
 }
 
+function emptyConfigView(): SandboxConfigView {
+  return {
+    hasApiKey: false,
+    hasTelegramToken: false,
+    hasDiscordToken: false,
+    hasSlackToken: false,
+  };
+}
+
 /** Safe view of config currently on the sandbox (secrets masked). */
 export async function readSandboxConfig(
   sessionId: string,
   sandboxId?: string,
 ): Promise<SandboxConfigView> {
-  const empty: SandboxConfigView = { hasApiKey: false, hasTelegramToken: false };
   try {
     const envFile = await readFileInSession(
       sessionId,
@@ -373,17 +387,25 @@ export async function readSandboxConfig(
     const apiKey =
       env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY || env.XIBECODE_API_KEY || profile.apiKey || '';
     const tg = env.TELEGRAM_BOT_TOKEN || env.XIBECODE_TELEGRAM_BOT_TOKEN || '';
+    const dc = env.DISCORD_BOT_TOKEN || env.XIBECODE_DISCORD_BOT_TOKEN || '';
+    const slackBot = env.SLACK_BOT_TOKEN || env.XIBECODE_SLACK_BOT_TOKEN || '';
+    const slackApp = env.SLACK_APP_TOKEN || env.XIBECODE_SLACK_APP_TOKEN || '';
+    const slackOk = Boolean(slackBot && slackApp);
     return {
       provider: profile.provider || (env.ANTHROPIC_API_KEY ? 'anthropic' : 'openai'),
       model: profile.model || env.XIBECODE_MODEL || '',
       baseUrl: profile.baseUrl || env.XIBECODE_BASE_URL || '',
       hasApiKey: Boolean(apiKey),
       hasTelegramToken: Boolean(tg),
+      hasDiscordToken: Boolean(dc),
+      hasSlackToken: slackOk,
       apiKeyHint: hint(apiKey),
       telegramHint: hint(tg),
+      discordHint: hint(dc),
+      slackHint: slackOk ? hint(slackBot) : undefined,
     };
   } catch {
-    return empty;
+    return emptyConfigView();
   }
 }
 
@@ -393,16 +415,19 @@ export type ConfigInput = {
   baseUrl?: string;
   model?: string;
   telegramBotToken?: string;
+  discordBotToken?: string;
+  slackBotToken?: string;
+  slackAppToken?: string;
   /** If true, blank apiKey/token means keep values already on the sandbox. */
   mergeExisting?: boolean;
   /**
-   * true = anyone can talk to the bot (no pairing).
-   * false/omit = pairing required (recommended). First DM gets a code; approve in dashboard.
+   * true = anyone can talk (no pairing).
+   * false/omit = pairing required (recommended). First message gets a code; approve in dashboard.
    */
   allowAllUsers?: boolean;
 };
 
-/** Write AI/Telegram config into the sandbox (no daemon start). */
+/** Write AI + chat-channel config into the sandbox (no daemon start). */
 export async function writeSandboxConfig(
   sessionId: string,
   input: ConfigInput & { sandboxId?: string },
@@ -446,10 +471,16 @@ export async function writeSandboxConfig(
     prevProfile.apiKey ||
     '';
   const prevTg = prevEnv.TELEGRAM_BOT_TOKEN || prevEnv.XIBECODE_TELEGRAM_BOT_TOKEN || '';
+  const prevDc = prevEnv.DISCORD_BOT_TOKEN || prevEnv.XIBECODE_DISCORD_BOT_TOKEN || '';
+  const prevSlackBot = prevEnv.SLACK_BOT_TOKEN || prevEnv.XIBECODE_SLACK_BOT_TOKEN || '';
+  const prevSlackApp = prevEnv.SLACK_APP_TOKEN || prevEnv.XIBECODE_SLACK_APP_TOKEN || '';
 
-  const apiKey = (input.apiKey || '').trim() || (input.mergeExisting !== false ? prevApi : '');
-  const telegramBotToken =
-    (input.telegramBotToken || '').trim() || (input.mergeExisting !== false ? prevTg : '');
+  const merge = input.mergeExisting !== false;
+  const apiKey = (input.apiKey || '').trim() || (merge ? prevApi : '');
+  const telegramBotToken = (input.telegramBotToken || '').trim() || (merge ? prevTg : '');
+  const discordBotToken = (input.discordBotToken || '').trim() || (merge ? prevDc : '');
+  const slackBotToken = (input.slackBotToken || '').trim() || (merge ? prevSlackBot : '');
+  const slackAppToken = (input.slackAppToken || '').trim() || (merge ? prevSlackApp : '');
 
   if (!apiKey) {
     return {
@@ -458,15 +489,25 @@ export async function writeSandboxConfig(
       meta: existing,
     };
   }
-  if (!telegramBotToken) {
+  if (Boolean(slackBotToken) !== Boolean(slackAppToken)) {
     return {
       ok: false,
-      logs: ['Telegram bot token is required (enter a new token or set one first).'],
+      logs: ['Slack needs both SLACK_BOT_TOKEN (xoxb-…) and SLACK_APP_TOKEN (xapp-…).'],
+      meta: existing,
+    };
+  }
+  // XibeCode daemon starts any adapter that has tokens — at least one channel required.
+  if (!telegramBotToken && !discordBotToken && !slackBotToken) {
+    return {
+      ok: false,
+      logs: [
+        'At least one chat channel is required: Telegram bot token, Discord bot token, or Slack bot+app tokens.',
+      ],
       meta: existing,
     };
   }
 
-  secrets.push(apiKey, telegramBotToken);
+  secrets.push(apiKey, telegramBotToken, discordBotToken, slackBotToken, slackAppToken);
 
   // Prefer pairing (secure) unless tenant opts into open access.
   // If the form omits the flag, keep previous value; brand-new installs default to pairing.
@@ -475,10 +516,21 @@ export async function writeSandboxConfig(
       ? input.allowAllUsers
       : prevEnv.GATEWAY_ALLOW_ALL_USERS === 'true';
 
+  const channels: string[] = [];
+  if (telegramBotToken) channels.push('telegram');
+  if (discordBotToken) channels.push('discord');
+  if (slackBotToken) channels.push('slack');
+
   const envBody =
     [
-      `TELEGRAM_BOT_TOKEN=${telegramBotToken}`,
-      `XIBECODE_TELEGRAM_BOT_TOKEN=${telegramBotToken}`,
+      telegramBotToken ? `TELEGRAM_BOT_TOKEN=${telegramBotToken}` : '',
+      telegramBotToken ? `XIBECODE_TELEGRAM_BOT_TOKEN=${telegramBotToken}` : '',
+      discordBotToken ? `DISCORD_BOT_TOKEN=${discordBotToken}` : '',
+      discordBotToken ? `XIBECODE_DISCORD_BOT_TOKEN=${discordBotToken}` : '',
+      slackBotToken ? `SLACK_BOT_TOKEN=${slackBotToken}` : '',
+      slackBotToken ? `XIBECODE_SLACK_BOT_TOKEN=${slackBotToken}` : '',
+      slackAppToken ? `SLACK_APP_TOKEN=${slackAppToken}` : '',
+      slackAppToken ? `XIBECODE_SLACK_APP_TOKEN=${slackAppToken}` : '',
       openAccess ? `GATEWAY_ALLOW_ALL_USERS=true` : `GATEWAY_ALLOW_ALL_USERS=false`,
       provider === 'anthropic' ? `ANTHROPIC_API_KEY=${apiKey}` : `OPENAI_API_KEY=${apiKey}`,
       // clear the other provider key so conf/env don't fight
@@ -542,12 +594,12 @@ export async function writeSandboxConfig(
   // Verify what actually landed
   const verify = await execInSession(
     sessionId,
-    'grep -E "^(XIBECODE_MODEL|XIBECODE_BASE_URL|GATEWAY_ALLOW_ALL)" /home/user/.xibecode/daemon.env; python3 -c "import json;d=json.load(open(\'/home/user/.xibecode/profile-default.json\'));print(\'profile model=\',d.get(\'model\'),\'provider=\',d.get(\'provider\'))"',
+    'grep -E "^(XIBECODE_MODEL|XIBECODE_BASE_URL|GATEWAY_ALLOW_ALL|TELEGRAM_|DISCORD_|SLACK_)" /home/user/.xibecode/daemon.env | sed -E "s/(TOKEN|KEY)=.*/\\1=…/"; python3 -c "import json;d=json.load(open(\'/home/user/.xibecode/profile-default.json\'));print(\'profile model=\',d.get(\'model\'),\'provider=\',d.get(\'provider\'))"',
     { timeout: 30, sandboxId },
   );
   logs.push(
     redact(
-      `config saved OK · pairing=${openAccess ? 'OFF (open access)' : 'ON (approve in dashboard)'} · provider=${provider} model=${model || '(none)'} baseUrl=${baseUrl || '(none)'}\n${verify.stdout || ''}`,
+      `config saved OK · channels=${channels.join('+') || 'none'} · pairing=${openAccess ? 'OFF (open access)' : 'ON (approve in dashboard)'} · provider=${provider} model=${model || '(none)'} baseUrl=${baseUrl || '(none)'}\n${verify.stdout || ''}`,
     ),
   );
 
@@ -556,9 +608,13 @@ export async function writeSandboxConfig(
     model,
     baseUrl,
     hasApiKey: true,
-    hasTelegramToken: true,
+    hasTelegramToken: Boolean(telegramBotToken),
+    hasDiscordToken: Boolean(discordBotToken),
+    hasSlackToken: Boolean(slackBotToken && slackAppToken),
     apiKeyHint: hint(apiKey),
     telegramHint: hint(telegramBotToken),
+    discordHint: hint(discordBotToken),
+    slackHint: slackBotToken ? hint(slackBotToken) : undefined,
   };
   return { ok: true, logs, meta: existing };
 }
@@ -645,7 +701,9 @@ export async function restartDaemon(
       `restart exit=${r.exitCode ?? '?'} ${out.slice(0, 2500)}`,
     ),
   ];
-  const ok = out.includes('RESTART_DONE') || out.includes('telegram enabled');
+  const ok =
+    out.includes('RESTART_DONE') ||
+    /telegram enabled|discord enabled|slack enabled/i.test(out);
   return { ok, logs };
 }
 
@@ -657,7 +715,10 @@ export async function setupAiAndTelegram(
     apiKey: string;
     baseUrl?: string;
     model?: string;
-    telegramBotToken: string;
+    telegramBotToken?: string;
+    discordBotToken?: string;
+    slackBotToken?: string;
+    slackAppToken?: string;
     sandboxId?: string;
   },
 ): Promise<{ ok: boolean; logs: string[] }> {

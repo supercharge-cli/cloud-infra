@@ -9,7 +9,7 @@ export const BRAND = {
   shortName: 'Vectra',
   tagline: 'Managed AI coding sandboxes',
   description:
-    'Spin up 4 vCPU / 8GB sandboxes with XibeCode preinstalled, configure AI + Telegram, and chat from anywhere.',
+    'Spin up 4 vCPU / 8GB sandboxes with XibeCode preinstalled, configure AI + Telegram/Discord/Slack, and chat from anywhere.',
   plan: {
     id: 'hosting-4c8g',
     /** Marketing label — no prices (prices are env-driven and loaded via API). */

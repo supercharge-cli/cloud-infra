@@ -57,6 +57,8 @@ export type InstanceConfigMeta = {
   baseUrl?: string;
   hasApiKey?: boolean;
   hasTelegramToken?: boolean;
+  hasDiscordToken?: boolean;
+  hasSlackToken?: boolean;
 };
 
 export type Instance = {

@@ -56,6 +56,9 @@ export async function PUT(req: Request, ctx: Ctx) {
     baseUrl?: string;
     model?: string;
     telegramBotToken?: string;
+    discordBotToken?: string;
+    slackBotToken?: string;
+    slackAppToken?: string;
     name?: string;
     restart?: boolean;
     allowAllUsers?: boolean;
@@ -68,6 +71,9 @@ export async function PUT(req: Request, ctx: Ctx) {
       baseUrl: body.baseUrl,
       model: body.model,
       telegramBotToken: body.telegramBotToken,
+      discordBotToken: body.discordBotToken,
+      slackBotToken: body.slackBotToken,
+      slackAppToken: body.slackAppToken,
       mergeExisting: true,
       allowAllUsers: body.allowAllUsers,
       sandboxId: inst.sandboxId,
@@ -90,25 +96,36 @@ export async function PUT(req: Request, ctx: Ctx) {
 
     const wakeSecret = inst.wakeSecret || (await ensureWakeSecret(user.id, id));
     const token = (body.telegramBotToken || '').trim() || inst.telegramBotToken || '';
+    const anyChannel =
+      result.meta.hasTelegramToken || result.meta.hasDiscordToken || result.meta.hasSlackToken;
 
     // Host webhook = Telegram DM can trigger SDK activity → auto-resume
-    if (token) {
-      const url = wakeWebhookUrl(inst.id, wakeSecret);
-      if (url) {
-        if (body.restart) {
-          await new Promise((r) => setTimeout(r, 2500));
+    // (Discord/Slack use in-sandbox websockets — resume from dashboard after pause.)
+    if (token || result.meta.hasTelegramToken) {
+      const tgToken = token || inst.telegramBotToken || '';
+      if (tgToken) {
+        const url = wakeWebhookUrl(inst.id, wakeSecret);
+        if (url) {
+          if (body.restart) {
+            await new Promise((r) => setTimeout(r, 2500));
+          }
+          const wh = await setTelegramWebhook(tgToken, url);
+          logs.push(
+            wh.ok
+              ? `Telegram host webhook set (auto-resume on DM): ${url}`
+              : `Telegram setWebhook failed: ${wh.description || 'unknown'}`,
+          );
+        } else {
+          logs.push(
+            'Tip: set PUBLIC_BASE_URL=https://your-public-host so Telegram DMs can wake paused sandboxes (localhost cannot receive webhooks).',
+          );
         }
-        const wh = await setTelegramWebhook(token, url);
-        logs.push(
-          wh.ok
-            ? `Telegram host webhook set (auto-resume on DM): ${url}`
-            : `Telegram setWebhook failed: ${wh.description || 'unknown'}`,
-        );
-      } else {
-        logs.push(
-          'Tip: set PUBLIC_BASE_URL=https://your-public-host so Telegram DMs can wake paused sandboxes (localhost cannot receive webhooks).',
-        );
       }
+    }
+    if (result.meta.hasDiscordToken || result.meta.hasSlackToken) {
+      logs.push(
+        'Discord/Slack: after idle pause, use Wake / resume on the dashboard (no host webhook for those channels).',
+      );
     }
 
     const instance = await updateInstance(user.id, inst.id, {
@@ -116,7 +133,7 @@ export async function PUT(req: Request, ctx: Ctx) {
       ...(token ? { telegramBotToken: token } : {}),
       wakeSecret,
       aiConfigured: true,
-      telegramConfigured: true,
+      telegramConfigured: anyChannel,
       status: restartOk ? 'running' : 'error',
       lastError: restartOk ? undefined : logs.join('\n').slice(0, 500),
       config: {
@@ -125,6 +142,8 @@ export async function PUT(req: Request, ctx: Ctx) {
         baseUrl: result.meta.baseUrl,
         hasApiKey: result.meta.hasApiKey,
         hasTelegramToken: result.meta.hasTelegramToken,
+        hasDiscordToken: result.meta.hasDiscordToken,
+        hasSlackToken: result.meta.hasSlackToken,
       },
     });
 
@@ -135,7 +154,9 @@ export async function PUT(req: Request, ctx: Ctx) {
         ? { ...instance, telegramBotToken: instance.telegramBotToken ? '[stored]' : undefined }
         : null,
       sandbox: result.meta,
-      wakeWebhookUrl: token ? wakeWebhookUrl(inst.id, wakeSecret) : null,
+      wakeWebhookUrl: token || result.meta.hasTelegramToken
+        ? wakeWebhookUrl(inst.id, wakeSecret)
+        : null,
     });
   } catch (e) {
     await updateInstance(user.id, inst.id, {

@@ -1,33 +1,45 @@
 ---
-title: Telegram
-description: Connect your bot and approve users
+title: Chat channels
+description: Connect Telegram, Discord, or Slack to your cloud agent
 ---
 
-# Telegram
+# Chat channels
 
-Talk to your cloud agent from Telegram.
+XibeCode on Vectra Cloud talks over **Telegram**, **Discord**, and/or **Slack**. Use any one channel, or several at once.
 
 ## Setup
 
-1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
-2. In the dashboard, open your instance → paste the token → **Save & restart**.
-3. Open the bot in Telegram and send `/start` (or any message).
+1. Open your instance on the [dashboard](/dashboard).
+2. Under **AI + chat channels**, paste tokens for the channels you want (leave others blank).
+3. Click **Save & restart**.
+
+| Channel | What you need |
+| --- | --- |
+| **Telegram** | Bot token from [@BotFather](https://t.me/BotFather) |
+| **Discord** | Bot token + **Message Content Intent** enabled in the Discord developer portal |
+| **Slack** | Bot token (`xoxb-…`) **and** app token (`xapp-…`, Socket Mode) |
+
+You also need an AI API key (OpenAI-compatible or Anthropic).
 
 ## Pairing (default)
 
-By default only approved users can chat with the bot.
+By default only approved users can chat.
 
-1. The bot replies with a **pairing code**.
-2. Dashboard → that instance → **Telegram pairing**.
-3. Paste the code → **Approve**.
-4. You can chat normally.
+1. Message the bot on any configured channel — it replies with a **pairing code**.
+2. Dashboard → that instance → **Channel pairing**.
+3. Click the pending code (or paste it) → **Approve**.
 
 Use **Refresh** if the code is not listed yet (agent may still be starting).
 
 ## Open access
 
-If you enable **Allow all Telegram users** when saving config, anyone who finds the bot can message it. Prefer pairing for private use.
+If you enable **Allow all users on every channel** when saving config, anyone who finds the bot can message it. Prefer pairing for private use.
 
 ## After the sandbox pauses
 
-If the bot goes quiet after idle time, open the dashboard and **Resume** the instance, then message again. See [Pause & resume](/docs/pause-resume).
+Idle sandboxes pause to save cost.
+
+- **Telegram**: a DM can auto-wake the sandbox when `PUBLIC_BASE_URL` is set (host webhook).
+- **Discord / Slack**: open the dashboard and click **Wake / resume**, then message again.
+
+See [Pause & resume](/docs/pause-resume).

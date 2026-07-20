@@ -53,7 +53,7 @@ export function Footer() {
               </li>
               <li>
                 <Link href="/docs/telegram" className="text-zinc-400 hover:text-orange-400">
-                  Telegram
+                  Chat channels
                 </Link>
               </li>
               <li>
