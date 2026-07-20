@@ -1,26 +1,33 @@
 ---
-title: Telegram pairing
-description: Approve bot users securely from the dashboard
+title: Telegram
+description: Connect your bot and approve users
 ---
 
-# Telegram pairing
+# Telegram
 
-By default sandboxes run with **pairing on** (`GATEWAY_ALLOW_ALL_USERS=false`).
+Talk to your cloud agent from Telegram.
 
-## Flow
+## Setup
 
-1. User opens your bot and sends `/start` or any message.
-2. Bot replies with a short **pairing code**.
-3. In the dashboard, open the instance → **Telegram pairing**.
-4. Paste the code → **Approve**.
-5. User can chat; unapproved users stay blocked.
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
+2. In the dashboard, open your instance → paste the token → **Save & restart**.
+3. Open the bot in Telegram and send `/start` (or any message).
+
+## Pairing (default)
+
+By default only approved users can chat with the bot.
+
+1. The bot replies with a **pairing code**.
+2. Dashboard → that instance → **Telegram pairing**.
+3. Paste the code → **Approve**.
+4. You can chat normally.
+
+Use **Refresh** if the code is not listed yet (agent may still be starting).
 
 ## Open access
 
-Check **Allow all Telegram users** when saving config if you want anyone who finds the bot to talk to it (not recommended for production).
+If you enable **Allow all Telegram users** when saving config, anyone who finds the bot can message it. Prefer pairing for private use.
 
-## Tips
+## After the sandbox pauses
 
-- Codes are alphanumeric; paste them exactly.
-- Use **Refresh** if a code does not appear yet (daemon may still be starting).
-- After changing tokens, **Save & restart** so the daemon reloads env.
+If the bot goes quiet after idle time, open the dashboard and **Resume** the instance, then message again. See [Pause & resume](/docs/pause-resume).

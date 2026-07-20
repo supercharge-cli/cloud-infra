@@ -1,32 +1,44 @@
 ---
 title: Dashboard
-description: Create sandboxes, edit config, restart daemons
+description: Create, configure, resume, and manage your sandboxes
 ---
 
 # Dashboard
 
-After login you land on `/dashboard`.
+After login, open **[Dashboard](/dashboard)**.
 
-## Create instance
+## Create an instance
 
-Enter a workspace name and click **Create instance**. The server:
+1. Enter a workspace name.
+2. Pick **₹399** (India) or **$4.59** (USD).
+3. Click **Pay & create** and complete Razorpay checkout.
+4. When payment succeeds, the instance appears in your list (paid for 30 days).
 
-1. Authenticates your session cookie
-2. `POST`s to e2b-gateway `/sessions` with `strategy: sandbox_full`
-3. Stores `sessionId` + `sandboxId` in MongoDB under your user
+You only see **your** instances. Paused ones stay in the list so you can resume them.
 
-## AI + Telegram config
+## Configure AI + Telegram
 
-Fields:
+Select an instance, then:
 
-- **Provider** — `openai` (OpenAI-compatible) or `anthropic`
-- **Model** / **Base URL** — optional
-- **API key** — leave blank to keep the value already on the sandbox
-- **Telegram bot token** — same merge behavior
-- **Allow all users** — if checked, pairing is disabled (`GATEWAY_ALLOW_ALL_USERS=true`)
+| Field | What to enter |
+| --- | --- |
+| Provider | OpenAI-compatible or Anthropic |
+| Model / Base URL | Optional |
+| API key | Your LLM key (leave blank to keep the current one) |
+| Telegram bot token | From [@BotFather](https://t.me/BotFather) |
+| Allow all users | Off = pairing (recommended); on = anyone can talk to the bot |
 
-**Save config** writes `daemon.env`, `gateway.env`, and `profile-default.json` inside the sandbox. **Save & restart** also starts `xibecode daemon`.
+Use **Save config** or **Save & restart** so the agent reloads settings.
+
+## Resume a paused instance
+
+If status is **paused**, the machine is idle but still yours.
+
+- Click **Resume sandbox** / **Wake / resume**.
+- If payment expired, **Renew** first, then resume.
+
+See [Pause & resume](/docs/pause-resume).
 
 ## Destroy
 
-Deletes the gateway session (best-effort) and removes the MongoDB instance document.
+**Destroy** permanently deletes that sandbox. This cannot be undone. Billing access for that seat is not automatically refunded.

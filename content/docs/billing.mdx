@@ -1,44 +1,31 @@
 ---
-title: Billing & Razorpay
-description: ₹399 / $4.59 per instance, checkout and webhooks
+title: Billing
+description: Pricing and renewals for Vectra Cloud instances
 ---
 
 # Billing
 
-Each sandbox is **₹399** (India) or **$4.59** (USD) for **30 days**.
+## Price
 
-## Payment flow
+| | |
+| --- | --- |
+| India | **₹399** / instance / **30 days** |
+| International | **$4.59** / instance / **30 days** |
 
-1. Dashboard creates a Razorpay **order** (`POST /api/billing/create-order`).
-2. Customer pays in Checkout.
-3. Confirmation can arrive via:
-   - **Client** `POST /api/billing/verify` (HMAC of `order_id|payment_id` with API secret)
-   - **Webhook** `POST /api/billing/webhook` (HMAC of raw body with **webhook secret**)
+Each payment unlocks **one** sandbox for 30 days. Multiple instances = multiple payments.
 
-Both call the same `fulfillPaidOrder` (idempotent — safe if both fire).
+## How payment works
 
-## Configure webhook (required in production)
+1. On the dashboard, choose currency and click **Pay & create** (or **Renew** on an existing instance).
+2. Complete checkout with Razorpay.
+3. After a successful payment, access is active until the **paid until** date on the card.
 
-1. Razorpay Dashboard → **Account & Settings → Webhooks**
-2. **URL:** `https://YOUR_PUBLIC_DOMAIN/api/billing/webhook`
-3. **Secret:** generate and set as `RAZORPAY_WEBHOOK_SECRET` in `.env.local`
-4. Enable events:
-   - `payment.captured`
-   - `order.paid` (optional fallback)
-5. Save and use **Test** webhooks when on `rzp_test_` keys
+## Renew
 
-```bash
-RAZORPAY_WEBHOOK_SECRET=whsec_or_dashboard_secret
-PUBLIC_BASE_URL=https://your-domain.com
-```
+When the period ends, status shows payment expired. Use **Renew** on that instance — you keep the same sandbox and settings; only the paid period extends.
 
-Local testing: tunnel (ngrok/cloudflared) → point webhook URL at the tunnel.
+## Notes
 
-## Env checklist
-
-```bash
-RAZORPAY_KEY_ID=
-RAZORPAY_KEY_SECRET=
-NEXT_PUBLIC_RAZORPAY_KEY_ID=
-RAZORPAY_WEBHOOK_SECRET=
-```
+- Sandboxes are not provisioned until payment succeeds.
+- You can still **see** expired or paused instances on the dashboard and renew or resume as needed.
+- For payment issues, contact support with your account email and approximate payment time.

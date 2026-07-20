@@ -47,13 +47,18 @@ export function Footer() {
                 </Link>
               </li>
               <li>
-                <Link href="/docs/telegram" className="text-zinc-400 hover:text-orange-400">
-                  Telegram pairing
+                <Link href="/docs/billing" className="text-zinc-400 hover:text-orange-400">
+                  Billing
                 </Link>
               </li>
               <li>
-                <Link href="/docs/self-host" className="text-zinc-400 hover:text-orange-400">
-                  Self-host
+                <Link href="/docs/telegram" className="text-zinc-400 hover:text-orange-400">
+                  Telegram
+                </Link>
+              </li>
+              <li>
+                <Link href="/docs/pause-resume" className="text-zinc-400 hover:text-orange-400">
+                  Pause & resume
                 </Link>
               </li>
             </ul>

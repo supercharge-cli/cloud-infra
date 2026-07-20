@@ -1,42 +1,29 @@
 ---
 title: Getting started
-description: Provision managed AI coding sandboxes with Vectra Cloud
+description: How to use Vectra Cloud — managed AI coding sandboxes
 ---
 
-# Vectra Cloud
+# Getting started
 
-**Vectra Cloud** is managed infrastructure for AI coding agents: 4 vCPU / 8 GB E2B sandboxes with [XibeCode](https://github.com/iotserver24/Xibecode) preinstalled, plus a dashboard for AI keys, Telegram, and pairing.
-
-This site is **not** the XibeCode CLI documentation. CLI docs live on the separate product site.
+**Vectra Cloud** gives you a private cloud sandbox for an AI coding agent (XibeCode), with a dashboard to manage keys, Telegram, and billing.
 
 ## What you get
 
-| Resource | Spec |
+| | |
 | --- | --- |
-| CPU | 4 vCPU |
-| Memory | 8 GB |
-| Agent | XibeCode (daemon + tools) |
-| Chat | Telegram bot (pairing or open) |
+| Machine | **4 vCPU · 8 GB RAM** |
+| Agent | XibeCode preinstalled |
+| Chat | Telegram (pairing or open access) |
+| Idle | Auto-pauses to save cost — still yours; resume anytime |
+| Price | **₹399** or **$4.59** per instance / 30 days |
 
-## Quick path
+## First steps
 
-1. [Sign up](/signup) with email + password (stored in MongoDB).
+1. [Sign up](/signup) with email and password.
 2. Open the [dashboard](/dashboard).
-3. **Create instance** — calls your e2b-gateway to boot a sandbox.
-4. Paste **API key** + **Telegram bot token** → **Save & restart**.
-5. DM the bot, copy the pairing code, **Approve** in the dashboard.
+3. Choose **₹399** or **$4.59**, name your workspace, and pay with Razorpay.
+4. After payment, the sandbox is created automatically.
+5. Open the instance → paste your **AI API key** and optional **Telegram bot token** → **Save & restart**.
+6. Message the bot, copy the pairing code, and **Approve** it in the dashboard.
 
-## Operator requirements
-
-The app talks to an **e2b-gateway** you run (API key stays on the gateway, not in the browser):
-
-```bash
-# example env for this Next.js app
-MONGODB_URI=mongodb+srv://...
-MONGODB_DB=vectra_cloud
-AUTH_SECRET=long-random-string
-XIBECODE_SANDBOX_GATEWAY_URL=http://127.0.0.1:8787
-XIBECODE_GATEWAY_TOKEN=optional-bearer
-```
-
-See [Self-hosting](/docs/self-host) for a full checklist.
+Next: [Dashboard](/docs/dashboard) · [Billing](/docs/billing) · [Telegram](/docs/telegram)
