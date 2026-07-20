@@ -1,0 +1,60 @@
+---
+title: Pause & resume
+description: 15m idle pause, auto-resume limits, Telegram caveats
+---
+
+# Pause & resume
+
+## Expected behavior
+
+| Setting | Value |
+| --- | --- |
+| Idle timeout | 15 minutes (`XIBECODE_E2B_SANDBOX_TIMEOUT_MS=900000`) |
+| On timeout | **pause** (memory + disk), not kill |
+| Auto-resume | SDK ops + HTTP to sandbox public host |
+| Continuous run | ~23h then pause→resume cycle (Pro 24h cap) |
+
+Configured at sandbox **create** time:
+
+```ts
+await Sandbox.create(template, {
+  timeoutMs: 15 * 60 * 1000,
+  lifecycle: { onTimeout: 'pause', autoResume: true },
+})
+```
+
+## What actually wakes a paused sandbox
+
+From [E2B auto-resume docs](https://e2b.dev/docs/sandbox/auto-resume):
+
+- `sandbox.commands.run(...)`
+- `files.read` / `files.write`
+- HTTP to a **public URL** of a service inside the sandbox
+
+Gateway always calls `Sandbox.connect` when state is `paused` before exec/file ops, and the dashboard has **Wake / resume**.
+
+## Why Telegram DMs do NOT auto-resume
+
+The XibeCode Telegram bot / long-poll runs **inside** the sandbox.
+
+When the VM is **paused**, that process is **frozen**. Your DM never becomes E2B “activity”, so auto-resume never fires. The sandbox can look “stopped” from the bot’s point of view even though E2B state is `paused`.
+
+**Workaround today:** open the dashboard → **Wake / resume** (reconnects + restarts daemon), then message the bot again.
+
+**Proper product fix (later):** Telegram webhook on the **host** (or a public URL on the sandbox) so the first HTTP hit wakes the VM, then the agent handles the update.
+
+## If it kills instead of pauses
+
+1. Check gateway logs after create: `lifecycle.onTimeout=pause` and `autoResume=true`.
+2. If logs say `onTimeout=kill` despite config, the E2B account/plan may not have auto-pause (beta) — contact E2B or use a longer timeout.
+3. Env must include:
+
+```bash
+XIBECODE_E2B_ON_TIMEOUT=pause
+XIBECODE_E2B_AUTO_RESUME=true
+XIBECODE_E2B_SANDBOX_TIMEOUT_MS=900000
+```
+
+## MCP note
+
+There is no E2B MCP wired in this repo session; behavior is based on [e2b.dev docs](https://e2b.dev/docs/sandbox/auto-resume).

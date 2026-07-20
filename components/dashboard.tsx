@@ -152,6 +152,30 @@ export function Dashboard({ email }: { email: string }) {
     }
   }
 
+  async function wakeInstance() {
+    if (!selected) return;
+    setBusy(true);
+    setLogs('');
+    try {
+      const res = await fetch(`/api/instances/${selected}/wake`, { method: 'POST' });
+      const data = await res.json();
+      setLogs(
+        [
+          data.ok
+            ? `Wake OK · state=${data.state || '?'} resumed=${data.resumed ? 'yes' : 'no'}`
+            : data.error || 'Wake failed',
+          ...(data.logs || []),
+        ].join('\n'),
+      );
+      if (!res.ok) throw new Error(data.error || 'Wake failed');
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function approvePair() {
     if (!selected || !pairCode.trim()) return;
     setBusy(true);
@@ -287,6 +311,14 @@ export function Dashboard({ email }: { email: string }) {
               Manage · {selectedInst.name}
             </h2>
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={wakeInstance}
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                Wake / resume
+              </button>
               <button
                 type="button"
                 disabled={busy}

@@ -559,3 +559,43 @@ export async function setupAiAndTelegram(
 export function getGatewayUrl(): string {
   return gatewayBase();
 }
+
+/** Resume a paused sandbox (and optionally restart xibecode daemon for Telegram). */
+export async function wakeSession(
+  sessionId: string,
+  opts?: { sandboxId?: string; restartDaemon?: boolean },
+): Promise<{ ok: boolean; state?: string; resumed?: boolean; logs: string[]; message?: string }> {
+  const res = await gwFetch(`/sessions/${encodeURIComponent(sessionId)}/wake`, {
+    method: 'POST',
+    body: JSON.stringify({
+      sandboxId: opts?.sandboxId,
+      restartDaemon: opts?.restartDaemon !== false,
+    }),
+  });
+  const text = await res.text();
+  let data: {
+    success?: boolean;
+    state?: string;
+    resumed?: boolean;
+    message?: string;
+    daemon?: { ok?: boolean; logs?: string[] };
+  } = {};
+  try {
+    data = JSON.parse(text) as typeof data;
+  } catch {
+    data = { message: text.slice(0, 300) };
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
+      logs: [data.message || text.slice(0, 400)],
+      message: data.message || `HTTP ${res.status}`,
+    };
+  }
+  return {
+    ok: true,
+    state: data.state,
+    resumed: data.resumed,
+    logs: data.daemon?.logs || [],
+  };
+}
