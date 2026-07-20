@@ -30,6 +30,13 @@ export type Instance = {
   telegramConfigured: boolean;
   plan: 'hosting-4c8g';
   config?: InstanceConfigMeta;
+  /** Random secret in Telegram webhook URL — host receives DMs and wakes sandbox via SDK. */
+  wakeSecret?: string;
+  /**
+   * Bot token for host-side setWebhook re-registration.
+   * Daemon deletes webhooks on start (long-poll); host re-sets after wake.
+   */
+  telegramBotToken?: string;
   createdAt: string;
   updatedAt: string;
   lastError?: string;
@@ -106,6 +113,7 @@ export async function createInstanceRecord(input: {
     telegramConfigured: false,
     plan: 'hosting-4c8g',
     config: {},
+    wakeSecret: nanoid(24),
     createdAt: now,
     updatedAt: now,
   };
@@ -126,6 +134,8 @@ export async function updateInstance(
       | 'lastError'
       | 'name'
       | 'config'
+      | 'wakeSecret'
+      | 'telegramBotToken'
     >
   >,
 ): Promise<Instance | null> {
@@ -149,4 +159,22 @@ export async function deleteInstance(userId: string, id: string): Promise<boolea
   const db = await getDb();
   const r = await db.collection('instances').deleteOne({ id, userId });
   return r.deletedCount > 0;
+}
+
+/** Public webhook lookup (no user session). */
+export async function getInstanceByWake(
+  id: string,
+  wakeSecret: string,
+): Promise<Instance | null> {
+  const db = await getDb();
+  return db.collection<Instance>('instances').findOne({ id, wakeSecret });
+}
+
+export async function ensureWakeSecret(userId: string, id: string): Promise<string> {
+  const inst = await getInstance(userId, id);
+  if (!inst) throw new Error('Instance not found');
+  if (inst.wakeSecret) return inst.wakeSecret;
+  const wakeSecret = nanoid(24);
+  await updateInstance(userId, id, { wakeSecret });
+  return wakeSecret;
 }

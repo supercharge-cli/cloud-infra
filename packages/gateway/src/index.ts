@@ -89,13 +89,19 @@ const maxContinuousMs = (() => {
   const n = Number(raw || 23 * 60 * 60 * 1000);
   return Number.isFinite(n) && n > 0 ? Math.max(60_000, n) : 23 * 60 * 60 * 1000;
 })();
+/** Docs default is kill; we force pause unless explicitly set to kill. */
 const lifecycleOnTimeout =
   process.env.XIBECODE_E2B_ON_TIMEOUT?.trim().toLowerCase() === 'kill'
     ? ('kill' as const)
     : ('pause' as const);
+/**
+ * Official auto-resume (https://e2b.dev/docs/sandbox/auto-resume):
+ * any SDK op / sandbox HTTP traffic wakes a paused sandbox when true.
+ * Only valid with onTimeout: 'pause' + full memory snapshot.
+ */
 const lifecycleAutoResume =
-  process.env.XIBECODE_E2B_AUTO_RESUME?.trim().toLowerCase() !== 'false' &&
-  lifecycleOnTimeout === 'pause';
+  lifecycleOnTimeout === 'pause' &&
+  process.env.XIBECODE_E2B_AUTO_RESUME?.trim().toLowerCase() !== 'false';
 const previewDomain = process.env.XIBECODE_E2B_PREVIEW_DOMAIN?.trim() || 'e2b.dev';
 const maxExportBytes = Math.max(
   1,
@@ -257,9 +263,13 @@ async function resetContinuousRunCycle(session: SessionRecord, reason: string): 
 /**
  * Ensure sandbox is running before any op.
  *
- * E2B auto-resume only fires for SDK ops / HTTP to the sandbox public host —
- * NOT for Telegram long-polling inside a paused VM (that process is frozen).
- * We always connect() when state is paused so dashboard/gateway traffic wakes it.
+ * Per https://e2b.dev/docs/sandbox/auto-resume:
+ * - onTimeout: 'pause' + autoResume: true at create
+ * - Any SDK op (commands.run, files.read/write) auto-resumes a paused sandbox
+ * - connect() is also fine after gateway restart (no live client object)
+ *
+ * Telegram long-poll *inside* a paused VM cannot wake it — host must call this
+ * (or any gateway exec) when a Telegram message arrives.
  */
 async function ensureSandboxRunning(session: SessionRecord): Promise<{
   state: string;
@@ -272,17 +282,38 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
     const info = await Sandbox.getInfo(session.sandboxId);
     state = String((info as { state?: string }).state || 'unknown');
     const life = (info as { lifecycle?: { onTimeout?: string; autoResume?: boolean } }).lifecycle;
-    if (life && life.onTimeout && life.onTimeout !== 'pause' && lifecycleOnTimeout === 'pause') {
+    if (life?.onTimeout && life.onTimeout !== 'pause' && lifecycleOnTimeout === 'pause') {
       console.warn(
-        `[xibecode-e2b-gateway] sandbox=${session.sandboxId} lifecycle.onTimeout=${life.onTimeout} (wanted pause) — plan/API may not support auto-pause`,
+        `[xibecode-e2b-gateway] sandbox=${session.sandboxId} lifecycle.onTimeout=${life.onTimeout} (wanted pause)`,
+      );
+    }
+    if (lifecycleAutoResume && life && life.autoResume === false) {
+      console.warn(
+        `[xibecode-e2b-gateway] sandbox=${session.sandboxId} autoResume=false on E2B side — wake will use connect()`,
       );
     }
   } catch (err) {
-    // Not found / network — try connect anyway (paused sandboxes are still connectable)
     console.warn(
       `[xibecode-e2b-gateway] getInfo failed sandbox=${session.sandboxId}: ${(err as Error).message}`,
     );
     state = 'unknown';
+  }
+
+  // Prefer official auto-resume: SDK activity on the live client object
+  if (state === 'paused' && session.sandbox?.commands?.run) {
+    try {
+      await session.sandbox.commands.run('true', { timeoutMs: 60_000 });
+      session.continuousRunStartedAt = Date.now();
+      resumed = true;
+      state = 'running';
+      console.log(
+        `[xibecode-e2b-gateway] auto-resumed sandbox=${session.sandboxId} via commands.run (lifecycle.autoResume)`,
+      );
+    } catch (err) {
+      console.warn(
+        `[xibecode-e2b-gateway] auto-resume via commands.run failed, falling back to connect: ${(err as Error).message}`,
+      );
+    }
   }
 
   if (state === 'paused' || state === 'unknown') {
@@ -292,20 +323,17 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
       });
       session.sandbox = connected as unknown as SandboxLike;
       session.continuousRunStartedAt = Date.now();
-      resumed = state === 'paused' || state === 'unknown';
+      resumed = true;
       state = 'running';
-      if (resumed) {
-        console.log(
-          `[xibecode-e2b-gateway] resumed sandbox=${session.sandboxId} via Sandbox.connect (auto-resume path)`,
-        );
-      }
+      console.log(
+        `[xibecode-e2b-gateway] resumed sandbox=${session.sandboxId} via Sandbox.connect`,
+      );
     } catch (err) {
       throw new Error(
-        `Sandbox ${session.sandboxId} is not available (not paused — missing/killed?). ${(err as Error).message}`,
+        `Sandbox ${session.sandboxId} unavailable (killed or missing?). ${(err as Error).message}`,
       );
     }
   } else if (state === 'running') {
-    // Refresh idle timer so active work does not hit the 15m auto-pause mid-task
     try {
       if (typeof session.sandbox.setTimeout === 'function') {
         await session.sandbox.setTimeout(sandboxTimeoutMs);
@@ -313,7 +341,6 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
         await Sandbox.setTimeout(session.sandboxId, sandboxTimeoutMs);
       }
     } catch (err) {
-      // Running client stale — reconnect
       console.warn(
         `[xibecode-e2b-gateway] setTimeout failed, reconnecting sandbox=${session.sandboxId}: ${(err as Error).message}`,
       );
@@ -384,9 +411,10 @@ async function createSession(input: {
     sandboxId = sandbox.sandboxId || wantSandbox;
     console.log(`[xibecode-e2b-gateway] reattached sandbox=${sandboxId} as session=${sessionId}`);
   } else {
-    // Official API: create(template, opts) — lifecycle defaults to kill if omitted.
-    // See https://e2b.dev/docs/sandbox/auto-resume
-    sandbox = (await Sandbox.create(sandboxTemplate, {
+    // Exact docs shape: https://e2b.dev/docs/sandbox/auto-resume
+    // Default onTimeout is 'kill' — we must pass lifecycle or sandboxes die.
+    sandbox = (await Sandbox.create({
+      template: sandboxTemplate,
       timeoutMs: sandboxTimeoutMs,
       lifecycle: {
         onTimeout: lifecycleOnTimeout,
@@ -409,7 +437,12 @@ async function createSession(input: {
       );
       if (lifecycleOnTimeout === 'pause' && info.lifecycle?.onTimeout === 'kill') {
         console.error(
-          `[xibecode-e2b-gateway] WARNING: requested onTimeout=pause but sandbox reports kill — check E2B plan/beta auto-pause support`,
+          `[xibecode-e2b-gateway] WARNING: requested onTimeout=pause but sandbox reports kill — check E2B plan supports auto-pause`,
+        );
+      }
+      if (lifecycleAutoResume && info.lifecycle && info.lifecycle.autoResume !== true) {
+        console.error(
+          `[xibecode-e2b-gateway] WARNING: requested autoResume=true but sandbox reports ${info.lifecycle.autoResume}`,
         );
       }
     } catch {
