@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
-import { getPlan, isSubscriptionActive } from '@/lib/billing';
+import { getPlan, hasInstanceAccess } from '@/lib/billing';
 import { execInSession, redactSecrets } from '@/lib/gateway-client';
 import { getInstance, publicInstance, updateInstance } from '@/lib/store';
 
@@ -30,7 +30,7 @@ export async function POST(req: Request, ctx: Ctx) {
     return NextResponse.json({ error: 'Instance destroyed' }, { status: 410 });
   }
 
-  if (!isSubscriptionActive(inst.paidUntil)) {
+  if (!hasInstanceAccess(inst)) {
     const plan = getPlan();
     return NextResponse.json(
       {

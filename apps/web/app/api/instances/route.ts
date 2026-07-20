@@ -1,8 +1,20 @@
 import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
-import { billingStatusFromPaidUntil, getPlan, isSubscriptionActive, priceForCurrency } from '@/lib/billing';
-import { getSandboxState } from '@/lib/gateway-client';
 import {
+  billingStatusForInstance,
+  freeInstanceLimit,
+  getPlan,
+  hasInstanceAccess,
+  priceForCurrency,
+} from '@/lib/billing';
+import {
+  createGatewaySession,
+  destroyGatewaySession,
+  getSandboxState,
+} from '@/lib/gateway-client';
+import {
+  countFreeInstancesForUser,
+  createInstanceRecord,
   listInstances,
   publicInstance,
   updateInstance,
@@ -24,6 +36,10 @@ export async function GET() {
     return NextResponse.json({ error: 'Login required' }, { status: 401 });
   }
 
+  const freeLimit = freeInstanceLimit();
+  const freeUsed = await countFreeInstancesForUser(user.id);
+  const freeAvailable = Math.max(0, freeLimit - freeUsed);
+
   const rows = await listInstances(user.id);
   const instances = await Promise.all(
     rows.map(async (inst) => {
@@ -31,8 +47,8 @@ export async function GET() {
       let resumable = true;
       let liveMessage: string | undefined;
 
-      // Sync billing status from paidUntil
-      const billingStatus = billingStatusFromPaidUntil(inst.paidUntil);
+      // Sync billing status (free tier stays active)
+      const billingStatus = billingStatusForInstance(inst);
       if (inst.billingStatus !== billingStatus) {
         const u = await updateInstance(user.id, inst.id, { billingStatus });
         if (u) Object.assign(inst, u);
@@ -69,8 +85,9 @@ export async function GET() {
         liveState: liveState || inst.status,
         resumable,
         liveMessage,
-        paid: isSubscriptionActive(inst.paidUntil),
-        billingStatus: billingStatusFromPaidUntil(inst.paidUntil),
+        paid: hasInstanceAccess(inst),
+        isFree: Boolean(inst.isFree),
+        billingStatus: billingStatusForInstance(inst),
       };
     }),
   );
@@ -78,6 +95,11 @@ export async function GET() {
   const plan = getPlan();
   return NextResponse.json({
     instances,
+    freeQuota: {
+      limit: freeLimit,
+      used: freeUsed,
+      available: freeAvailable,
+    },
     plan: {
       priceInr: plan.priceInr,
       priceUsd: plan.priceUsd,
@@ -92,16 +114,95 @@ export async function GET() {
 }
 
 /**
- * Free create is disabled. Use POST /api/billing/create-order + verify.
+ * Create one free instance per user (when free quota remains).
+ * Extra instances require POST /api/billing/create-order + verify.
  */
-export async function POST() {
-  const plan = getPlan();
-  return NextResponse.json(
-    {
-      error: 'Payment required',
-      message: `Each instance is ₹${plan.priceInr} or $${plan.priceUsd}/month. Use billing checkout to create one.`,
-      plan,
-    },
-    { status: 402 },
-  );
+export async function POST(req: Request) {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Login required' }, { status: 401 });
+  }
+
+  const freeLimit = freeInstanceLimit();
+  const freeUsed = await countFreeInstancesForUser(user.id);
+  if (freeLimit <= 0 || freeUsed >= freeLimit) {
+    const plan = getPlan();
+    return NextResponse.json(
+      {
+        error: 'Payment required',
+        message:
+          freeLimit <= 0
+            ? `Each instance is ₹${plan.priceInr} or $${plan.priceUsd}/month. Use billing checkout to create one.`
+            : `You've used your free instance (${freeLimit}). Extra instances are ₹${plan.priceInr} or $${plan.priceUsd}/month — use Pay & create.`,
+        code: 'PAYMENT_REQUIRED',
+        freeQuota: { limit: freeLimit, used: freeUsed, available: 0 },
+        plan,
+      },
+      { status: 402 },
+    );
+  }
+
+  let name = 'workspace';
+  try {
+    const body = (await req.json()) as { name?: string };
+    if (body?.name) name = String(body.name).trim().slice(0, 64) || 'workspace';
+  } catch {
+    /* empty body ok */
+  }
+
+  try {
+    const session = await createGatewaySession({ strategy: 'sandbox_full' });
+
+    // Re-check after slow provision so two parallel requests don't both get free slots
+    const freeUsedAfter = await countFreeInstancesForUser(user.id);
+    if (freeUsedAfter >= freeLimit) {
+      try {
+        await destroyGatewaySession(session.sessionId);
+      } catch {
+        /* best-effort cleanup */
+      }
+      const plan = getPlan();
+      return NextResponse.json(
+        {
+          error: 'Payment required',
+          message: `You've used your free instance (${freeLimit}). Extra instances are ₹${plan.priceInr} or $${plan.priceUsd}/month — use Pay & create.`,
+          code: 'PAYMENT_REQUIRED',
+          freeQuota: { limit: freeLimit, used: freeUsedAfter, available: 0 },
+          plan,
+        },
+        { status: 402 },
+      );
+    }
+
+    const instance = await createInstanceRecord({
+      userId: user.id,
+      name,
+      sessionId: session.sessionId,
+      sandboxId: session.sandboxId,
+      isFree: true,
+    });
+
+    return NextResponse.json(
+      {
+        instance: {
+          ...publicInstance(instance),
+          paid: true,
+          isFree: true,
+          billingStatus: 'active' as const,
+        },
+        freeQuota: {
+          limit: freeLimit,
+          used: freeUsedAfter + 1,
+          available: Math.max(0, freeLimit - freeUsedAfter - 1),
+        },
+      },
+      { status: 201 },
+    );
+  } catch (e) {
+    console.error('[instances/POST free]', e);
+    return NextResponse.json(
+      { error: (e as Error).message || 'Failed to create free instance' },
+      { status: 502 },
+    );
+  }
 }

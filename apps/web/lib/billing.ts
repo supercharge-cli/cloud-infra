@@ -103,6 +103,35 @@ export const PLAN = {
 
 export type BillingStatus = 'active' | 'past_due' | 'none';
 
+/**
+ * How many free instances each user may hold at once (non-destroyed).
+ * Override with FREE_INSTANCE_LIMIT env (0 disables free tier).
+ */
+export function freeInstanceLimit(): number {
+  const raw = process.env.FREE_INSTANCE_LIMIT?.trim();
+  if (raw === '0' || raw === 'off' || raw === 'false') return 0;
+  if (!raw) return 1;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 1;
+}
+
+/** Access is granted for free-tier instances or while paidUntil is in the future. */
+export function hasInstanceAccess(inst: {
+  isFree?: boolean | null;
+  paidUntil?: string | null;
+}): boolean {
+  if (inst.isFree) return true;
+  return isSubscriptionActive(inst.paidUntil);
+}
+
+export function billingStatusForInstance(inst: {
+  isFree?: boolean | null;
+  paidUntil?: string | null;
+}): BillingStatus {
+  if (inst.isFree) return 'active';
+  return billingStatusFromPaidUntil(inst.paidUntil);
+}
+
 export function normalizeCurrency(raw?: string | null): BillingCurrency {
   const c = String(raw || '').trim().toUpperCase();
   return c === 'USD' ? 'USD' : 'INR';

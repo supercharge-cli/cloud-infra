@@ -5,28 +5,37 @@ description: Pricing and renewals for Vectra Cloud instances
 
 # Billing
 
-## Price
+## Free tier
+
+Every account includes **1 free instance** (no payment, no expiry).
+
+- Create it from the dashboard with **Create free instance**.
+- Destroying a free instance frees the slot so you can create another free one later.
+- Extra sandboxes beyond the free slot require payment.
+
+## Price (paid instances)
 
 | | |
 | --- | --- |
 | India | **₹** per instance (set by host; default ₹399) / **30 days** |
 | International | **$** per instance (set by host; default $4.59) / **30 days** |
 
-Each payment unlocks **one** sandbox for 30 days. Multiple instances = multiple payments.
+Each payment unlocks **one** additional sandbox for 30 days. Multiple paid instances = multiple payments.
 
 ## How payment works
 
-1. On the dashboard, choose currency and click **Pay & create** (or **Renew** on an existing instance).
+1. On the dashboard, choose currency and click **Pay & create** (or **Renew** on an existing paid instance).
 2. Complete checkout with Razorpay.
 3. After a successful payment, access is active until the **paid until** date on the card.
 
 ## Renew
 
-When the period ends, status shows payment expired. Use **Renew** on that instance — you keep the same sandbox and settings; only the paid period extends.
+When a **paid** period ends, status shows payment expired. Use **Renew** on that instance — you keep the same sandbox and settings; only the paid period extends. Free-tier instances do not expire and do not need renew.
 
 ## Notes
 
-- Sandboxes are not provisioned until payment succeeds.
+- Free-tier sandboxes are provisioned immediately (no checkout).
+- Paid sandboxes are not provisioned until payment succeeds.
 - You can still **see** expired or paused instances on the dashboard and renew or resume as needed.
 - **Refunds:** sales are final under our [Refund Policy](/refund). See also [Terms](/terms) and [Privacy](/privacy).
 - For payment issues, contact support (`hello@vectra.cloud`) with your account email and approximate payment time.

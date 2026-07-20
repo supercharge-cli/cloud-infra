@@ -25,6 +25,7 @@ type DashboardInstance = Instance & {
   resumable?: boolean;
   liveMessage?: string;
   paid?: boolean;
+  isFree?: boolean;
   billingStatus?: string;
 };
 
@@ -37,6 +38,12 @@ type PlanInfo = {
     INR: { priceLabel: string; buttonLabel: string; display: number };
     USD: { priceLabel: string; buttonLabel: string; display: number };
   };
+};
+
+type FreeQuota = {
+  limit: number;
+  used: number;
+  available: number;
 };
 
 declare global {
@@ -66,10 +73,16 @@ export function Dashboard({ email }: { email: string }) {
     periodDays: 30,
     label: `${BRAND.plan.label} sandboxes`,
   });
+  const [freeQuota, setFreeQuota] = useState<FreeQuota>({
+    limit: 1,
+    used: 0,
+    available: 1,
+  });
   const [currency, setCurrency] = useState<'INR' | 'USD'>('INR');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [creatingFree, setCreatingFree] = useState(false);
   const [name, setName] = useState('workspace');
   const [selected, setSelected] = useState<string | null>(null);
   const [config, setConfig] = useState<ConfigView | null>(null);
@@ -116,6 +129,13 @@ export function Dashboard({ email }: { email: string }) {
     }
     setInstances(data.instances || []);
     if (data.plan) setPlan(data.plan);
+    if (data.freeQuota) {
+      setFreeQuota({
+        limit: Number(data.freeQuota.limit) || 0,
+        used: Number(data.freeQuota.used) || 0,
+        available: Number(data.freeQuota.available) || 0,
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -214,6 +234,30 @@ export function Dashboard({ email }: { email: string }) {
       });
       rzp.open();
     });
+  }
+
+  async function createFreeInstance() {
+    setCreatingFree(true);
+    setError('');
+    try {
+      const res = await fetch('/api/instances', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || 'Could not create free instance');
+      await refresh();
+      if (data.instance?.id) {
+        setSelected(data.instance.id);
+        setLogs('Free instance created — configure AI + Telegram below.');
+        await loadDetail(data.instance.id);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCreatingFree(false);
+    }
   }
 
   async function createInstance() {
@@ -549,6 +593,11 @@ export function Dashboard({ email }: { email: string }) {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-white">Create sandbox</h2>
           <div className="flex items-center gap-2">
+            {freeQuota.limit > 0 ? (
+              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300">
+                Free: {freeQuota.available}/{freeQuota.limit} left
+              </span>
+            ) : null}
             <div className="flex rounded-full border border-zinc-700 p-0.5 text-xs">
               <button
                 type="button"
@@ -585,9 +634,19 @@ export function Dashboard({ email }: { email: string }) {
             placeholder="workspace name"
             className="min-w-[200px] flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-white"
           />
+          {freeQuota.available > 0 ? (
+            <button
+              type="button"
+              disabled={creatingFree || creating || busy}
+              onClick={() => void createFreeInstance()}
+              className="rounded-lg bg-emerald-600 px-5 py-2 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {creatingFree ? 'Creating free…' : 'Create free instance'}
+            </button>
+          ) : null}
           <button
             type="button"
-            disabled={creating || busy}
+            disabled={creating || creatingFree || busy}
             onClick={createInstance}
             className="rounded-lg bg-orange-600 px-5 py-2 font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
           >
@@ -595,9 +654,21 @@ export function Dashboard({ email }: { email: string }) {
           </button>
         </div>
         <p className="mt-2 text-xs text-zinc-500">
-          Razorpay · India <strong className="text-zinc-400">₹{plan.priceInr || '—'}</strong> ·
-          International <strong className="text-zinc-400">${plan.priceUsd || '—'}</strong> ·{' '}
-          {plan.periodDays} days access · sandbox only after payment.
+          {freeQuota.limit > 0 ? (
+            <>
+              Every account includes <strong className="text-zinc-400">{freeQuota.limit} free</strong>{' '}
+              instance (no expiry). Extra sandboxes via Razorpay · India{' '}
+              <strong className="text-zinc-400">₹{plan.priceInr || '—'}</strong> · International{' '}
+              <strong className="text-zinc-400">${plan.priceUsd || '—'}</strong> · {plan.periodDays}{' '}
+              days.
+            </>
+          ) : (
+            <>
+              Razorpay · India <strong className="text-zinc-400">₹{plan.priceInr || '—'}</strong> ·
+              International <strong className="text-zinc-400">${plan.priceUsd || '—'}</strong> ·{' '}
+              {plan.periodDays} days access · sandbox only after payment.
+            </>
+          )}
         </p>
       </div>
 
@@ -642,7 +713,9 @@ export function Dashboard({ email }: { email: string }) {
                   <p className="mt-2 text-xs text-zinc-400">
                     AI {inst.aiConfigured ? '✓' : '—'} · Telegram{' '}
                     {inst.telegramConfigured ? '✓' : '—'}
-                    {inst.paid === false || inst.billingStatus === 'past_due' ? (
+                    {inst.isFree ? (
+                      <span className="ml-2 text-emerald-400">· free tier</span>
+                    ) : inst.paid === false || inst.billingStatus === 'past_due' ? (
                       <span className="ml-2 text-red-400">· payment expired</span>
                     ) : inst.paidUntil ? (
                       <span className="ml-2 text-zinc-500">
@@ -654,7 +727,8 @@ export function Dashboard({ email }: { email: string }) {
                     ) : null}
                   </p>
                 </button>
-                {inst.paid === false || inst.billingStatus === 'past_due' ? (
+                {!inst.isFree &&
+                (inst.paid === false || inst.billingStatus === 'past_due') ? (
                   <button
                     type="button"
                     disabled={busy}
@@ -692,7 +766,8 @@ export function Dashboard({ email }: { email: string }) {
 
       {selectedInst ? (
         <div className="mt-8 space-y-6">
-          {(selectedInst.paid === false || selectedInst.billingStatus === 'past_due') && (
+          {!selectedInst.isFree &&
+            (selectedInst.paid === false || selectedInst.billingStatus === 'past_due') && (
             <div className="rounded-xl border border-red-900/40 bg-red-950/20 px-4 py-3 text-sm text-red-100/90">
               Subscription expired
               {selectedInst.paidUntil
@@ -710,6 +785,12 @@ export function Dashboard({ email }: { email: string }) {
               </button>
             </div>
           )}
+          {selectedInst.isFree ? (
+            <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/20 px-4 py-3 text-sm text-emerald-100/90">
+              This is your <strong>free tier</strong> instance — no payment required, no expiry.
+              Need another sandbox? Use <strong>Pay & create</strong> above.
+            </div>
+          ) : null}
           {(selectedInst.liveState === 'paused' || selectedInst.status === 'paused') &&
             selectedInst.paid !== false && (
             <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/90">
@@ -725,7 +806,8 @@ export function Dashboard({ email }: { email: string }) {
               </span>
             </h2>
             <div className="flex flex-wrap gap-2">
-              {(selectedInst.paid === false || selectedInst.billingStatus === 'past_due') && (
+              {!selectedInst.isFree &&
+                (selectedInst.paid === false || selectedInst.billingStatus === 'past_due') && (
                 <button
                   type="button"
                   disabled={busy}

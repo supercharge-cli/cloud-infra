@@ -33,6 +33,7 @@ type AdminInstance = {
   sessionId?: string;
   paidUntil?: string;
   paid?: boolean;
+  isFree?: boolean;
   billingStatus?: string;
   createdAt: string;
   lastError?: string;
@@ -633,7 +634,9 @@ export function AdminPanel({ email }: { email: string }) {
                       <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300">
                         {inst.status}
                       </span>
-                      {inst.paid === false ? (
+                      {inst.isFree ? (
+                        <span className="ml-1 text-[11px] text-emerald-400">free</span>
+                      ) : inst.paid === false ? (
                         <span className="ml-1 text-[11px] text-red-400">unpaid</span>
                       ) : (
                         <span className="ml-1 text-[11px] text-emerald-500/80">paid</span>

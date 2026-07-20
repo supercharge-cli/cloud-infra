@@ -42,7 +42,8 @@ export async function GET(req: Request) {
       instances: list.map((inst) => ({
         ...publicInstance(inst),
         ownerEmail: emailById.get(inst.userId) || null,
-        paid: isSubscriptionActive(inst.paidUntil),
+        paid: inst.isFree || isSubscriptionActive(inst.paidUntil),
+        isFree: Boolean(inst.isFree),
         sessionId: inst.sessionId,
       })),
     });

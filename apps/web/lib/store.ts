@@ -77,7 +77,12 @@ export type Instance = {
    * Daemon deletes webhooks on start (long-poll); host re-sets after wake.
    */
   telegramBotToken?: string;
-  /** ISO — access valid until this time (see BILLING_* env for price/period). */
+  /**
+   * Free-tier sandbox (one per user by default). Never expires; does not require payment.
+   * Additional instances are paid via Razorpay.
+   */
+  isFree?: boolean;
+  /** ISO — access valid until this time (see BILLING_* env for price/period). Ignored when isFree. */
   paidUntil?: string;
   billingStatus?: 'active' | 'past_due' | 'none';
   lastPaymentId?: string;
@@ -227,6 +232,16 @@ export async function countInstancesForUser(userId: string): Promise<number> {
   const db = await getDb();
   return db.collection('instances').countDocuments({
     userId,
+    status: { $ne: 'destroyed' },
+  });
+}
+
+/** Non-destroyed free-tier instances for this user (for free quota). */
+export async function countFreeInstancesForUser(userId: string): Promise<number> {
+  const db = await getDb();
+  return db.collection('instances').countDocuments({
+    userId,
+    isFree: true,
     status: { $ne: 'destroyed' },
   });
 }
@@ -409,6 +424,9 @@ export async function createInstanceRecord(input: {
   name: string;
   sessionId: string;
   sandboxId?: string;
+  isFree?: boolean;
+  paidUntil?: string;
+  billingStatus?: Instance['billingStatus'];
 }): Promise<Instance> {
   const db = await getDb();
   const now = new Date().toISOString();
@@ -424,6 +442,12 @@ export async function createInstanceRecord(input: {
     plan: 'hosting-4c8g',
     config: {},
     wakeSecret: nanoid(24),
+    ...(input.isFree
+      ? { isFree: true, billingStatus: 'active' as const }
+      : {
+          ...(input.paidUntil ? { paidUntil: input.paidUntil } : {}),
+          ...(input.billingStatus ? { billingStatus: input.billingStatus } : {}),
+        }),
     createdAt: now,
     updatedAt: now,
   };
@@ -448,6 +472,7 @@ export async function updateInstance(
       | 'telegramBotToken'
       | 'paidUntil'
       | 'billingStatus'
+      | 'isFree'
       | 'lastPaymentId'
       | 'lastOrderId'
     >

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
-import { getPlan, isSubscriptionActive } from '@/lib/billing';
+import { getPlan, hasInstanceAccess } from '@/lib/billing';
 import { wakeSession } from '@/lib/gateway-client';
 import { getInstance, updateInstance } from '@/lib/store';
 
@@ -19,7 +19,7 @@ export async function POST(_req: Request, ctx: Ctx) {
     return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
   }
 
-  if (!isSubscriptionActive(inst.paidUntil)) {
+  if (!hasInstanceAccess(inst)) {
     const plan = getPlan();
     return NextResponse.json(
       {
