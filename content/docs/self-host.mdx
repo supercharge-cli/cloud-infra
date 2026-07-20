@@ -1,6 +1,6 @@
 ---
 title: Self-host
-description: Run Vectra Cloud with MongoDB and e2b-gateway
+description: Run Vectra Cloud with MongoDB and packages/gateway (in this repo)
 ---
 
 # Self-host Vectra Cloud
@@ -9,7 +9,7 @@ description: Run Vectra Cloud with MongoDB and e2b-gateway
 
 - **Next.js app** (this repo) — marketing, docs, auth, dashboard APIs
 - **MongoDB** — users + instances
-- **e2b-gateway** — holds `E2B_API_KEY`, creates sandboxes, exec/file APIs
+- **packages/gateway (in this repo)** — holds `E2B_API_KEY`, creates sandboxes, exec/file APIs
 - **Custom template** (optional) — e.g. `xibecode-full-sandbox` with 4c/8GB
 
 ## Environment
@@ -35,7 +35,7 @@ pnpm install
 pnpm dev   # http://127.0.0.1:3001
 ```
 
-Ensure e2b-gateway is up on `8787` before creating instances.
+Ensure packages/gateway (in this repo) is up on `8787` before creating instances.
 
 ## API surface
 

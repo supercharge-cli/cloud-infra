@@ -11,6 +11,7 @@ export function Footer() {
               Vectra<span className="text-orange-500">Cloud</span>
             </h3>
             <p className="text-sm leading-relaxed text-zinc-400">{BRAND.tagline}</p>
+            <p className="mt-2 text-xs text-zinc-600">Proprietary · closed source</p>
           </div>
           <div>
             <h4 className="mb-3 text-sm font-semibold text-zinc-200">Product</h4>
@@ -50,29 +51,22 @@ export function Footer() {
                   Telegram pairing
                 </Link>
               </li>
+              <li>
+                <Link href="/docs/self-host" className="text-zinc-400 hover:text-orange-400">
+                  Self-host
+                </Link>
+              </li>
             </ul>
           </div>
           <div>
-            <h4 className="mb-3 text-sm font-semibold text-zinc-200">Open source</h4>
+            <h4 className="mb-3 text-sm font-semibold text-zinc-200">Support</h4>
             <ul className="space-y-2 text-sm">
               <li>
                 <a
-                  href={BRAND.github}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href="mailto:hello@vectra.cloud"
                   className="text-zinc-400 hover:text-orange-400"
                 >
-                  cloud-infra
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://github.com/iotserver24/Xibecode"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-zinc-400 hover:text-orange-400"
-                >
-                  XibeCode agent
+                  Contact
                 </a>
               </li>
             </ul>
@@ -80,8 +74,8 @@ export function Footer() {
         </div>
         <div className="border-t border-zinc-800 pt-6">
           <p className="text-xs text-zinc-500">
-            © {new Date().getFullYear()} {BRAND.name}. Separate product from the XibeCode CLI
-            docs site.
+            © {new Date().getFullYear()} {BRAND.name}. All rights reserved. Not affiliated with
+            the public XibeCode CLI docs site.
           </p>
         </div>
       </div>

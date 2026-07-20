@@ -1,4 +1,4 @@
-/** Product brand — separate from XibeCode CLI marketing site. */
+/** Product brand — closed-source product (not the XibeCode CLI OSS site). */
 export const BRAND = {
   name: 'Vectra Cloud',
   shortName: 'Vectra',
@@ -11,7 +11,8 @@ export const BRAND = {
     cpu: 4,
     memoryMb: 8192,
   },
-  github: 'https://github.com/iotserver24/cloud-infra',
+  /** Private product repo — do not advertise as open source. */
+  github: null as string | null,
   docsHome: '/docs',
   dashboard: '/dashboard',
   login: '/login',

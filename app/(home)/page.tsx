@@ -6,7 +6,6 @@ import {
   Bot,
   Cloud,
   Cpu,
-  Github,
   MessageCircle,
   Shield,
   Sparkles,
@@ -152,15 +151,12 @@ export default function HomePage() {
             >
               Create account
             </Link>
-            <a
-              href={BRAND.github}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-full border border-zinc-700 px-6 py-3 font-semibold text-zinc-300"
+            <Link
+              href={BRAND.docsHome}
+              className="inline-flex items-center gap-2 rounded-full border border-zinc-700 px-6 py-3 font-semibold text-zinc-300 hover:border-orange-500/40"
             >
-              <Github className="h-4 w-4" />
-              GitHub
-            </a>
+              Read the docs
+            </Link>
           </div>
         </div>
       </section>
