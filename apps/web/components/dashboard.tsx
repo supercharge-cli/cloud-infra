@@ -1031,14 +1031,23 @@ export function Dashboard({ email }: { email: string }) {
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Provider">
-                <select
+                <input
+                  list="ai-providers"
                   value={provider}
                   onChange={(e) => setProvider(e.target.value)}
+                  placeholder="openai, anthropic, routingrun, openrouter…"
                   className="field"
-                >
-                  <option value="openai">OpenAI-compatible</option>
-                  <option value="anthropic">Anthropic</option>
-                </select>
+                />
+                <datalist id="ai-providers">
+                  <option value="openai" />
+                  <option value="anthropic" />
+                  <option value="routingrun" />
+                  <option value="openrouter" />
+                  <option value="grok" />
+                  <option value="google" />
+                  <option value="deepseek" />
+                  <option value="custom" />
+                </datalist>
               </Field>
               <Field label="Model">
                 <input

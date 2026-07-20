@@ -326,11 +326,70 @@ function parseEnvFile(raw: string): Record<string, string> {
   for (const line of raw.split('\n')) {
     const t = line.trim();
     if (!t || t.startsWith('#')) continue;
-    const i = t.indexOf('=');
+    // support optional "export KEY=val"
+    const body = t.startsWith('export ') ? t.slice(7).trim() : t;
+    const i = body.indexOf('=');
     if (i < 0) continue;
-    out[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+    let key = body.slice(0, i).trim();
+    let val = body.slice(i + 1).trim();
+    // strip matching single/double quotes around values
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (key) out[key] = val;
   }
   return out;
+}
+
+/** First non-empty trimmed string. */
+function pick(...vals: Array<string | undefined | null>): string {
+  for (const v of vals) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
+/** Common provider API key env names (profile.apiKey still preferred). */
+const API_KEY_ENV_NAMES = [
+  'XIBECODE_API_KEY',
+  'OPENAI_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'ROUTINGRUN_API_KEY',
+  'OPENROUTER_API_KEY',
+  'ZENLLM_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'GOOGLE_API_KEY',
+  'GEMINI_API_KEY',
+  'XAI_API_KEY',
+  'GROQ_API_KEY',
+  'MISTRAL_API_KEY',
+  'TOGETHER_API_KEY',
+  'FIREWORKS_API_KEY',
+  'PERPLEXITY_API_KEY',
+  'COHERE_API_KEY',
+  'MOONSHOT_API_KEY',
+  'KIMI_API_KEY',
+  'MINIMAX_API_KEY',
+  'HF_TOKEN',
+  'AZURE_FOUNDRY_API_KEY',
+  'LM_API_KEY',
+  'OLLAMA_API_KEY',
+] as const;
+
+function apiKeyFromEnv(env: Record<string, string>): string {
+  for (const k of API_KEY_ENV_NAMES) {
+    const v = env[k]?.trim();
+    if (v) return v;
+  }
+  // any *API_KEY leftover (provider-specific)
+  for (const [k, v] of Object.entries(env)) {
+    if (!v?.trim()) continue;
+    if (/_API_KEY$/i.test(k) || k === 'HF_TOKEN') return v.trim();
+  }
+  return '';
 }
 
 export type SandboxConfigView = {
@@ -369,15 +428,182 @@ function emptyConfigView(): SandboxConfigView {
   };
 }
 
+function parseProfileJson(raw: string): Record<string, unknown> {
+  try {
+    const data = JSON.parse(raw || '{}') as unknown;
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      return data as Record<string, unknown>;
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+function strField(obj: Record<string, unknown>, key: string): string {
+  const v = obj[key];
+  return typeof v === 'string' ? v.trim() : v != null && typeof v !== 'object' ? String(v).trim() : '';
+}
+
+function viewFromSources(
+  env: Record<string, string>,
+  profile: Record<string, unknown>,
+): SandboxConfigView {
+  // Prefer profile (what xibecode CLI/Telegram setup writes) then daemon/gateway env.
+  const apiKey = pick(strField(profile, 'apiKey'), apiKeyFromEnv(env));
+  const tg = pick(
+    env.TELEGRAM_BOT_TOKEN,
+    env.XIBECODE_TELEGRAM_BOT_TOKEN,
+    strField(profile, 'telegramBotToken'),
+  );
+  const dc = pick(
+    env.DISCORD_BOT_TOKEN,
+    env.XIBECODE_DISCORD_BOT_TOKEN,
+    strField(profile, 'discordBotToken'),
+  );
+  const slackBot = pick(
+    env.SLACK_BOT_TOKEN,
+    env.XIBECODE_SLACK_BOT_TOKEN,
+    strField(profile, 'slackBotToken'),
+  );
+  const slackApp = pick(
+    env.SLACK_APP_TOKEN,
+    env.XIBECODE_SLACK_APP_TOKEN,
+    strField(profile, 'slackAppToken'),
+  );
+  const model = pick(strField(profile, 'model'), env.XIBECODE_MODEL);
+  const baseUrl = pick(
+    strField(profile, 'baseUrl'),
+    env.XIBECODE_BASE_URL,
+    env.OPENAI_BASE_URL,
+    env.ANTHROPIC_BASE_URL,
+  );
+  const provider = pick(
+    strField(profile, 'provider'),
+    env.XIBECODE_PROVIDER,
+    env.ANTHROPIC_API_KEY ? 'anthropic' : '',
+    'openai',
+  );
+  const slackOk = Boolean(slackBot && slackApp);
+  return {
+    provider: provider || 'openai',
+    model: model || '',
+    baseUrl: baseUrl || '',
+    hasApiKey: Boolean(apiKey),
+    hasTelegramToken: Boolean(tg),
+    hasDiscordToken: Boolean(dc),
+    hasSlackToken: slackOk,
+    apiKey: apiKey || undefined,
+    telegramBotToken: tg || undefined,
+    discordBotToken: dc || undefined,
+    slackBotToken: slackBot || undefined,
+    slackAppToken: slackApp || undefined,
+    allowAllUsers: env.GATEWAY_ALLOW_ALL_USERS === 'true',
+    apiKeyHint: hint(apiKey),
+    telegramHint: hint(tg),
+    discordHint: hint(dc),
+    slackHint: slackOk ? hint(slackBot) : undefined,
+  };
+}
+
 /** Config currently on the sandbox — full secrets for authenticated owner edit. */
 export async function readSandboxConfig(
   sessionId: string,
   sandboxId?: string,
 ): Promise<SandboxConfigView> {
   try {
+    // One shell dump is more reliable than separate file reads (and picks up
+    // profile-*.json + both env files that Telegram / CLI setup may write).
+    const dump = await execInSession(
+      sessionId,
+      `python3 - <<'PY'
+import json, os
+from pathlib import Path
+home = Path(os.path.expanduser("~/.xibecode"))
+if not home.is_dir():
+    home = Path("/home/user/.xibecode")
+env = {}
+for name in ("daemon.env", "gateway.env"):
+    p = home / name
+    if not p.is_file():
+        continue
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        continue
+    for line in text.splitlines():
+        t = line.strip()
+        if not t or t.startswith("#"):
+            continue
+        if t.startswith("export "):
+            t = t[7:].strip()
+        i = t.find("=")
+        if i < 0:
+            continue
+        k, v = t[:i].strip(), t[i+1:].strip()
+        if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+            v = v[1:-1]
+        if k and v and k not in env:
+            env[k] = v
+profile = {}
+meta_path = home / "meta.json"
+default = "default"
+if meta_path.is_file():
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8", errors="replace"))
+        if isinstance(meta, dict) and meta.get("defaultProfile"):
+            default = str(meta["defaultProfile"]).strip() or "default"
+    except Exception:
+        pass
+for name in (f"profile-{default}.json", "profile-default.json", "config.json", "settings.json"):
+    p = home / name
+    if not p.is_file():
+        continue
+    try:
+        data = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+        if isinstance(data, dict):
+            # later files only fill missing keys (prefer default profile)
+            for k, v in data.items():
+                if k not in profile:
+                    profile[k] = v
+    except Exception:
+        pass
+# also merge any other profile-*.json fields that default missed
+for p in sorted(home.glob("profile-*.json")):
+    try:
+        data = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if k not in profile and v not in (None, "", [], {}):
+                    profile[k] = v
+    except Exception:
+        pass
+print(json.dumps({"env": env, "profile": profile}, ensure_ascii=False))
+PY`,
+      { timeout: 45, sandboxId },
+    );
+
+    if (dump.stdout?.trim()) {
+      try {
+        const parsed = JSON.parse(dump.stdout.trim()) as {
+          env?: Record<string, string>;
+          profile?: Record<string, unknown>;
+        };
+        return viewFromSources(parsed.env || {}, parsed.profile || {});
+      } catch {
+        /* fall through to file reads */
+      }
+    }
+
+    // Fallback: direct file reads (older gateway / python missing)
     const envFile = await readFileInSession(
       sessionId,
       '/home/user/.xibecode/daemon.env',
+      sandboxId,
+    );
+    const gatewayEnvFile = await readFileInSession(
+      sessionId,
+      '/home/user/.xibecode/gateway.env',
       sandboxId,
     );
     const profileFile = await readFileInSession(
@@ -385,39 +611,12 @@ export async function readSandboxConfig(
       '/home/user/.xibecode/profile-default.json',
       sandboxId,
     );
-    const env = parseEnvFile(envFile.content || '');
-    let profile: Record<string, string> = {};
-    try {
-      profile = JSON.parse(profileFile.content || '{}') as Record<string, string>;
-    } catch {
-      /* ignore */
-    }
-    const apiKey =
-      env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY || env.XIBECODE_API_KEY || profile.apiKey || '';
-    const tg = env.TELEGRAM_BOT_TOKEN || env.XIBECODE_TELEGRAM_BOT_TOKEN || '';
-    const dc = env.DISCORD_BOT_TOKEN || env.XIBECODE_DISCORD_BOT_TOKEN || '';
-    const slackBot = env.SLACK_BOT_TOKEN || env.XIBECODE_SLACK_BOT_TOKEN || '';
-    const slackApp = env.SLACK_APP_TOKEN || env.XIBECODE_SLACK_APP_TOKEN || '';
-    const slackOk = Boolean(slackBot && slackApp);
-    return {
-      provider: profile.provider || (env.ANTHROPIC_API_KEY ? 'anthropic' : 'openai'),
-      model: profile.model || env.XIBECODE_MODEL || '',
-      baseUrl: profile.baseUrl || env.XIBECODE_BASE_URL || '',
-      hasApiKey: Boolean(apiKey),
-      hasTelegramToken: Boolean(tg),
-      hasDiscordToken: Boolean(dc),
-      hasSlackToken: slackOk,
-      apiKey: apiKey || undefined,
-      telegramBotToken: tg || undefined,
-      discordBotToken: dc || undefined,
-      slackBotToken: slackBot || undefined,
-      slackAppToken: slackApp || undefined,
-      allowAllUsers: env.GATEWAY_ALLOW_ALL_USERS === 'true',
-      apiKeyHint: hint(apiKey),
-      telegramHint: hint(tg),
-      discordHint: hint(dc),
-      slackHint: slackOk ? hint(slackBot) : undefined,
+    const env = {
+      ...parseEnvFile(gatewayEnvFile.content || ''),
+      ...parseEnvFile(envFile.content || ''),
     };
+    const profile = parseProfileJson(profileFile.content || '');
+    return viewFromSources(env, profile);
   } catch {
     return emptyConfigView();
   }
@@ -452,49 +651,39 @@ export async function writeSandboxConfig(
   const sandboxId = input.sandboxId;
 
   let existing = await readSandboxConfig(sessionId, sandboxId);
-  // Need raw secrets for merge — read env again
-  let prevEnv: Record<string, string> = {};
-  let prevProfile: Record<string, string> = {};
+
+  // Full profile for merge (preserve unrelated conf keys like plugins, theme, etc.)
+  let prevProfile: Record<string, unknown> = {};
   try {
-    const envFile = await readFileInSession(
-      sessionId,
-      '/home/user/.xibecode/daemon.env',
-      sandboxId,
-    );
-    prevEnv = parseEnvFile(envFile.content || '');
     const pf = await readFileInSession(
       sessionId,
       '/home/user/.xibecode/profile-default.json',
       sandboxId,
     );
-    prevProfile = JSON.parse(pf.content || '{}') as Record<string, string>;
+    prevProfile = parseProfileJson(pf.content || '');
   } catch {
     /* first write */
   }
 
   const provider =
-    (input.provider || prevProfile.provider || 'openai').replace(/[^a-z0-9_-]/gi, '') ||
+    (input.provider || existing.provider || 'openai').replace(/[^a-z0-9_-]/gi, '') ||
     'openai';
-  const model = (input.model ?? prevProfile.model ?? prevEnv.XIBECODE_MODEL ?? '').trim();
-  const baseUrl = (input.baseUrl ?? prevProfile.baseUrl ?? prevEnv.XIBECODE_BASE_URL ?? '').trim();
-
-  const prevApi =
-    prevEnv.OPENAI_API_KEY ||
-    prevEnv.ANTHROPIC_API_KEY ||
-    prevEnv.XIBECODE_API_KEY ||
-    prevProfile.apiKey ||
-    '';
-  const prevTg = prevEnv.TELEGRAM_BOT_TOKEN || prevEnv.XIBECODE_TELEGRAM_BOT_TOKEN || '';
-  const prevDc = prevEnv.DISCORD_BOT_TOKEN || prevEnv.XIBECODE_DISCORD_BOT_TOKEN || '';
-  const prevSlackBot = prevEnv.SLACK_BOT_TOKEN || prevEnv.XIBECODE_SLACK_BOT_TOKEN || '';
-  const prevSlackApp = prevEnv.SLACK_APP_TOKEN || prevEnv.XIBECODE_SLACK_APP_TOKEN || '';
+  const model = (input.model ?? existing.model ?? '').trim();
+  const baseUrl = (input.baseUrl ?? existing.baseUrl ?? '').trim();
 
   const merge = input.mergeExisting !== false;
-  const apiKey = (input.apiKey || '').trim() || (merge ? prevApi : '');
-  const telegramBotToken = (input.telegramBotToken || '').trim() || (merge ? prevTg : '');
-  const discordBotToken = (input.discordBotToken || '').trim() || (merge ? prevDc : '');
-  const slackBotToken = (input.slackBotToken || '').trim() || (merge ? prevSlackBot : '');
-  const slackAppToken = (input.slackAppToken || '').trim() || (merge ? prevSlackApp : '');
+  const apiKey =
+    (input.apiKey || '').trim() || (merge ? existing.apiKey || '' : '');
+  const telegramBotToken =
+    (input.telegramBotToken || '').trim() ||
+    (merge ? existing.telegramBotToken || '' : '');
+  const discordBotToken =
+    (input.discordBotToken || '').trim() ||
+    (merge ? existing.discordBotToken || '' : '');
+  const slackBotToken =
+    (input.slackBotToken || '').trim() || (merge ? existing.slackBotToken || '' : '');
+  const slackAppToken =
+    (input.slackAppToken || '').trim() || (merge ? existing.slackAppToken || '' : '');
 
   if (!apiKey) {
     return {
@@ -528,7 +717,7 @@ export async function writeSandboxConfig(
   const openAccess =
     typeof input.allowAllUsers === 'boolean'
       ? input.allowAllUsers
-      : prevEnv.GATEWAY_ALLOW_ALL_USERS === 'true';
+      : Boolean(existing.allowAllUsers);
 
   const channels: string[] = [];
   if (telegramBotToken) channels.push('telegram');
@@ -550,8 +739,10 @@ export async function writeSandboxConfig(
       // clear the other provider key so conf/env don't fight
       provider === 'anthropic' ? `OPENAI_API_KEY=` : `ANTHROPIC_API_KEY=`,
       `XIBECODE_API_KEY=${apiKey}`,
+      `XIBECODE_PROVIDER=${provider}`,
       model ? `XIBECODE_MODEL=${model}` : '',
       baseUrl ? `XIBECODE_BASE_URL=${baseUrl}` : '',
+      baseUrl && provider !== 'anthropic' ? `OPENAI_BASE_URL=${baseUrl}` : '',
       `XIBECODE_DAEMON_WORKDIR=/home/user/workspace`,
     ]
       .filter((line) => line !== '')
@@ -562,7 +753,7 @@ export async function writeSandboxConfig(
     ...prevProfile,
     provider,
     ...(model ? { model } : {}),
-    ...(baseUrl ? { baseUrl } : { baseUrl: prevProfile.baseUrl }),
+    ...(baseUrl ? { baseUrl } : prevProfile.baseUrl ? { baseUrl: prevProfile.baseUrl } : {}),
     apiKey,
   };
   const profileJson = JSON.stringify(mergedProfile, null, 2);
@@ -625,6 +816,12 @@ export async function writeSandboxConfig(
     hasTelegramToken: Boolean(telegramBotToken),
     hasDiscordToken: Boolean(discordBotToken),
     hasSlackToken: Boolean(slackBotToken && slackAppToken),
+    apiKey,
+    telegramBotToken: telegramBotToken || undefined,
+    discordBotToken: discordBotToken || undefined,
+    slackBotToken: slackBotToken || undefined,
+    slackAppToken: slackAppToken || undefined,
+    allowAllUsers: openAccess,
     apiKeyHint: hint(apiKey),
     telegramHint: hint(telegramBotToken),
     discordHint: hint(discordBotToken),
