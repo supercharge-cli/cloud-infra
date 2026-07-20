@@ -13,6 +13,12 @@ type ConfigView = {
   hasTelegramToken: boolean;
   hasDiscordToken?: boolean;
   hasSlackToken?: boolean;
+  apiKey?: string;
+  telegramBotToken?: string;
+  discordBotToken?: string;
+  slackBotToken?: string;
+  slackAppToken?: string;
+  allowAllUsers?: boolean;
   apiKeyHint?: string;
   telegramHint?: string;
   discordHint?: string;
@@ -331,12 +337,29 @@ export function Dashboard({ email }: { email: string }) {
       const cData = await cRes.json();
       const pData = await pRes.json();
       if (cRes.ok) {
-        setConfig(cData.sandbox);
-        if (cData.sandbox?.provider) setProvider(cData.sandbox.provider);
-        if (cData.sandbox?.model) setModel(cData.sandbox.model || '');
-        if (cData.sandbox?.baseUrl) setBaseUrl(cData.sandbox.baseUrl || '');
+        const s = cData.sandbox as ConfigView | undefined;
+        setConfig(s || null);
+        // Prefill form with whatever is already on the sandbox (env + profile).
+        setProvider(s?.provider || 'openai');
+        setModel(s?.model || '');
+        setBaseUrl(s?.baseUrl || '');
+        setApiKey(s?.apiKey || '');
+        setTelegramToken(s?.telegramBotToken || '');
+        setDiscordToken(s?.discordBotToken || '');
+        setSlackBotToken(s?.slackBotToken || '');
+        setSlackAppToken(s?.slackAppToken || '');
+        setAllowAll(Boolean(s?.allowAllUsers));
       } else {
         setConfig(null);
+        setProvider('openai');
+        setModel('');
+        setBaseUrl('');
+        setApiKey('');
+        setTelegramToken('');
+        setDiscordToken('');
+        setSlackBotToken('');
+        setSlackAppToken('');
+        setAllowAll(false);
         setError(cData.error || 'Config load failed');
       }
       if (pRes.ok) setPairing(pData.pairing);
@@ -436,11 +459,6 @@ export function Dashboard({ email }: { email: string }) {
       const data = await res.json();
       setLogs((data.logs || [data.error]).join('\n'));
       if (!res.ok) throw new Error(data.error || 'Save failed');
-      setApiKey('');
-      setTelegramToken('');
-      setDiscordToken('');
-      setSlackBotToken('');
-      setSlackAppToken('');
       await refresh();
       await loadDetail(selected);
     } catch (e) {
@@ -1008,8 +1026,8 @@ export function Dashboard({ email }: { email: string }) {
               </p>
             ) : null}
             <p className="mb-3 text-xs text-zinc-500">
-              XibeCode supports Telegram, Discord, and Slack — set any one (or several). Leave a
-              field blank to keep the current token.
+              Values below are loaded from the sandbox env. Edit any field, then Save (or Save &amp;
+              restart). XibeCode supports Telegram, Discord, and Slack — set any one (or several).
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Provider">
@@ -1030,7 +1048,7 @@ export function Dashboard({ email }: { email: string }) {
                   className="field"
                 />
               </Field>
-              <Field label="API key (leave blank to keep)">
+              <Field label="API key">
                 <input
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}

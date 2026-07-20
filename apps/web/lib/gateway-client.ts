@@ -341,6 +341,13 @@ export type SandboxConfigView = {
   hasTelegramToken: boolean;
   hasDiscordToken: boolean;
   hasSlackToken: boolean;
+  /** Full values for owner edit form (auth-gated API only). */
+  apiKey?: string;
+  telegramBotToken?: string;
+  discordBotToken?: string;
+  slackBotToken?: string;
+  slackAppToken?: string;
+  allowAllUsers?: boolean;
   apiKeyHint?: string;
   telegramHint?: string;
   discordHint?: string;
@@ -358,10 +365,11 @@ function emptyConfigView(): SandboxConfigView {
     hasTelegramToken: false,
     hasDiscordToken: false,
     hasSlackToken: false,
+    allowAllUsers: false,
   };
 }
 
-/** Safe view of config currently on the sandbox (secrets masked). */
+/** Config currently on the sandbox — full secrets for authenticated owner edit. */
 export async function readSandboxConfig(
   sessionId: string,
   sandboxId?: string,
@@ -399,6 +407,12 @@ export async function readSandboxConfig(
       hasTelegramToken: Boolean(tg),
       hasDiscordToken: Boolean(dc),
       hasSlackToken: slackOk,
+      apiKey: apiKey || undefined,
+      telegramBotToken: tg || undefined,
+      discordBotToken: dc || undefined,
+      slackBotToken: slackBot || undefined,
+      slackAppToken: slackApp || undefined,
+      allowAllUsers: env.GATEWAY_ALLOW_ALL_USERS === 'true',
       apiKeyHint: hint(apiKey),
       telegramHint: hint(tg),
       discordHint: hint(dc),
