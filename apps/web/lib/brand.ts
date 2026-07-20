@@ -23,4 +23,7 @@ export const BRAND = {
   dashboard: '/dashboard',
   login: '/login',
   signup: '/signup',
+  terms: '/terms',
+  privacy: '/privacy',
+  refund: '/refund',
 } as const;

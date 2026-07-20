@@ -318,8 +318,25 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
 
             {isSignup ? (
               <p className="mt-4 text-center text-[11px] leading-relaxed text-zinc-600">
-                By creating an account you agree to use {BRAND.name} for authorized access only.
-                Your data is stored securely; API keys live on your sandboxes, not in our DB.
+                By creating an account you agree to our{' '}
+                <Link href={BRAND.terms} className="text-zinc-400 underline-offset-2 hover:underline">
+                  Terms
+                </Link>
+                ,{' '}
+                <Link
+                  href={BRAND.privacy}
+                  className="text-zinc-400 underline-offset-2 hover:underline"
+                >
+                  Privacy Policy
+                </Link>
+                , and{' '}
+                <Link
+                  href={BRAND.refund}
+                  className="text-zinc-400 underline-offset-2 hover:underline"
+                >
+                  Refund Policy
+                </Link>{' '}
+                (sales are final). Use {BRAND.name} only for authorized access.
               </p>
             ) : null}
           </div>

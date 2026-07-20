@@ -64,8 +64,23 @@ export function Footer() {
             </ul>
           </div>
           <div>
-            <h4 className="mb-3 text-sm font-semibold text-zinc-200">Support</h4>
+            <h4 className="mb-3 text-sm font-semibold text-zinc-200">Legal</h4>
             <ul className="space-y-2 text-sm">
+              <li>
+                <Link href="/terms" className="text-zinc-400 hover:text-orange-400">
+                  Terms of Service
+                </Link>
+              </li>
+              <li>
+                <Link href="/privacy" className="text-zinc-400 hover:text-orange-400">
+                  Privacy Policy
+                </Link>
+              </li>
+              <li>
+                <Link href="/refund" className="text-zinc-400 hover:text-orange-400">
+                  Refund Policy
+                </Link>
+              </li>
               <li>
                 <a
                   href="mailto:hello@vectra.cloud"
@@ -77,10 +92,23 @@ export function Footer() {
             </ul>
           </div>
         </div>
-        <div className="border-t border-zinc-800 pt-6">
+        <div className="border-t border-zinc-800 pt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-zinc-500">
             © {new Date().getFullYear()} {BRAND.name}. All rights reserved. Not affiliated with
             the public XibeCode CLI docs site.
+          </p>
+          <p className="text-xs text-zinc-600">
+            <Link href="/terms" className="hover:text-zinc-400">
+              Terms
+            </Link>
+            {' · '}
+            <Link href="/privacy" className="hover:text-zinc-400">
+              Privacy
+            </Link>
+            {' · '}
+            <Link href="/refund" className="hover:text-zinc-400">
+              No refunds
+            </Link>
           </p>
         </div>
       </div>
