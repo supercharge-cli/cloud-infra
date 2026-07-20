@@ -851,6 +851,49 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // Live E2B state by sandbox id (works even if gateway session map is empty / sandbox paused)
+    const sandboxStateMatch = url.pathname.match(/^\/sandboxes\/([^/]+)(?:\/state)?$/);
+    if (method === 'GET' && sandboxStateMatch) {
+      const sandboxId = decodeURIComponent(sandboxStateMatch[1] || '').trim();
+      if (!sandboxId) {
+        sendJson(res, 400, { success: false, error: true, message: 'Missing sandboxId' });
+        return;
+      }
+      try {
+        const info = (await Sandbox.getInfo(sandboxId)) as {
+          state?: string;
+          sandboxId?: string;
+          templateId?: string;
+          cpuCount?: number;
+          memoryMB?: number;
+          lifecycle?: { onTimeout?: string; autoResume?: boolean };
+        };
+        const state = String(info.state || 'unknown');
+        sendJson(res, 200, {
+          success: true,
+          sandboxId: info.sandboxId || sandboxId,
+          state,
+          // paused sandboxes remain owned/resumable — not deleted
+          resumable: state === 'paused' || state === 'running',
+          templateId: info.templateId,
+          cpuCount: info.cpuCount,
+          memoryMB: info.memoryMB,
+          lifecycle: info.lifecycle,
+        });
+      } catch (e) {
+        const msg = (e as Error).message || String(e);
+        // Not found / killed — still return structured body so dashboard can show "gone"
+        sendJson(res, 200, {
+          success: true,
+          sandboxId,
+          state: 'missing',
+          resumable: false,
+          message: msg.slice(0, 300),
+        });
+      }
+      return;
+    }
+
     if (method === 'GET' && url.pathname === '/sessions') {
       const data = Array.from(sessions.values()).map((session) => ({
         sessionId: session.sessionId,

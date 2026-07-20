@@ -560,6 +560,33 @@ export function getGatewayUrl(): string {
   return gatewayBase();
 }
 
+export type SandboxLiveState = {
+  sandboxId: string;
+  state: 'running' | 'paused' | 'missing' | 'unknown' | string;
+  resumable: boolean;
+  message?: string;
+  lifecycle?: { onTimeout?: string; autoResume?: boolean };
+};
+
+/** Query E2B state for a sandbox (paused still exists and is resumable). */
+export async function getSandboxState(sandboxId: string): Promise<SandboxLiveState> {
+  const res = await gwFetch(`/sandboxes/${encodeURIComponent(sandboxId)}`);
+  const text = await res.text();
+  let data: Partial<SandboxLiveState> & { success?: boolean; message?: string } = {};
+  try {
+    data = JSON.parse(text) as typeof data;
+  } catch {
+    data = { message: text.slice(0, 200) };
+  }
+  return {
+    sandboxId,
+    state: String(data.state || 'unknown'),
+    resumable: data.resumable !== false && data.state !== 'missing',
+    message: data.message,
+    lifecycle: data.lifecycle,
+  };
+}
+
 /** Resume a paused sandbox (and optionally restart xibecode daemon for Telegram). */
 export async function wakeSession(
   sessionId: string,

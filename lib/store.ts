@@ -77,13 +77,37 @@ export async function authenticateUser(
   return user;
 }
 
-export async function listInstances(userId: string): Promise<Instance[]> {
+export async function listInstances(
+  userId: string,
+  opts?: { includeDestroyed?: boolean },
+): Promise<Instance[]> {
   const db = await getDb();
+  const filter: Record<string, unknown> = { userId };
+  // Paused/running/error always listed so the owner can resume. Destroyed hidden by default.
+  if (!opts?.includeDestroyed) {
+    filter.status = { $ne: 'destroyed' };
+  }
   return db
     .collection<Instance>('instances')
-    .find({ userId })
+    .find(filter)
     .sort({ createdAt: -1 })
     .toArray();
+}
+
+/** Strip secrets before sending instance JSON to the browser. */
+export function publicInstance(inst: Instance): Omit<Instance, 'telegramBotToken' | 'wakeSecret'> & {
+  wakeSecret?: undefined;
+  telegramBotToken?: undefined;
+  hasWakeSecret?: boolean;
+} {
+  const { telegramBotToken: _t, wakeSecret: _w, ...rest } = inst as Instance & {
+    _id?: unknown;
+  };
+  const { _id: _drop, ...clean } = rest as Instance & { _id?: unknown };
+  return {
+    ...(clean as Instance),
+    hasWakeSecret: Boolean(_w),
+  };
 }
 
 export async function getInstance(

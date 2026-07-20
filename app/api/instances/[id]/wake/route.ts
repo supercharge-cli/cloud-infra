@@ -21,17 +21,18 @@ export async function POST(_req: Request, ctx: Ctx) {
       sandboxId: inst.sandboxId,
       restartDaemon: true,
     });
-    await updateInstance(user.id, inst.id, {
+    const next = await updateInstance(user.id, inst.id, {
       status: result.ok ? 'running' : 'error',
       lastError: result.ok ? undefined : (result.message || result.logs.join('\n')).slice(0, 500),
     });
+    const { publicInstance } = await import('@/lib/store');
     return NextResponse.json(
       {
         ok: result.ok,
-        state: result.state,
+        state: result.state || (result.ok ? 'running' : undefined),
         resumed: result.resumed,
         logs: result.logs,
-        instance: await getInstance(user.id, inst.id),
+        instance: next ? publicInstance(next) : null,
       },
       { status: result.ok ? 200 : 502 },
     );

@@ -20,8 +20,14 @@ type PairingView = {
   approved: Array<{ platform: string; userId: string }>;
 };
 
+type DashboardInstance = Instance & {
+  liveState?: string;
+  resumable?: boolean;
+  liveMessage?: string;
+};
+
 export function Dashboard({ email }: { email: string }) {
-  const [instances, setInstances] = useState<Instance[]>([]);
+  const [instances, setInstances] = useState<DashboardInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
@@ -152,12 +158,14 @@ export function Dashboard({ email }: { email: string }) {
     }
   }
 
-  async function wakeInstance() {
-    if (!selected) return;
+  async function wakeInstance(id?: string) {
+    const target = id || selected;
+    if (!target) return;
     setBusy(true);
     setLogs('');
+    setSelected(target);
     try {
-      const res = await fetch(`/api/instances/${selected}/wake`, { method: 'POST' });
+      const res = await fetch(`/api/instances/${target}/wake`, { method: 'POST' });
       const data = await res.json();
       setLogs(
         [
@@ -169,6 +177,7 @@ export function Dashboard({ email }: { email: string }) {
       );
       if (!res.ok) throw new Error(data.error || 'Wake failed');
       await refresh();
+      await loadDetail(target);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -270,51 +279,96 @@ export function Dashboard({ email }: { email: string }) {
         </p>
       </div>
 
+      <p className="mb-3 text-xs text-zinc-500">
+        Your sandboxes stay listed when <span className="text-amber-400">paused</span> (idle) —
+        open them anytime and hit Resume. Only Destroy removes them.
+      </p>
+
       {loading ? (
         <p className="text-zinc-500">Loading instances…</p>
       ) : instances.length === 0 ? (
         <p className="text-zinc-500">No instances yet. Create one above.</p>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
-          {instances.map((inst) => (
-            <button
-              key={inst.id}
-              type="button"
-              onClick={() => loadDetail(inst.id)}
-              className={`rounded-xl border p-4 text-left transition ${
-                selected === inst.id
-                  ? 'border-orange-500/60 bg-orange-500/5'
-                  : 'border-zinc-800 bg-zinc-950 hover:border-zinc-600'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold text-white">{inst.name}</span>
-                <StatusPill status={inst.status} />
+          {instances.map((inst) => {
+            const displayStatus = inst.liveState || inst.status;
+            const isPaused = displayStatus === 'paused' || inst.status === 'paused';
+            return (
+              <div
+                key={inst.id}
+                className={`rounded-xl border p-4 transition ${
+                  selected === inst.id
+                    ? 'border-orange-500/60 bg-orange-500/5'
+                    : isPaused
+                      ? 'border-amber-800/50 bg-zinc-950'
+                      : 'border-zinc-800 bg-zinc-950 hover:border-zinc-600'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => loadDetail(inst.id)}
+                  className="w-full text-left"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-white">{inst.name}</span>
+                    <StatusPill status={displayStatus} />
+                  </div>
+                  <p className="mt-1 font-mono text-xs text-zinc-500">
+                    {inst.id}
+                    {inst.sandboxId ? ` · ${inst.sandboxId.slice(0, 12)}…` : ''}
+                  </p>
+                  <p className="mt-2 text-xs text-zinc-400">
+                    AI {inst.aiConfigured ? '✓' : '—'} · Telegram{' '}
+                    {inst.telegramConfigured ? '✓' : '—'}
+                    {isPaused ? (
+                      <span className="ml-2 text-amber-400">· idle paused — still yours</span>
+                    ) : null}
+                  </p>
+                </button>
+                {isPaused && inst.resumable !== false ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void wakeInstance(inst.id);
+                    }}
+                    className="mt-3 w-full rounded-lg bg-emerald-600 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                  >
+                    Resume sandbox
+                  </button>
+                ) : null}
+                {displayStatus === 'missing' || displayStatus === 'error' ? (
+                  <p className="mt-2 text-xs text-red-400">
+                    {inst.liveMessage || inst.lastError || 'Sandbox missing on provider'}
+                  </p>
+                ) : null}
               </div>
-              <p className="mt-1 font-mono text-xs text-zinc-500">
-                {inst.id}
-                {inst.sandboxId ? ` · ${inst.sandboxId.slice(0, 12)}…` : ''}
-              </p>
-              <p className="mt-2 text-xs text-zinc-400">
-                AI {inst.aiConfigured ? '✓' : '—'} · Telegram{' '}
-                {inst.telegramConfigured ? '✓' : '—'}
-              </p>
-            </button>
-          ))}
+            );
+          })}
         </div>
       )}
 
       {selectedInst ? (
         <div className="mt-8 space-y-6">
+          {(selectedInst.liveState === 'paused' || selectedInst.status === 'paused') && (
+            <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/90">
+              This sandbox is <strong>paused</strong> (saved on E2B). It still belongs to you —
+              click <strong>Wake / resume</strong> to continue. Config and files are preserved.
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-semibold text-white">
-              Manage · {selectedInst.name}
+              Manage · {selectedInst.name}{' '}
+              <span className="align-middle">
+                <StatusPill status={selectedInst.liveState || selectedInst.status} />
+              </span>
             </h2>
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 disabled={busy}
-                onClick={wakeInstance}
+                onClick={() => wakeInstance()}
                 className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
               >
                 Wake / resume
@@ -528,9 +582,11 @@ function StatusPill({ status }: { status: string }) {
   const color =
     status === 'running'
       ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
-      : status === 'error'
-        ? 'bg-red-950 text-red-300 border-red-900'
-        : 'bg-zinc-900 text-zinc-400 border-zinc-700';
+      : status === 'paused'
+        ? 'bg-amber-950 text-amber-300 border-amber-800'
+        : status === 'error' || status === 'missing'
+          ? 'bg-red-950 text-red-300 border-red-900'
+          : 'bg-zinc-900 text-zinc-400 border-zinc-700';
   return (
     <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${color}`}>
       {status}
