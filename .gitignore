@@ -11,6 +11,7 @@ node_modules/
 # Next / Fumadocs
 .source/
 .next/
+apps/web/.next/
 out/
 build/
 coverage/
