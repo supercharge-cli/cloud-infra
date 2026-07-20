@@ -4,28 +4,118 @@
  */
 
 function gatewayBase(): string {
-  const base =
+  let base =
     process.env.XIBECODE_SANDBOX_GATEWAY_URL?.trim() ||
     process.env.XIBECODE_E2B_GATEWAY_URL?.trim() ||
     'http://127.0.0.1:8787';
+  // strip wrapping quotes from Vercel env paste mistakes
+  if (
+    (base.startsWith('"') && base.endsWith('"')) ||
+    (base.startsWith("'") && base.endsWith("'"))
+  ) {
+    base = base.slice(1, -1).trim();
+  }
+  if (/^XIBECODE_.*URL\s*=/i.test(base)) {
+    base = base.replace(/^[A-Z_]+\s*=\s*/i, '').trim();
+  }
   return base.replace(/\/$/, '');
 }
 
 function gatewayToken(): string {
-  return (
+  let t =
     process.env.XIBECODE_GATEWAY_TOKEN?.trim() ||
     process.env.XIBECODE_SANDBOX_AUTH_TOKEN?.trim() ||
-    ''
-  );
+    '';
+  if (
+    (t.startsWith('"') && t.endsWith('"')) ||
+    (t.startsWith("'") && t.endsWith("'"))
+  ) {
+    t = t.slice(1, -1).trim();
+  }
+  return t;
+}
+
+/** Human-readable reason when gateway returns HTML / Cloudflare / wrong host. */
+export function explainGatewayFailure(status: number, body: string, url: string): string {
+  const snippet = (body || '').slice(0, 280).replace(/\s+/g, ' ');
+  const lower = snippet.toLowerCase();
+
+  if (
+    lower.includes('just a moment') ||
+    lower.includes('cf-browser-verification') ||
+    lower.includes('cloudflare') ||
+    lower.includes('attention required') ||
+    lower.includes('_cf_chl')
+  ) {
+    return (
+      `Gateway blocked by Cloudflare bot check (HTTP ${status}) at ${url}. ` +
+      `Vercel cannot pass the "Just a moment…" page. Fix: set XIBECODE_SANDBOX_GATEWAY_URL to the ` +
+      `direct Railway/Coolify origin (*.up.railway.app or server IP/http), not a custom domain with ` +
+      `Cloudflare orange-cloud proxy. In Cloudflare DNS set the record to DNS-only (grey cloud), ` +
+      `or turn off Bot Fight Mode / Under Attack for that hostname.`
+    );
+  }
+
+  if (lower.includes('<!doctype html') || lower.includes('<html')) {
+    return (
+      `Gateway returned HTML instead of JSON (HTTP ${status}) from ${url}. ` +
+      `Check XIBECODE_SANDBOX_GATEWAY_URL points at the gateway service (ends without a path), ` +
+      `not a website homepage. Body: ${snippet.slice(0, 120)}…`
+    );
+  }
+
+  if (
+    url.includes('127.0.0.1') ||
+    url.includes('localhost') ||
+    url.includes('0.0.0.0')
+  ) {
+    return (
+      `Gateway URL is localhost (${url}) — that only works on your machine, not on Vercel. ` +
+      `Set XIBECODE_SANDBOX_GATEWAY_URL to your public gateway HTTPS URL and redeploy.`
+    );
+  }
+
+  if (status === 401 || status === 403) {
+    return (
+      `Gateway auth failed (HTTP ${status}) at ${url}. ` +
+      `XIBECODE_GATEWAY_TOKEN on Vercel must match the token on the gateway (XIBECODE_GATEWAY_TOKEN). ` +
+      `Body: ${snippet || '(empty)'}`
+    );
+  }
+
+  return `Gateway request failed (HTTP ${status}) ${url}: ${snippet || '(empty body)'}`;
+}
+
+function assertGatewayUrlUsable(): void {
+  const base = gatewayBase();
+  if (
+    process.env.VERCEL === '1' &&
+    (base.includes('127.0.0.1') || base.includes('localhost'))
+  ) {
+    throw new Error(
+      'XIBECODE_SANDBOX_GATEWAY_URL is localhost on Vercel. Set it to your public Railway/Coolify gateway URL (Production env) and redeploy.',
+    );
+  }
 }
 
 async function gwFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  assertGatewayUrlUsable();
   const headers = new Headers(init.headers);
   headers.set('content-type', 'application/json');
+  headers.set('accept', 'application/json');
+  // Identify as server client (helps some proxies; does not bypass Cloudflare challenge)
+  headers.set('user-agent', 'VectraCloud-Web/1.0 (+server)');
   const token = gatewayToken();
   if (token) headers.set('authorization', `Bearer ${token}`);
-  const res = await fetch(`${gatewayBase()}${path}`, { ...init, headers });
-  return res;
+  const url = `${gatewayBase()}${path}`;
+  try {
+    return await fetch(url, { ...init, headers, redirect: 'manual' });
+  } catch (e) {
+    const msg = (e as Error).message || String(e);
+    throw new Error(
+      `Gateway unreachable at ${gatewayBase()}: ${msg}. Is the gateway deployed and is the URL correct?`,
+    );
+  }
 }
 
 export type GatewaySession = {
@@ -48,11 +138,19 @@ export async function createGatewaySession(opts?: {
       strategy: opts?.strategy || 'sandbox_full',
     }),
   });
+  const text = await res.text();
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Gateway create session failed (${res.status}): ${text.slice(0, 400)}`);
+    throw new Error(
+      explainGatewayFailure(res.status, text, `${gatewayBase()}/sessions`),
+    );
   }
-  return (await res.json()) as GatewaySession;
+  try {
+    return JSON.parse(text) as GatewaySession;
+  } catch {
+    throw new Error(
+      explainGatewayFailure(res.status || 200, text, `${gatewayBase()}/sessions`),
+    );
+  }
 }
 
 /** Re-attach after gateway restart (session map is memory-only). */

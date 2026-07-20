@@ -60,6 +60,13 @@ export async function getDb(): Promise<Db> {
   await client.connect();
   db = client.db(resolveMongoDbName());
   await ensureIndexes(db);
+  // Seed / sync bootstrap admin(s) from ADMIN_EMAILS + ADMIN_BOOTSTRAP_PASSWORD
+  try {
+    const { ensureBootstrapAdmins } = await import('./store');
+    await ensureBootstrapAdmins(db);
+  } catch (e) {
+    console.warn('[mongodb] bootstrap admin skipped:', (e as Error).message);
+  }
   return db;
 }
 

@@ -103,6 +103,53 @@ export type PendingOrder = {
   paymentId?: string;
 };
 
+/**
+ * Ensure admins from env exist.
+ * - ADMIN_EMAILS=a@x.com,b@y.com
+ * - ADMIN_BOOTSTRAP_PASSWORD=... (min 8 chars)
+ * When password is set, creates missing admins and syncs their password hash
+ * so Vercel env stays the source of truth after DB wipes.
+ * Pass the Db from getDb() to avoid circular imports.
+ */
+export async function ensureBootstrapAdmins(database: {
+  collection: (name: string) => {
+    findOne: (q: object) => Promise<User | null>;
+    insertOne: (doc: User) => Promise<unknown>;
+    updateOne: (q: object, u: object) => Promise<unknown>;
+  };
+}): Promise<void> {
+  const password = process.env.ADMIN_BOOTSTRAP_PASSWORD?.trim() || '';
+  if (password.length < 8) return;
+
+  const emails = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((e) => e.includes('@'));
+  if (!emails.length) return;
+
+  for (const email of emails) {
+    const existing = await database.collection('users').findOne({ email });
+    const passwordHash = hashPassword(password);
+    if (!existing) {
+      const user: User = {
+        id: nanoid(12),
+        email,
+        passwordHash,
+        role: 'admin',
+        createdAt: new Date().toISOString(),
+      };
+      await database.collection('users').insertOne(user);
+      console.log(`[bootstrap] created admin ${email}`);
+    } else {
+      await database.collection('users').updateOne(
+        { email },
+        { $set: { passwordHash, role: 'admin' } },
+      );
+      console.log(`[bootstrap] synced admin password/role ${email}`);
+    }
+  }
+}
+
 export async function createUser(
   email: string,
   password: string,
