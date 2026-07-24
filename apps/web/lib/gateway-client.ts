@@ -992,7 +992,8 @@ export async function updateCliInSandbox(
     'echo "--- pre version ---"',
     'xibecode -v 2>&1 || true',
     'echo "--- install ---"',
-    'sudo npm install -g xibecode@latest 2>&1 || npm install -g xibecode@latest 2>&1',
+    // Global package is root-owned in the template — always prefer passwordless sudo.
+    'sudo -n npm install -g xibecode@latest --no-fund --no-audit 2>&1 || sudo npm install -g xibecode@latest --no-fund --no-audit 2>&1 || npm install -g xibecode@latest --no-fund --no-audit 2>&1',
     'echo "--- post version ---"',
     'xibecode -v 2>&1 || true',
     'echo UPDATE_DONE',
