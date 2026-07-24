@@ -5,13 +5,36 @@ description: What happens when your sandbox goes idle
 
 # Pause & resume
 
+Vectra follows the [E2B auto-resume](https://e2b.dev/docs/sandbox/auto-resume) lifecycle.
+
 ## Idle pause
 
-After about **15 minutes** without activity, your sandbox **pauses** automatically to save cost (E2B lifecycle: `onTimeout: pause`, `autoResume: true`).
+After about **30 minutes** without activity (configurable), your sandbox **pauses** automatically to save cost:
+
+```ts
+lifecycle: {
+  onTimeout: 'pause',   // full memory + filesystem snapshot (not kill)
+  autoResume: true,     // wake on next SDK/HTTP activity
+}
+```
 
 - It is **not deleted**.
 - It still appears on **your** dashboard.
-- Files, config, and memory snapshot are kept.
+- Files, config, and **memory** are kept (so processes can thaw in place).
+- Lifecycle settings are **persistent** across pause/resume cycles.
+
+We do **not** use filesystem-only pause (`keepMemory: false`) — that cannot auto-resume on traffic.
+
+## What wakes a paused sandbox
+
+Per E2B, activity includes:
+
+- SDK ops from our gateway: `commands.run`, `files.read` / `files.write`
+- HTTP to a service **inside** the sandbox (preview URLs)
+
+You do not need `Sandbox.connect()` first when `autoResume` is true and the control plane still holds a live client. After a gateway restart we use `Sandbox.connect()`.
+
+After resume, the idle timeout countdown **restarts** (E2B applies at least 5 minutes; we re-apply our configured window via `setTimeout`).
 
 ## How to resume
 
@@ -24,13 +47,16 @@ After about **15 minutes** without activity, your sandbox **pauses** automatical
 
 ### Telegram (auto-resume)
 
-When the sandbox is paused, Vectra arms a **host wake webhook** (immediately via E2B lifecycle event when configured, otherwise within a few minutes via cron / dashboard). The next DM:
+Telegram long-poll runs **inside** the sandbox (same idea as [OpenClaw Telegram on E2B](https://e2b.dev/docs/agents/openclaw/openclaw-telegram)): a background channel runtime.
 
-1. Resumes the sandbox via the E2B SDK (`Sandbox.connect` / auto-resume).
-2. Restarts the coding daemon (long-poll freezes across pause) and clears the host webhook.
-3. Replies asking you to **send the message again** (Telegram delivered the first update to the wake webhook, not the bot).
+When the VM is **paused**, that long-poll is frozen — a DM alone cannot wake the machine. Vectra arms a **host wake webhook** while paused. The next DM:
 
-While the sandbox is **running**, the host webhook stays **cleared** so the bot’s normal long-poll works. If wake fails, the host webhook is re-armed for the next try.
+1. Issues gateway SDK activity → E2B auto-resumes (or `Sandbox.connect` fallback).
+2. Restarts the coding daemon (thawed TCP to Telegram is stale; OpenClaw-style readiness poll).
+3. Clears the host webhook so the daemon’s `getUpdates` long-poll owns the bot again.
+4. Asks you to **send the message again** (the first update was delivered to the wake webhook).
+
+While **running**, the host webhook stays cleared. If wake fails, it is re-armed.
 
 Discord / Slack do not use a host wake webhook — use **Wake / resume** on the dashboard after idle pause.
 

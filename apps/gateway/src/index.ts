@@ -71,12 +71,15 @@ const authToken = process.env.XIBECODE_GATEWAY_TOKEN?.trim() || '';
 const sandboxTemplate =
   process.env.XIBECODE_E2B_TEMPLATE?.trim() || 'xibecode-full-sandbox';
 /**
- * Inactivity window (ms) before lifecycle action; default 15m (E2B default is 5m).
- * With onTimeout=pause + autoResume, idle sandboxes freeze and wake on next SDK/HTTP activity.
+ * Inactivity window (ms) before lifecycle action.
+ * Default 30m (E2B platform default is 5m). After auto-resume, E2B restarts the
+ * countdown with max(this value, 5m) — see e2b.dev/docs/sandbox/auto-resume.
+ * OpenClaw-style long-running Telegram in-sandbox benefits from a longer idle
+ * window so the bot is not freeze/thaw thrashing every few minutes.
  */
 const sandboxTimeoutMs = Math.max(
   60_000,
-  Number(process.env.XIBECODE_E2B_SANDBOX_TIMEOUT_MS || 15 * 60 * 1000),
+  Number(process.env.XIBECODE_E2B_SANDBOX_TIMEOUT_MS || 30 * 60 * 1000),
 );
 /**
  * E2B Pro continuous *running* cap is 24h. Pause+resume resets that window.
@@ -89,19 +92,34 @@ const maxContinuousMs = (() => {
   const n = Number(raw || 23 * 60 * 60 * 1000);
   return Number.isFinite(n) && n > 0 ? Math.max(60_000, n) : 23 * 60 * 60 * 1000;
 })();
-/** Docs default is kill; we force pause unless explicitly set to kill. */
+/**
+ * https://e2b.dev/docs/sandbox/auto-resume
+ * Default onTimeout is "kill". We force "pause" (full memory + fs snapshot).
+ * String form "pause" keeps keepMemory=true (required for autoResume).
+ * Do NOT use { action: 'pause', keepMemory: false } — that cannot auto-resume.
+ */
 const lifecycleOnTimeout =
   process.env.XIBECODE_E2B_ON_TIMEOUT?.trim().toLowerCase() === 'kill'
     ? ('kill' as const)
     : ('pause' as const);
 /**
- * Official auto-resume (sandbox auto-resume docs):
- * any SDK op / sandbox HTTP traffic wakes a paused sandbox when true.
+ * https://e2b.dev/docs/sandbox/auto-resume
+ * autoResume: true → paused sandbox wakes on activity:
+ *   - sandbox.commands.run / files.read / files.write
+ *   - HTTP to a service inside the sandbox (preview URL)
+ * You do not need Sandbox.connect() first when autoResume is on *and* you still
+ * hold a live client from create. After gateway restart use connect().
  * Only valid with onTimeout: 'pause' + full memory snapshot.
  */
 const lifecycleAutoResume =
   lifecycleOnTimeout === 'pause' &&
   process.env.XIBECODE_E2B_AUTO_RESUME?.trim().toLowerCase() !== 'false';
+
+/** Exact lifecycle object passed to Sandbox.create (docs shape). */
+const sandboxLifecycle =
+  lifecycleOnTimeout === 'pause'
+    ? ({ onTimeout: 'pause' as const, autoResume: lifecycleAutoResume })
+    : ({ onTimeout: 'kill' as const, autoResume: false as const });
 const previewDomain = process.env.XIBECODE_E2B_PREVIEW_DOMAIN?.trim() || 'e2b.dev';
 const maxExportBytes = Math.max(
   1,
@@ -265,17 +283,21 @@ async function resetContinuousRunCycle(session: SessionRecord, reason: string): 
 /**
  * Ensure sandbox is running before any op.
  *
- * E2B auto-resume docs (lifecycle.autoResume=true):
- * - Paused sandboxes wake on SDK ops (commands.run / files.*) or HTTP traffic.
- * - You do not need connect() first when autoResume is enabled *and* you still
- *   hold a live client from create.
- * - After gateway restart the in-memory client is gone → Sandbox.connect().
- * - setTimeout() fails with "not found" while paused — only call it when running.
+ * https://e2b.dev/docs/sandbox/auto-resume
+ * - Create with lifecycle { onTimeout: 'pause', autoResume: true }
+ * - Activity (commands.run, files.*, HTTP into sandbox) wakes paused VMs
+ * - No connect() needed first when autoResume is true AND client is still live
+ * - After gateway restart (no client) → Sandbox.connect()
+ * - setTimeout() only while running (paused → "not found")
+ * - After resume, call setTimeout() so the idle window is our configured value
+ *   (E2B restarts countdown; min applied server-side is 5m)
  *
- * Telegram long-poll inside a paused VM cannot wake it; the host webhook must
- * call gateway wake/exec so SDK activity resumes the VM.
+ * Telegram long-poll *inside* a paused VM cannot generate that activity.
+ * Host must issue an SDK op (wake/exec) — OpenClaw-style channel runtime then
+ * needs a restart because frozen TCP to api.telegram.org is stale after thaw.
  */
 async function reconnectSandbox(session: SessionRecord, reason: string): Promise<void> {
+  // connect() resumes if paused; timeoutMs is the new idle window after resume.
   // requestTimeoutMs: memory restore can exceed the default 60s handshake.
   const connected = await Sandbox.connect(session.sandboxId, {
     timeoutMs: Math.max(sandboxTimeoutMs, 120_000),
@@ -284,7 +306,7 @@ async function reconnectSandbox(session: SessionRecord, reason: string): Promise
   session.sandbox = connected as unknown as SandboxLike;
   session.continuousRunStartedAt = Date.now();
   session.updatedAt = Date.now();
-  // Fresh idle window after resume (docs: auto-resume restarts timeout countdown)
+  // Docs: change timeout after resume via setTimeout()
   await refreshSandboxTimeout(session);
   console.log(
     `[xibecode-e2b-gateway] reconnected sandbox=${session.sandboxId} via Sandbox.connect (${reason})`,
@@ -324,6 +346,20 @@ function isResumeRelatedError(msg: string): boolean {
   );
 }
 
+/**
+ * SDK activity that counts for auto-resume (docs list commands.run / files.*).
+ * Prefer a trivial command — same idea as the docs' files.read after pause.
+ */
+async function probeWithSdkActivity(
+  session: SessionRecord,
+  timeoutMs: number,
+): Promise<void> {
+  if (!session.sandbox?.commands?.run) {
+    throw new Error('no live sandbox client (commands.run missing)');
+  }
+  await session.sandbox.commands.run('true', { timeoutMs });
+}
+
 async function ensureSandboxRunning(session: SessionRecord): Promise<{
   state: string;
   resumed: boolean;
@@ -359,9 +395,7 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
   if (state === 'running') {
     // Probe first (also covers mid-pause race). setTimeout only after probe succeeds.
     try {
-      if (session.sandbox?.commands?.run) {
-        await session.sandbox.commands.run('true', { timeoutMs: 30_000 });
-      }
+      await probeWithSdkActivity(session, 30_000);
       await refreshSandboxTimeout(session);
       session.updatedAt = Date.now();
       return { state: 'running', resumed: false };
@@ -377,16 +411,16 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
   }
 
   // Paused / unknown
-  // 1) Official auto-resume: next SDK op wakes the VM when autoResume=true
-  //    (works when we still hold the create-time client).
+  // 1) Official auto-resume: next SDK op wakes when autoResume=true + live client
+  //    (docs: "You do not need to call Sandbox.connect() first")
   if (state === 'paused' && sandboxAutoResume && session.sandbox?.commands?.run) {
     try {
-      await session.sandbox.commands.run('true', { timeoutMs: 60_000 });
+      await probeWithSdkActivity(session, 90_000);
       await refreshSandboxTimeout(session);
       session.continuousRunStartedAt = Date.now();
       session.updatedAt = Date.now();
       console.log(
-        `[xibecode-e2b-gateway] auto-resumed sandbox=${session.sandboxId} via commands.run`,
+        `[xibecode-e2b-gateway] auto-resumed sandbox=${session.sandboxId} via commands.run (lifecycle.autoResume)`,
       );
       return { state: 'running', resumed: true };
     } catch (err) {
@@ -396,7 +430,8 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
     }
   }
 
-  // 2) Explicit resume (always works for paused; required after gateway restart)
+  // 2) Explicit resume (docs: if autoResume is falsy, use Sandbox.connect;
+  //    also required after gateway restart when the create-time client is gone)
   try {
     await reconnectSandbox(session, `state=${state}`);
     resumed = true;
@@ -448,33 +483,27 @@ async function createSession(input: {
     }
   }
 
-  const lifecycle = {
-    onTimeout: lifecycleOnTimeout,
-    autoResume: lifecycleAutoResume,
-  };
-
   let sandbox: SandboxLike;
   let sandboxId: string;
 
   if (wantSandbox) {
     // Re-attach existing VM (filesystem + optional paused memory).
-    // connect() resumes if paused; sets a fresh timeout window.
+    // connect() resumes if paused; timeoutMs becomes the post-resume idle window.
     sandbox = (await Sandbox.connect(wantSandbox, {
       timeoutMs: sandboxTimeoutMs,
       requestTimeoutMs: 120_000,
     })) as unknown as SandboxLike;
     sandboxId = sandbox.sandboxId || wantSandbox;
     console.log(`[xibecode-e2b-gateway] reattached sandbox=${sandboxId} as session=${sessionId}`);
+    // connect already resumes; still pin idle timeout to our configured window
   } else {
-    // Exact docs shape: sandbox auto-resume docs
-    // Default onTimeout is 'kill' — we must pass lifecycle or sandboxes die.
+    // Exact docs shape: https://e2b.dev/docs/sandbox/auto-resume
+    //   lifecycle: { onTimeout: 'pause', autoResume: true }
+    // Default onTimeout is 'kill' — without lifecycle, idle sandboxes die permanently.
     sandbox = (await Sandbox.create({
       template: sandboxTemplate,
       timeoutMs: sandboxTimeoutMs,
-      lifecycle: {
-        onTimeout: lifecycleOnTimeout,
-        autoResume: lifecycleAutoResume,
-      },
+      lifecycle: sandboxLifecycle,
     })) as unknown as SandboxLike;
     sandboxId = sandbox.sandboxId || randomUUID();
     try {
@@ -487,8 +516,8 @@ async function createSession(input: {
       console.log(
         `[xibecode-e2b-gateway] created sandbox=${sandboxId} template=${sandboxTemplate}` +
           ` state=${info.state ?? '?'} cpu=${info.cpuCount ?? '?'} memMB=${info.memoryMB ?? '?'}` +
-          ` lifecycle.onTimeout=${info.lifecycle?.onTimeout ?? lifecycleOnTimeout}` +
-          ` autoResume=${info.lifecycle?.autoResume ?? lifecycleAutoResume}`,
+          ` lifecycle.onTimeout=${info.lifecycle?.onTimeout ?? sandboxLifecycle.onTimeout}` +
+          ` autoResume=${info.lifecycle?.autoResume ?? sandboxLifecycle.autoResume}`,
       );
       if (lifecycleOnTimeout === 'pause' && info.lifecycle?.onTimeout === 'kill') {
         console.error(
@@ -502,7 +531,7 @@ async function createSession(input: {
       }
     } catch {
       console.log(
-        `[xibecode-e2b-gateway] created sandbox=${sandboxId} template=${sandboxTemplate} lifecycle=${JSON.stringify(lifecycle)}`,
+        `[xibecode-e2b-gateway] created sandbox=${sandboxId} template=${sandboxTemplate} lifecycle=${JSON.stringify(sandboxLifecycle)}`,
       );
     }
   }
@@ -525,8 +554,12 @@ async function createSession(input: {
   };
   sessions.set(sessionId, session);
 
+  // After connect/create the sandbox is running — pin idle TTL (docs: setTimeout after resume).
+  await refreshSandboxTimeout(session);
+
   if (strategy === 'sandbox_full') {
     try {
+      // SDK activity (also proves auto-resume path works for new clients)
       const mk = await sandbox.commands?.run(`mkdir -p ${shQuote(requestedWorkspaceRoot)}`, {
         cwd: '/tmp',
         timeoutMs: 60_000,

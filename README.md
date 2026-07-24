@@ -54,9 +54,21 @@ https://your-app.vercel.app/api/billing/webhook
 
 ### Auto-resume (E2B pause → Telegram wake)
 
-Idle sandboxes use E2B `onTimeout: pause` + `autoResume: true`. Telegram long-poll
-inside a paused VM cannot wake itself, so the host arms a **Telegram wake webhook**
-while paused and clears it while running.
+Follows [E2B auto-resume](https://e2b.dev/docs/sandbox/auto-resume):
+
+```ts
+Sandbox.create({
+  timeoutMs: 30 * 60 * 1000,
+  lifecycle: { onTimeout: 'pause', autoResume: true }, // full memory snapshot
+})
+```
+
+Activity that wakes a paused sandbox: gateway SDK ops (`commands.run`, files) or HTTP
+into the VM. Telegram long-poll runs **inside** the sandbox (same model as
+[OpenClaw Telegram on E2B](https://e2b.dev/docs/agents/openclaw/openclaw-telegram));
+when paused that poll freezes, so the host arms a **Telegram wake webhook** while
+paused and clears it while running. After thaw we restart the channel runtime
+(stale TCP) with an OpenClaw-style readiness poll.
 
 1. **Instant path:** register an E2B project lifecycle webhook:
    - URL: `https://your-app.vercel.app/api/e2b/lifecycle`
@@ -65,6 +77,8 @@ while paused and clears it while running.
 2. **Fallback:** Vercel cron every 5m hits `/api/cron/arm-telegram-wake` (needs `CRON_SECRET`).
 3. **Dashboard list / Wake** also syncs webhook + status.
 4. Redeploy **both** Vercel (web) and Railway (gateway) after pull.
+   Set gateway `XIBECODE_E2B_SANDBOX_TIMEOUT_MS` (default 30m) and keep
+   `XIBECODE_E2B_ON_TIMEOUT=pause` + `XIBECODE_E2B_AUTO_RESUME=true`.
 
 ### Backend — Railway or Coolify
 
