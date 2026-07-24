@@ -9,7 +9,7 @@ Vectra follows the [E2B auto-resume](https://e2b.dev/docs/sandbox/auto-resume) l
 
 ## Idle pause
 
-After about **30 minutes** without activity (configurable), your sandbox **pauses** automatically to save cost:
+After about **30 minutes** without activity (operator-configurable on the gateway), your sandbox **pauses** automatically to save cost:
 
 ```ts
 lifecycle: {
@@ -24,6 +24,10 @@ lifecycle: {
 - Lifecycle settings are **persistent** across pause/resume cycles.
 
 We do **not** use filesystem-only pause (`keepMemory: false`) — that cannot auto-resume on traffic.
+
+### Long continuous runs (platform limit)
+
+E2B also has a **~24 hour continuous-run** ceiling. The control plane may **pause and resume** on a longer cycle (default about **23 hours**) so the instance stays usable without hitting a hard kill. Idle pause still applies as usual. Operators can disable that cycle with gateway env `XIBECODE_E2B_MAX_CONTINUOUS_MS=0`.
 
 ## What wakes a paused sandbox
 
@@ -44,6 +48,8 @@ After resume, the idle timeout countdown **restarts** (E2B applies at least 5 mi
 2. Find the instance (status **paused**).
 3. Click **Wake / resume**.
 4. Wait a few seconds, then use Telegram / Discord / Slack as usual.
+
+Dashboard **Command pane**, **View logs**, **Update & restart**, and **Save & restart** also wake the sandbox before work.
 
 ### Telegram (auto-resume)
 
@@ -68,7 +74,7 @@ If payment has expired, renew first, then resume.
 
 ## Tips
 
-- Resume is free while your current paid period is active.
+- Resume is free while your current paid period is active (or free-tier slot).
 - Destroy is permanent; pause is not.
 - Set `PUBLIC_BASE_URL` to your public HTTPS app URL so Telegram can reach the wake webhook.
-- Ops: register E2B lifecycle webhook → `POST ${PUBLIC_BASE_URL}/api/e2b/lifecycle` with events `sandbox.lifecycle.paused` / `resumed` / `killed` (and set `E2B_LIFECYCLE_WEBHOOK_SECRET`). Cron `/api/cron/arm-telegram-wake` remains the fallback.
+- Ops: register E2B lifecycle webhook → `POST ${PUBLIC_BASE_URL}/api/e2b/lifecycle` with events `sandbox.lifecycle.paused` / `resumed` / `killed` / `created` (and set `E2B_LIFECYCLE_WEBHOOK_SECRET`). Cron `/api/cron/arm-telegram-wake` remains the fallback.

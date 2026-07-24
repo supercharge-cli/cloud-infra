@@ -5,7 +5,7 @@ description: Connect Telegram, Discord, or Slack to your cloud agent
 
 # Chat channels
 
-XibeCode on Vectra Cloud talks over **Telegram**, **Discord**, and/or **Slack**. Use any one channel, or several at once.
+Vectra Cloud sandboxes talk over **Telegram**, **Discord**, and/or **Slack**. Use any one channel, or several at once.
 
 ## Setup
 
@@ -37,9 +37,18 @@ If you enable **Allow all users on every channel** when saving config, anyone wh
 
 ## After the sandbox pauses
 
-Idle sandboxes pause to save cost.
+Idle sandboxes pause to save cost (see [Pause & resume](/docs/pause-resume)).
 
-- **Telegram**: a DM can auto-wake the sandbox when `PUBLIC_BASE_URL` is set (host webhook).
-- **Discord / Slack**: open the dashboard and click **Wake / resume**, then message again.
+| Channel | Wake behavior |
+| --- | --- |
+| **Telegram** | A DM can auto-wake when the host webhook is armed (`PUBLIC_BASE_URL` set on the site). You may need to **send the message again** after thaw. |
+| **Discord / Slack** | Open the dashboard and click **Wake / resume**, then message again. |
 
-See [Pause & resume](/docs/pause-resume).
+## If the bot is silent
+
+1. Check instance status on the [dashboard](/dashboard) — **paused** needs wake; **error** needs logs.
+2. Use **View logs** (daemon source) after wake.
+3. **Save & restart** after changing tokens or the API key.
+4. Confirm pairing is approved (or open access is intentional).
+
+Channel tokens and pairing state live **inside the sandbox**. Destroying the instance removes them; pause does not.

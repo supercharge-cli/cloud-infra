@@ -109,13 +109,30 @@ For **existing** instances, the dashboard offers an **opt-in** upgrade when npm 
 newer `xibecode` than `xibecode -v` inside the sandbox:
 
 1. Open the instance → banner *Update available: X.Y.Z (you have A.B.C)*.
-2. **Update & restart** runs `npm install -g xibecode@X.Y.Z` (via `xibecode update --apply`
-   when the sandbox CLI supports it), then restarts the daemon.
-3. **Dismiss** hides the offer until the next version / session.
-4. Never auto-updates silently. Disable checks with
-   `XIBECODE_DISABLE_UPDATE_CHECK=1` (or `XIBECODE_DISABLE_AUTO_UPDATE=1`) in the sandbox env.
+2. **Update & restart** wakes the sandbox if paused, then installs **latest** global CLI:
+   - Prefer **`sudo -n npm install -g xibecode@latest`** (template global prefix is often root-owned).
+   - Fallbacks: interactive `sudo npm …`, then plain `npm install -g …`.
+   - Then **restart daemon** (workspace, `daemon.env`, and pairing are kept).
+3. **Dismiss** hides the offer for that version in the current browser session.
+4. Never auto-updates silently.
 
-APIs: `GET /api/instances/:id/cli-version`, `POST /api/instances/:id/cli-update`.
+APIs:
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `GET` | `/api/instances/:id/cli-version` | Host npm registry + in-sandbox `xibecode -v` |
+| `POST` | `/api/instances/:id/cli-update` | Wake → install → restart daemon (`maxDuration` 300s) |
+| `GET` | `/api/instances/:id/logs?source=all\|daemon\|agent\|system` | Diagnostic log pull (wakes if paused) |
+
+### Gateway lifecycle env (summary)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `XIBECODE_E2B_TEMPLATE` | `xibecode-full-sandbox` | Published template id/alias |
+| `XIBECODE_E2B_ON_TIMEOUT` | `pause` | `pause` (snapshot) or `kill` |
+| `XIBECODE_E2B_AUTO_RESUME` | `true` | Wake on SDK/HTTP when paused |
+| `XIBECODE_E2B_SANDBOX_TIMEOUT_MS` | `1800000` (30m) | Idle before lifecycle action |
+| `XIBECODE_E2B_MAX_CONTINUOUS_MS` | `82800000` (~23h) | Pause/resume before E2B 24h hard limit; `0` = off |
 
 ## Local dev
 

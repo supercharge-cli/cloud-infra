@@ -18,6 +18,8 @@ Every account includes **1 free instance** (no payment, no expiry).
 
 You only see **your** instances. Paused ones stay in the list so you can resume them.
 
+Instance cards show **live status** (running / paused / error) and a short **sandbox id** when available.
+
 ## Configure AI + chat channels
 
 Select an instance, then:
@@ -48,6 +50,38 @@ Requirements:
 - Sandbox is woken automatically when you run a command if it was paused.
 
 Output is not a live interactive TTY (no `vim` / password prompts). Prefer non-interactive commands (`npm ci`, `git status`, `ls`, scripts with flags).
+
+## View logs
+
+Use **View logs** on a selected instance to pull diagnostics from the sandbox (daemon, agent, or system). Vectra **wakes** a paused sandbox first so log files can be read.
+
+| Source | What you get |
+| --- | --- |
+| **all** | Combined snapshot (default) |
+| **daemon** | Messaging agent / daemon process logs |
+| **agent** | Agent-related log paths under the instance home |
+| **system** | Lightweight system / process snapshot |
+
+Useful when a channel is quiet, restart failed, or status is **error**. Logs are redacted for common secrets where possible.
+
+Requires an active subscription (same as shell / update).
+
+## Update agent CLI (opt-in)
+
+New instances ship with the CLI version baked into the **E2B template**. Existing instances can lag behind npm.
+
+When a newer version is available on npm, the dashboard shows a banner:
+
+**Update available: X.Y.Z (you have A.B.C)**
+
+| Action | Effect |
+| --- | --- |
+| **Update & restart** | Wakes the sandbox if needed, installs the latest global CLI (passwordless `sudo` when the template needs it), restarts the coding daemon, keeps workspace + channel config |
+| **Dismiss** | Hides the offer for this browser session / version |
+
+Updates are **never silent** — only when you click **Update & restart**.
+
+Requires an active subscription. If payment expired, **Renew** first.
 
 ## Resume a paused instance
 
