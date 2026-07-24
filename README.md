@@ -74,7 +74,7 @@ paused and clears it while running. After thaw we restart the channel runtime
    - URL: `https://your-app.vercel.app/api/e2b/lifecycle`
    - Events: `sandbox.lifecycle.paused`, `resumed`, `killed`, `created`
    - Signature secret → Vercel `E2B_LIFECYCLE_WEBHOOK_SECRET`
-2. **Fallback:** Vercel cron every 5m hits `/api/cron/arm-telegram-wake` (needs `CRON_SECRET`).
+2. **Fallback:** Vercel cron daily (`0 6 * * *` UTC — Hobby plan limit) hits `/api/cron/arm-telegram-wake` (needs `CRON_SECRET`). Prefer E2B lifecycle for instant arm-on-pause.
 3. **Dashboard list / Wake** also syncs webhook + status.
 4. Redeploy **both** Vercel (web) and Railway (gateway) after pull.
    Set gateway `XIBECODE_E2B_SANDBOX_TIMEOUT_MS` (default 30m) and keep

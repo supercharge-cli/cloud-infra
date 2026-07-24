@@ -24,10 +24,10 @@ function mapE2bToStatus(state: string, prev: InstanceStatus): InstanceStatus {
  * 3) Clear host webhooks while running so the daemon long-poll owns Telegram.
  *
  * Prefer E2B lifecycle webhook (`/api/e2b/lifecycle`) for instant pause arming;
- * this cron is the safety net every few minutes.
+ * this cron is a daily safety net (Hobby: max 1 run/day — see apps/web/vercel.json).
  *
  * Secure with CRON_SECRET (Authorization: Bearer … or ?secret=).
- * Schedule from Vercel Cron every few minutes.
+ * Schedule: daily on Hobby; upgrade Vercel Pro for */5 if you need tighter catch-up.
  */
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET?.trim();
