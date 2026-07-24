@@ -24,13 +24,13 @@ After about **15 minutes** without activity, your sandbox **pauses** automatical
 
 ### Telegram (auto-resume)
 
-When the sandbox is paused, Vectra arms a **host wake webhook**. The next DM:
+When the sandbox is paused, Vectra arms a **host wake webhook** (immediately via E2B lifecycle event when configured, otherwise within a few minutes via cron / dashboard). The next DM:
 
 1. Resumes the sandbox via the E2B SDK (`Sandbox.connect` / auto-resume).
-2. Restarts the coding daemon (long-poll freezes across pause).
+2. Restarts the coding daemon (long-poll freezes across pause) and clears the host webhook.
 3. Replies asking you to **send the message again** (Telegram delivered the first update to the wake webhook, not the bot).
 
-While the sandbox is **running**, the host webhook is cleared so the bot’s normal long-poll works.
+While the sandbox is **running**, the host webhook stays **cleared** so the bot’s normal long-poll works. If wake fails, the host webhook is re-armed for the next try.
 
 Discord / Slack do not use a host wake webhook — use **Wake / resume** on the dashboard after idle pause.
 
@@ -45,3 +45,4 @@ If payment has expired, renew first, then resume.
 - Resume is free while your current paid period is active.
 - Destroy is permanent; pause is not.
 - Set `PUBLIC_BASE_URL` to your public HTTPS app URL so Telegram can reach the wake webhook.
+- Ops: register E2B lifecycle webhook → `POST ${PUBLIC_BASE_URL}/api/e2b/lifecycle` with events `sandbox.lifecycle.paused` / `resumed` / `killed` (and set `E2B_LIFECYCLE_WEBHOOK_SECRET`). Cron `/api/cron/arm-telegram-wake` remains the fallback.

@@ -29,6 +29,8 @@ cloud-infra/
 | `XIBECODE_SANDBOX_GATEWAY_URL` | public HTTPS gateway URL |
 | `XIBECODE_GATEWAY_TOKEN` | same secret as gateway |
 | `PUBLIC_BASE_URL` | public site origin (Telegram wake) |
+| `CRON_SECRET` | auth for `/api/cron/arm-telegram-wake` (required on Vercel) |
+| `E2B_LIFECYCLE_WEBHOOK_SECRET` | optional but recommended; E2B lifecycle → arm TG wake on pause |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | server keys |
 | `NEXT_PUBLIC_RAZORPAY_KEY_ID` | client key |
 | `RAZORPAY_WEBHOOK_SECRET` | Razorpay dashboard webhook secret |
@@ -49,6 +51,20 @@ Razorpay webhook URL:
 ```text
 https://your-app.vercel.app/api/billing/webhook
 ```
+
+### Auto-resume (E2B pause → Telegram wake)
+
+Idle sandboxes use E2B `onTimeout: pause` + `autoResume: true`. Telegram long-poll
+inside a paused VM cannot wake itself, so the host arms a **Telegram wake webhook**
+while paused and clears it while running.
+
+1. **Instant path:** register an E2B project lifecycle webhook:
+   - URL: `https://your-app.vercel.app/api/e2b/lifecycle`
+   - Events: `sandbox.lifecycle.paused`, `resumed`, `killed`, `created`
+   - Signature secret → Vercel `E2B_LIFECYCLE_WEBHOOK_SECRET`
+2. **Fallback:** Vercel cron every 5m hits `/api/cron/arm-telegram-wake` (needs `CRON_SECRET`).
+3. **Dashboard list / Wake** also syncs webhook + status.
+4. Redeploy **both** Vercel (web) and Railway (gateway) after pull.
 
 ### Backend — Railway or Coolify
 

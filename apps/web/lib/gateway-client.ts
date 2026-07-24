@@ -1118,14 +1118,53 @@ export async function getSandboxState(sandboxId: string): Promise<SandboxLiveSta
 export async function wakeSession(
   sessionId: string,
   opts?: { sandboxId?: string; restartDaemon?: boolean },
-): Promise<{ ok: boolean; state?: string; resumed?: boolean; logs: string[]; message?: string }> {
-  const res = await gwFetch(`/sessions/${encodeURIComponent(sessionId)}/wake`, {
-    method: 'POST',
-    body: JSON.stringify({
-      sandboxId: opts?.sandboxId,
-      restartDaemon: opts?.restartDaemon !== false,
-    }),
-  });
+): Promise<{
+  ok: boolean;
+  state?: string;
+  resumed?: boolean;
+  daemonOk?: boolean;
+  logs: string[];
+  message?: string;
+}> {
+  const logs: string[] = [];
+  const restartDaemon = opts?.restartDaemon !== false;
+
+  // Session map is memory-only — reattach before wake after gateway restart.
+  if (opts?.sandboxId) {
+    try {
+      await ensureGatewaySession(sessionId, opts.sandboxId);
+      logs.push('gateway session ensured');
+    } catch (e) {
+      logs.push(`ensure session: ${(e as Error).message}`);
+      // /wake still carries sandboxId for server-side reattach
+    }
+  }
+
+  const doWake = () =>
+    gwFetch(`/sessions/${encodeURIComponent(sessionId)}/wake`, {
+      method: 'POST',
+      body: JSON.stringify({
+        sandboxId: opts?.sandboxId,
+        restartDaemon,
+      }),
+    });
+
+  let res = await doWake();
+  // Lost session / cold gateway → ensure + retry once
+  if ((res.status === 404 || res.status === 502) && opts?.sandboxId) {
+    try {
+      await ensureGatewaySession(sessionId, opts.sandboxId);
+      res = await doWake();
+      logs.push('wake retried after reattach');
+    } catch (e) {
+      return {
+        ok: false,
+        logs: [...logs, `reattach failed: ${(e as Error).message}`],
+        message: (e as Error).message,
+      };
+    }
+  }
+
   const text = await res.text();
   let data: {
     success?: boolean;
@@ -1139,17 +1178,31 @@ export async function wakeSession(
   } catch {
     data = { message: text.slice(0, 300) };
   }
-  if (!res.ok) {
+  if (data.daemon?.logs?.length) {
+    logs.push(...data.daemon.logs);
+  }
+  if (!res.ok || data.success === false) {
     return {
       ok: false,
-      logs: [data.message || text.slice(0, 400)],
+      state: data.state,
+      resumed: data.resumed,
+      daemonOk: data.daemon?.ok,
+      logs: [...logs, data.message || text.slice(0, 400)],
       message: data.message || `HTTP ${res.status}`,
     };
   }
+
+  // Sandbox is up; daemon restart is best-effort but surface failure to callers.
+  const daemonOk = restartDaemon ? data.daemon?.ok !== false : true;
+  if (restartDaemon && data.daemon && data.daemon.ok === false) {
+    logs.push('daemon restart reported DAEMON_FAIL — host webhook should stay armed');
+  }
+
   return {
     ok: true,
-    state: data.state,
+    state: data.state || 'running',
     resumed: data.resumed,
-    logs: data.daemon?.logs || [],
+    daemonOk,
+    logs,
   };
 }

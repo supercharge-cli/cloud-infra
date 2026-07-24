@@ -39,33 +39,37 @@ export async function POST(_req: Request, ctx: Ctx) {
       restartDaemon: true,
     });
     const logs = [...(result.logs || [])];
+    const fullyUp = result.ok && result.daemonOk !== false;
 
-    // Running → clear host webhook so daemon long-poll owns Telegram.
-    // Failed wake → keep/arm host webhook for next attempt.
+    // Running + daemon up → clear host webhook so daemon long-poll owns Telegram.
+    // Otherwise keep/arm host webhook so the next Telegram DM can retry wake.
     if (inst.telegramBotToken) {
       const tg = await syncTelegramWakeWebhook({
         botToken: inst.telegramBotToken,
         instanceId: inst.id,
         wakeSecret: inst.wakeSecret,
-        sandboxState: result.ok ? 'running' : 'paused',
+        sandboxState: fullyUp ? 'running' : 'paused',
       });
       if (tg) logs.push(tg);
     }
 
     const next = await updateInstance(user.id, inst.id, {
-      status: result.ok ? 'running' : 'error',
-      lastError: result.ok ? undefined : (result.message || logs.join('\n')).slice(0, 500),
+      status: fullyUp ? 'running' : result.ok ? 'running' : 'error',
+      lastError: fullyUp
+        ? undefined
+        : (result.message || logs.join('\n') || 'wake incomplete').slice(0, 500),
     });
     const { publicInstance } = await import('@/lib/store');
     return NextResponse.json(
       {
-        ok: result.ok,
+        ok: fullyUp,
         state: result.state || (result.ok ? 'running' : undefined),
         resumed: result.resumed,
+        daemonOk: result.daemonOk,
         logs,
         instance: next ? publicInstance(next) : null,
       },
-      { status: result.ok ? 200 : 502 },
+      { status: fullyUp ? 200 : 502 },
     );
   } catch (e) {
     await updateInstance(user.id, inst.id, {

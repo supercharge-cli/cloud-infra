@@ -1,15 +1,30 @@
 import { NextResponse } from 'next/server';
 import { getSandboxState } from '@/lib/gateway-client';
 import { getDb } from '@/lib/mongodb';
-import type { Instance } from '@/lib/store';
+import type { Instance, InstanceStatus } from '@/lib/store';
+import { updateInstanceById } from '@/lib/store';
 import { syncTelegramWakeWebhook } from '@/lib/telegram-webhook';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
+function mapE2bToStatus(state: string, prev: InstanceStatus): InstanceStatus {
+  if (state === 'paused') return 'paused';
+  if (state === 'running') return 'running';
+  if (state === 'missing') return 'error';
+  return prev;
+}
+
 /**
- * Periodically arm host Telegram webhooks for paused sandboxes so the next DM
- * can auto-resume via gateway Sandbox.connect (E2B).
+ * Periodically:
+ * 1) Sync Mongo status from live E2B state (pause often happens without a user
+ *    opening the dashboard).
+ * 2) Arm host Telegram webhooks for paused sandboxes so the next DM can
+ *    auto-resume via gateway Sandbox.connect.
+ * 3) Clear host webhooks while running so the daemon long-poll owns Telegram.
+ *
+ * Prefer E2B lifecycle webhook (`/api/e2b/lifecycle`) for instant pause arming;
+ * this cron is the safety net every few minutes.
  *
  * Secure with CRON_SECRET (Authorization: Bearer … or ?secret=).
  * Schedule from Vercel Cron every few minutes.
@@ -37,20 +52,37 @@ export async function GET(req: Request) {
     .collection<Instance>('instances')
     .find({
       status: { $in: ['running', 'paused', 'error'] },
-      telegramBotToken: { $exists: true, $type: 'string' },
       sandboxId: { $exists: true, $type: 'string' },
     })
     .limit(100)
     .toArray();
 
-  const results: Array<{ id: string; state: string; action: string | null }> = [];
+  const results: Array<{
+    id: string;
+    state: string;
+    statusSynced?: string;
+    action: string | null;
+  }> = [];
 
   for (const inst of rows) {
-    if (!inst.sandboxId || !inst.telegramBotToken) continue;
+    if (!inst.sandboxId) continue;
     let state: string = inst.status || 'unknown';
     try {
       const live = await getSandboxState(inst.sandboxId);
       state = live.state || state;
+
+      const nextStatus = mapE2bToStatus(state, inst.status);
+      if (nextStatus !== inst.status) {
+        await updateInstanceById(inst.id, {
+          status: nextStatus,
+          lastError:
+            state === 'missing'
+              ? (live.message || 'Sandbox no longer exists').slice(0, 500)
+              : nextStatus === 'paused'
+                ? undefined
+                : inst.lastError,
+        });
+      }
     } catch {
       /* keep mongo status */
     }
@@ -60,13 +92,23 @@ export async function GET(req: Request) {
       continue;
     }
 
-    const action = await syncTelegramWakeWebhook({
-      botToken: inst.telegramBotToken,
-      instanceId: inst.id,
-      wakeSecret: inst.wakeSecret,
-      sandboxState: state,
+    let action: string | null = null;
+    if (inst.telegramBotToken) {
+      action = await syncTelegramWakeWebhook({
+        botToken: inst.telegramBotToken,
+        instanceId: inst.id,
+        wakeSecret: inst.wakeSecret,
+        sandboxState: state,
+      });
+    } else {
+      action = 'no telegram token';
+    }
+    results.push({
+      id: inst.id,
+      state,
+      statusSynced: state !== inst.status ? state : undefined,
+      action,
     });
-    results.push({ id: inst.id, state, action });
   }
 
   return NextResponse.json({

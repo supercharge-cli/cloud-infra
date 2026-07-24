@@ -511,6 +511,42 @@ export async function getInstanceByWake(
   return db.collection<Instance>('instances').findOne({ id, wakeSecret });
 }
 
+/** Lookup by E2B sandbox id (lifecycle webhooks, ops). */
+export async function getInstanceBySandboxId(
+  sandboxId: string,
+): Promise<Instance | null> {
+  const id = (sandboxId || '').trim();
+  if (!id) return null;
+  const db = await getDb();
+  return db.collection<Instance>('instances').findOne({
+    sandboxId: id,
+    status: { $nin: ['destroyed'] },
+  });
+}
+
+/**
+ * Update status without requiring the owner session (cron / E2B lifecycle).
+ * Returns the updated row or null if not found.
+ */
+export async function updateInstanceById(
+  id: string,
+  patch: Partial<
+    Pick<Instance, 'status' | 'lastError' | 'sandboxId' | 'telegramBotToken' | 'wakeSecret'>
+  >,
+): Promise<Instance | null> {
+  const db = await getDb();
+  const prev = await db.collection<Instance>('instances').findOne({ id });
+  if (!prev) return null;
+  const next: Instance = {
+    ...prev,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  const { _id: _drop, ...clean } = next as Instance & { _id?: unknown };
+  await db.collection('instances').updateOne({ id }, { $set: clean });
+  return clean as Instance;
+}
+
 export async function ensureWakeSecret(userId: string, id: string): Promise<string> {
   const inst = await getInstance(userId, id);
   if (!inst) throw new Error('Instance not found');
