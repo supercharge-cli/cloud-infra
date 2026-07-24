@@ -1095,6 +1095,82 @@ export type SandboxLiveState = {
   lifecycle?: { onTimeout?: string; autoResume?: boolean };
 };
 
+/**
+ * Pull diagnostic logs from the sandbox (daemon stdout + ~/.xibecode daemon logs).
+ * Wakes the sandbox if paused so logs can be read after idle.
+ */
+export async function readSandboxLogs(
+  sessionId: string,
+  opts?: { sandboxId?: string; lines?: number; source?: 'all' | 'daemon' | 'agent' | 'system' },
+): Promise<{ ok: boolean; text: string; logs: string[]; source: string }> {
+  const lines = Math.min(2000, Math.max(50, Math.round(opts?.lines ?? 200)));
+  const source = opts?.source || 'all';
+  const sandboxId = opts?.sandboxId;
+
+  // Tail multiple known log locations (hosting nohup + daemon home + agent).
+  const shell = [
+    'set +e',
+    `N=${lines}`,
+    'echo "=== meta ==="',
+    'date -u +"utc=%Y-%m-%dT%H:%M:%SZ"',
+    'hostname 2>/dev/null || true',
+    'xibecode -v 2>&1 || xibecode --version 2>&1 || echo "xibecode: not found"',
+    'echo "=== processes ==="',
+    'pgrep -af "xibecode|node" 2>/dev/null | head -25 || true',
+    'if [ -f /tmp/xibecode-daemon.pid ]; then echo "pidfile=$(cat /tmp/xibecode-daemon.pid 2>/dev/null)"; fi',
+    source === 'system' || source === 'all'
+      ? [
+          'echo "=== /tmp/xibecode-daemon.log (nohup) ==="',
+          'if [ -f /tmp/xibecode-daemon.log ]; then tail -n "$N" /tmp/xibecode-daemon.log; else echo "(missing)"; fi',
+        ].join('\n')
+      : '',
+    source === 'daemon' || source === 'all'
+      ? [
+          'echo "=== ~/.xibecode/daemon/logs/daemon.log ==="',
+          'for p in "$HOME/.xibecode/daemon/logs/daemon.log" /home/user/.xibecode/daemon/logs/daemon.log \\',
+          '  "$HOME/.xibecode/daemon/logs/daemon-verbose.log" /home/user/.xibecode/daemon/logs/daemon-verbose.log; do',
+          '  if [ -f "$p" ]; then echo "--- $p ---"; tail -n "$N" "$p"; fi',
+          'done',
+          'ls -la "$HOME/.xibecode/daemon/logs" /home/user/.xibecode/daemon/logs 2>/dev/null | head -40 || true',
+        ].join('\n')
+      : '',
+    source === 'agent' || source === 'all'
+      ? [
+          'echo "=== agent / session logs ==="',
+          'for p in "$HOME/.xibecode/logs" /home/user/.xibecode/logs; do',
+          '  if [ -d "$p" ]; then',
+          '    ls -lt "$p" 2>/dev/null | head -15',
+          '    find "$p" -type f -name "*.log" 2>/dev/null | head -8 | while read -r f; do',
+          '      echo "--- $f ---"; tail -n "$N" "$f"',
+          '    done',
+          '  fi',
+          'done',
+          '# profile-scoped daemon logs',
+          'find "$HOME/.xibecode/daemon/logs" /home/user/.xibecode/daemon/logs -type f -name "daemon-*.log" 2>/dev/null | head -6 | while read -r f; do',
+          '  echo "--- $f ---"; tail -n "$N" "$f"',
+          'done',
+        ].join('\n')
+      : '',
+    'echo "=== LOGS_DONE ==="',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const r = await execInSession(sessionId, shell, {
+    timeout: 90,
+    sandboxId,
+  });
+  const raw = `${r.stdout || ''}\n${r.stderr || ''}\n${r.message || ''}`.trim();
+  const text = redactSecrets(raw).slice(0, 120_000);
+  const ok = r.success !== false && !r.error && text.includes('LOGS_DONE');
+  return {
+    ok: ok || Boolean(text.length > 20),
+    text,
+    logs: [text || r.message || 'no log output'],
+    source,
+  };
+}
+
 /** Query live sandbox state (paused still exists and is resumable). */
 export async function getSandboxState(sandboxId: string): Promise<SandboxLiveState> {
   const res = await gwFetch(`/sandboxes/${encodeURIComponent(sandboxId)}`);

@@ -98,6 +98,8 @@ export function Dashboard({ email }: { email: string }) {
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [pairing, setPairing] = useState<PairingView | null>(null);
   const [logs, setLogs] = useState('');
+  const [logsSource, setLogsSource] = useState<'all' | 'daemon' | 'agent' | 'system'>('all');
+  const [logsLoading, setLogsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   /** Opt-in CLI update offer (E2B / Vectra Cloud sandboxes). */
   const [cliUpdate, setCliUpdate] = useState<{
@@ -479,6 +481,45 @@ export function Dashboard({ email }: { email: string }) {
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Pull daemon / agent / system logs from the sandbox (wakes if paused). */
+  async function loadLogs(opts?: {
+    source?: 'all' | 'daemon' | 'agent' | 'system';
+    lines?: number;
+  }) {
+    if (!selected) return;
+    const source = opts?.source || logsSource;
+    const lines = opts?.lines ?? 200;
+    setLogsLoading(true);
+    setBusy(true);
+    setError('');
+    try {
+      const q = new URLSearchParams({
+        source,
+        lines: String(lines),
+      });
+      const res = await fetch(`/api/instances/${selected}/logs?${q.toString()}`);
+      const data = await res.json();
+      if (res.status === 402) {
+        setError(data.message || data.error || 'Subscription expired');
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to load logs');
+      }
+      setLogsSource(source);
+      setLogs(
+        data.text ||
+          (Array.isArray(data.logs) ? data.logs.join('\n') : '') ||
+          '(no log output)',
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLogsLoading(false);
       setBusy(false);
     }
   }
@@ -998,6 +1039,15 @@ export function Dashboard({ email }: { email: string }) {
               </button>
               <button
                 type="button"
+                disabled={busy || logsLoading}
+                onClick={() => void loadLogs({ source: 'all' })}
+                className="rounded-lg border border-sky-800/60 bg-sky-950/40 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/40 disabled:opacity-50"
+                title="Read daemon + agent logs from the sandbox (wakes if paused)"
+              >
+                {logsLoading ? 'Loading logs…' : 'View logs'}
+              </button>
+              <button
+                type="button"
                 disabled={busy}
                 onClick={restartOnly}
                 className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"
@@ -1373,11 +1423,69 @@ export function Dashboard({ email }: { email: string }) {
             ) : null}
           </div>
 
-          {logs ? (
-            <pre className="max-h-64 overflow-auto rounded-xl border border-zinc-800 bg-black p-4 text-xs text-zinc-400 whitespace-pre-wrap">
-              {logs}
-            </pre>
-          ) : null}
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="font-semibold text-white">Logs</h3>
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  Daemon, agent, and process output from the sandbox. Use this when Telegram goes
+                  quiet or a run looks stuck.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ['all', 'All'],
+                    ['daemon', 'Daemon'],
+                    ['agent', 'Agent'],
+                    ['system', 'System'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    disabled={busy || logsLoading}
+                    onClick={() => void loadLogs({ source: key })}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-medium disabled:opacity-50 ${
+                      logsSource === key && logs
+                        ? 'bg-sky-600 text-white'
+                        : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-900'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  disabled={busy || logsLoading || !logs}
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(logs);
+                  }}
+                  className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-900 disabled:opacity-50"
+                >
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || logsLoading}
+                  onClick={() => void loadLogs({ source: logsSource, lines: 400 })}
+                  className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-900 disabled:opacity-50"
+                >
+                  {logsLoading ? '…' : 'Refresh'}
+                </button>
+              </div>
+            </div>
+            {logs ? (
+              <pre className="max-h-96 overflow-auto rounded-xl border border-zinc-800 bg-black p-4 text-xs text-zinc-300 whitespace-pre-wrap font-mono leading-relaxed">
+                {logs}
+              </pre>
+            ) : (
+              <p className="rounded-xl border border-dashed border-zinc-800 px-4 py-8 text-center text-sm text-zinc-600">
+                Click <strong className="text-zinc-400">View logs</strong> above (or a source
+                filter) to load live logs from this sandbox.
+              </p>
+            )}
+          </div>
         </div>
       ) : null}
 
