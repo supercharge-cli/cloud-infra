@@ -18,9 +18,9 @@ export const dynamic = 'force-dynamic';
  * Auth: optional E2B_LIFECYCLE_WEBHOOK_SECRET → verify e2b-signature header
  *       (sha256 base64 of secret+rawBody, trailing '=' stripped — see E2B docs)
  *
- * On **paused**: mark instance paused + arm Telegram host wake webhook immediately
- * (instead of waiting up to 5m for cron / dashboard list).
- * On **resumed/created**: mark running + clear host webhook so daemon long-poll owns TG.
+ * On **paused**: mark instance paused. Sandbox webhook mode keeps Telegram pointed
+ * at the sandbox public URL (E2B auto-resumes on traffic). Host mode arms Vercel wake.
+ * On **resumed/created**: mark running. Host mode clears webhook for long-poll.
  * On **killed**: mark error so dashboard doesn't show a dead box as resumable forever.
  */
 
@@ -113,13 +113,25 @@ export async function POST(req: Request) {
   logs.push(`status → ${next?.status || state}`);
 
   if (inst.telegramBotToken && (state === 'paused' || state === 'running')) {
-    const action = await syncTelegramWakeWebhook({
-      botToken: inst.telegramBotToken,
-      instanceId: inst.id,
-      wakeSecret: inst.wakeSecret,
-      sandboxState: state,
-    });
-    if (action) logs.push(action);
+    const mode =
+      inst.telegramWebhookMode ||
+      (inst.sandboxTelegramWebhookUrl ? 'sandbox' : 'host');
+    // Sandbox mode: re-affirm setWebhook on pause only (running keeps same URL)
+    if (mode === 'sandbox' && state === 'running') {
+      logs.push('sandbox webhook mode — Telegram stays on sandbox public URL');
+    } else {
+      const action = await syncTelegramWakeWebhook({
+        botToken: inst.telegramBotToken,
+        instanceId: inst.id,
+        wakeSecret: inst.wakeSecret,
+        sandboxState: state,
+        mode,
+        sandboxId: inst.sandboxId,
+        sandboxWebhookUrl: inst.sandboxTelegramWebhookUrl,
+        telegramWebhookSecret: inst.telegramWebhookSecret,
+      });
+      if (action) logs.push(action);
+    }
   }
 
   console.log(

@@ -120,7 +120,8 @@ const sandboxLifecycle =
   lifecycleOnTimeout === 'pause'
     ? ({ onTimeout: 'pause' as const, autoResume: lifecycleAutoResume })
     : ({ onTimeout: 'kill' as const, autoResume: false as const });
-const previewDomain = process.env.XIBECODE_E2B_PREVIEW_DOMAIN?.trim() || 'e2b.dev';
+// Docs use *.e2b.app (https://e2b.dev/docs/network/public-url)
+const previewDomain = process.env.XIBECODE_E2B_PREVIEW_DOMAIN?.trim() || 'e2b.app';
 const maxExportBytes = Math.max(
   1,
   Number(process.env.XIBECODE_EXPORT_MAX_MB || 64),
@@ -1140,8 +1141,11 @@ const server = createServer(async (req, res) => {
               '[ -f /home/user/.xibecode/daemon.env ] && . /home/user/.xibecode/daemon.env',
               '[ -f /home/user/.xibecode/gateway.env ] && . /home/user/.xibecode/gateway.env',
               'set +a',
-              // Clear any leftover Telegram host webhook so long-poll can bind
-              'if [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}" ]; then',
+              // Sandbox webhook mode keeps setWebhook on public URL (E2B auto-resume).
+              // Long-poll mode: clear webhook so getUpdates can bind.
+              'WEBHOOK_MODE=0',
+              'if [ -n "${TELEGRAM_WEBHOOK_PORT:-}${XIBECODE_TELEGRAM_WEBHOOK_PORT:-}" ] || [ "${TELEGRAM_WEBHOOK_MODE:-}" = "1" ]; then WEBHOOK_MODE=1; fi',
+              'if [ "$WEBHOOK_MODE" != "1" ] && [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}" ]; then',
               '  TOK="${TELEGRAM_BOT_TOKEN:-$XIBECODE_TELEGRAM_BOT_TOKEN}"',
               '  curl -sS -m 10 -X POST "https://api.telegram.org/bot${TOK}/deleteWebhook" -d "drop_pending_updates=false" >/dev/null 2>&1 || true',
               'fi',
@@ -1159,6 +1163,11 @@ const server = createServer(async (req, res) => {
               '  if pgrep -af "xibecode|node" 2>/dev/null | grep -qi "xibecode"; then OK=1; break; fi',
               'done',
               'if [ "$OK" = "1" ]; then echo DAEMON_OK; else echo DAEMON_FAIL; fi',
+              'if [ "$WEBHOOK_MODE" = "1" ]; then',
+              '  WP="${TELEGRAM_WEBHOOK_PORT:-8788}"',
+              '  curl -sS -m 2 "http://127.0.0.1:${WP}/health" 2>/dev/null | head -c 200 || true',
+              '  echo',
+              'fi',
               'echo "--- daemon pid ---"',
               'cat /tmp/xibecode-daemon.pid 2>/dev/null || true',
               'echo "--- daemon log (tail) ---"',

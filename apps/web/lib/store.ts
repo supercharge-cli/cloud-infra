@@ -72,13 +72,22 @@ export type Instance = {
   telegramConfigured: boolean;
   plan: 'hosting-4c8g';
   config?: InstanceConfigMeta;
-  /** Random secret in Telegram webhook URL — host receives DMs and wakes sandbox via SDK. */
+  /** Random secret in Telegram webhook URL — host fallback wake (legacy long-poll path). */
   wakeSecret?: string;
   /**
-   * Bot token for host-side setWebhook re-registration.
-   * Daemon deletes webhooks on start (long-poll); host re-sets after wake.
+   * Bot token for host-side setWebhook re-registration / sandbox webhook setup.
    */
   telegramBotToken?: string;
+  /**
+   * Prefer sandbox public URL webhook (E2B auto-resume).
+   * `sandbox` = Telegram → https://8788-{sandboxId}.e2b.app/telegram
+   * `host` = legacy Vercel arm-on-pause + long-poll
+   */
+  telegramWebhookMode?: 'sandbox' | 'host';
+  /** Public HTTPS webhook URL on the sandbox (when mode=sandbox). */
+  sandboxTelegramWebhookUrl?: string;
+  /** Telegram secret_token for sandbox webhook. */
+  telegramWebhookSecret?: string;
   /**
    * Free-tier sandbox (one per user by default). Never expires; does not require payment.
    * Additional instances are paid via Razorpay.
@@ -401,15 +410,25 @@ export async function listInstances(
 }
 
 /** Strip secrets before sending instance JSON to the browser. */
-export function publicInstance(inst: Instance): Omit<Instance, 'telegramBotToken' | 'wakeSecret'> & {
+export function publicInstance(
+  inst: Instance,
+): Omit<Instance, 'telegramBotToken' | 'wakeSecret' | 'telegramWebhookSecret'> & {
   hasWakeSecret?: boolean;
+  hasTelegramWebhookSecret?: boolean;
 } {
-  const { telegramBotToken: _t, wakeSecret: _w, _id: _drop, ...rest } = inst as Instance & {
+  const {
+    telegramBotToken: _t,
+    wakeSecret: _w,
+    telegramWebhookSecret: _s,
+    _id: _drop,
+    ...rest
+  } = inst as Instance & {
     _id?: unknown;
   };
   return {
     ...rest,
     hasWakeSecret: Boolean(_w),
+    hasTelegramWebhookSecret: Boolean(_s),
   };
 }
 
@@ -472,6 +491,9 @@ export async function updateInstance(
       | 'config'
       | 'wakeSecret'
       | 'telegramBotToken'
+      | 'telegramWebhookMode'
+      | 'sandboxTelegramWebhookUrl'
+      | 'telegramWebhookSecret'
       | 'paidUntil'
       | 'billingStatus'
       | 'isFree'
@@ -531,7 +553,17 @@ export async function getInstanceBySandboxId(
 export async function updateInstanceById(
   id: string,
   patch: Partial<
-    Pick<Instance, 'status' | 'lastError' | 'sandboxId' | 'telegramBotToken' | 'wakeSecret'>
+    Pick<
+      Instance,
+      | 'status'
+      | 'lastError'
+      | 'sandboxId'
+      | 'telegramBotToken'
+      | 'wakeSecret'
+      | 'telegramWebhookMode'
+      | 'sandboxTelegramWebhookUrl'
+      | 'telegramWebhookSecret'
+    >
   >,
 ): Promise<Instance | null> {
   const db = await getDb();

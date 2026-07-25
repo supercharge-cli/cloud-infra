@@ -1,9 +1,19 @@
 import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
-import { readSandboxConfig, writeSandboxConfig, restartDaemon } from '@/lib/gateway-client';
+import {
+  getSandboxPreviewHost,
+  readSandboxConfig,
+  restartDaemon,
+  writeSandboxConfig,
+} from '@/lib/gateway-client';
+import {
+  buildSandboxTelegramWebhookUrl,
+  newTelegramWebhookSecret,
+  SANDBOX_TG_WEBHOOK_PORT,
+  setSandboxTelegramWebhook,
+} from '@/lib/sandbox-telegram';
 import { ensureWakeSecret, getInstance, updateInstance } from '@/lib/store';
 import {
-  deleteTelegramWebhook,
   publicBaseUrl,
   wakeWebhookUrl,
 } from '@/lib/telegram-webhook';
@@ -31,7 +41,9 @@ export async function GET(_req: Request, ctx: Ctx) {
       wake: {
         secretSet: Boolean(wakeSecret),
         publicBaseUrl: publicBaseUrl() || null,
-        webhookUrl: wakeWebhookUrl(inst.id, wakeSecret),
+        hostWebhookUrl: wakeWebhookUrl(inst.id, wakeSecret),
+        mode: inst.telegramWebhookMode || (inst.sandboxTelegramWebhookUrl ? 'sandbox' : 'host'),
+        sandboxWebhookUrl: inst.sandboxTelegramWebhookUrl || null,
       },
     });
   } catch (e) {
@@ -65,6 +77,28 @@ export async function PUT(req: Request, ctx: Ctx) {
   };
 
   try {
+    const token = (body.telegramBotToken || '').trim() || inst.telegramBotToken || '';
+    const hasTg =
+      Boolean((body.telegramBotToken || '').trim()) ||
+      Boolean(inst.telegramBotToken) ||
+      Boolean(inst.config?.hasTelegramToken);
+
+    // Sandbox webhook (E2B auto-resume) when we have telegram + sandboxId
+    let sandboxWebhookUrl = inst.sandboxTelegramWebhookUrl || '';
+    let tgWebhookSecret = inst.telegramWebhookSecret || '';
+    let webhookMode: 'sandbox' | 'host' = inst.telegramWebhookMode || 'host';
+
+    if (hasTg && inst.sandboxId) {
+      webhookMode = 'sandbox';
+      if (!tgWebhookSecret) tgWebhookSecret = newTelegramWebhookSecret();
+      const host = await getSandboxPreviewHost(inst.sessionId, SANDBOX_TG_WEBHOOK_PORT);
+      sandboxWebhookUrl = buildSandboxTelegramWebhookUrl(
+        inst.sandboxId,
+        host,
+        SANDBOX_TG_WEBHOOK_PORT,
+      );
+    }
+
     const result = await writeSandboxConfig(inst.sessionId, {
       provider: body.provider,
       apiKey: body.apiKey,
@@ -77,6 +111,10 @@ export async function PUT(req: Request, ctx: Ctx) {
       mergeExisting: true,
       allowAllUsers: body.allowAllUsers,
       sandboxId: inst.sandboxId,
+      telegramWebhookUrl: webhookMode === 'sandbox' ? sandboxWebhookUrl : undefined,
+      telegramWebhookSecret: webhookMode === 'sandbox' ? tgWebhookSecret : undefined,
+      telegramWebhookPort:
+        webhookMode === 'sandbox' ? SANDBOX_TG_WEBHOOK_PORT : undefined,
     });
     if (!result.ok) {
       return NextResponse.json(
@@ -95,35 +133,31 @@ export async function PUT(req: Request, ctx: Ctx) {
     }
 
     const wakeSecret = inst.wakeSecret || (await ensureWakeSecret(user.id, id));
-    const token = (body.telegramBotToken || '').trim() || inst.telegramBotToken || '';
     const anyChannel =
       result.meta.hasTelegramToken || result.meta.hasDiscordToken || result.meta.hasSlackToken;
 
-    // While running, daemon long-polls Telegram. Host webhook is armed only when
-    // paused (see instances list sync) — never re-set it here or getUpdates dies.
-    if (token || result.meta.hasTelegramToken) {
-      const tgToken = token || inst.telegramBotToken || '';
-      if (tgToken) {
-        if (body.restart) {
-          await new Promise((r) => setTimeout(r, 1500));
-        }
-        const cleared = await deleteTelegramWebhook(tgToken);
-        const url = wakeWebhookUrl(inst.id, wakeSecret);
-        logs.push(
-          cleared.ok
-            ? 'Telegram: host webhook cleared so daemon long-poll works while running'
-            : `Telegram deleteWebhook failed: ${cleared.description || 'unknown'}`,
-        );
-        if (url) {
-          logs.push(
-            `Telegram auto-resume: host webhook re-arms when sandbox pauses (wake URL ready: ${url})`,
-          );
-        } else {
-          logs.push(
-            'Tip: set PUBLIC_BASE_URL=https://your-public-host so Telegram DMs can wake paused sandboxes (localhost cannot receive webhooks).',
-          );
-        }
+    if (webhookMode === 'sandbox' && token && sandboxWebhookUrl) {
+      if (body.restart) {
+        await new Promise((r) => setTimeout(r, 1500));
       }
+      const wh = await setSandboxTelegramWebhook(token, sandboxWebhookUrl, tgWebhookSecret);
+      logs.push(
+        wh.ok
+          ? `Telegram: sandbox webhook (E2B auto-resume) → ${sandboxWebhookUrl}`
+          : `Telegram setWebhook failed: ${wh.description || 'unknown'}`,
+      );
+      logs.push(
+        'DMs hit the sandbox public URL; if paused, E2B resumes the VM (~0.2–1s) then the daemon handles the message.',
+      );
+      logs.push(
+        'Requires xibecode with TELEGRAM_WEBHOOK_PORT support — use Dashboard → Update CLI if wake fails.',
+      );
+    } else if (token || result.meta.hasTelegramToken) {
+      logs.push(
+        'Telegram: long-poll mode (no sandboxId or webhook URL). Host wake webhook arms when paused.',
+      );
+      const url = wakeWebhookUrl(inst.id, wakeSecret);
+      if (url) logs.push(`Host wake URL ready: ${url}`);
     }
     if (result.meta.hasDiscordToken || result.meta.hasSlackToken) {
       logs.push(
@@ -135,6 +169,9 @@ export async function PUT(req: Request, ctx: Ctx) {
       ...(name ? { name } : {}),
       ...(token ? { telegramBotToken: token } : {}),
       wakeSecret,
+      telegramWebhookMode: webhookMode,
+      ...(sandboxWebhookUrl ? { sandboxTelegramWebhookUrl: sandboxWebhookUrl } : {}),
+      ...(tgWebhookSecret ? { telegramWebhookSecret: tgWebhookSecret } : {}),
       aiConfigured: true,
       telegramConfigured: anyChannel,
       status: restartOk ? 'running' : 'error',
@@ -157,9 +194,12 @@ export async function PUT(req: Request, ctx: Ctx) {
         ? { ...instance, telegramBotToken: instance.telegramBotToken ? '[stored]' : undefined }
         : null,
       sandbox: result.meta,
-      wakeWebhookUrl: token || result.meta.hasTelegramToken
-        ? wakeWebhookUrl(inst.id, wakeSecret)
-        : null,
+      telegramWebhookMode: webhookMode,
+      sandboxTelegramWebhookUrl: sandboxWebhookUrl || null,
+      wakeWebhookUrl:
+        webhookMode === 'host' && (token || result.meta.hasTelegramToken)
+          ? wakeWebhookUrl(inst.id, wakeSecret)
+          : null,
     });
   } catch (e) {
     await updateInstance(user.id, inst.id, {

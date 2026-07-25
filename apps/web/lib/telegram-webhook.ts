@@ -1,17 +1,19 @@
 /**
- * Host-side Telegram webhook helpers.
+ * Telegram webhook helpers.
  *
- * Why: XibeCode daemon long-polls getUpdates. That freezes when the E2B sandbox
- * pauses, so a Telegram DM cannot wake the VM alone.
+ * Preferred (E2B auto-resume): Telegram → sandbox public URL
+ *   https://8788-{sandboxId}.e2b.app/telegram
+ *   (daemon listens with TELEGRAM_WEBHOOK_PORT; traffic wakes paused VM)
+ *   Docs: https://e2b.dev/docs/sandbox/auto-resume
  *
- * Lifecycle (must not fight the daemon):
- * - **paused** → set host webhook so the next DM hits Vercel → gateway resume
- * - **running** → delete host webhook so the daemon's getUpdates works
- *
- * Never leave the host webhook set while the daemon is running: Telegram delivers
- * either to the webhook OR to long-poll, not both. Re-setting the webhook after
- * restart was breaking "auto resume" from the user's POV (sandbox woke, bot silent).
+ * Legacy host path: paused → Vercel host webhook → gateway SDK wake → long-poll.
+ * Only used when telegramWebhookMode !== 'sandbox'.
  */
+
+import {
+  buildSandboxTelegramWebhookUrl,
+  setSandboxTelegramWebhook,
+} from './sandbox-telegram';
 
 export function publicBaseUrl(): string {
   return (
@@ -38,15 +40,18 @@ export function wakeWebhookUrl(instanceId: string, wakeSecret: string): string |
 export async function setTelegramWebhook(
   botToken: string,
   url: string,
+  secretToken?: string,
 ): Promise<{ ok: boolean; description?: string }> {
+  const body: Record<string, unknown> = {
+    url,
+    allowed_updates: ['message', 'callback_query'],
+    drop_pending_updates: false,
+  };
+  if (secretToken) body.secret_token = secretToken;
   const res = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      url,
-      allowed_updates: ['message', 'callback_query'],
-      drop_pending_updates: false,
-    }),
+    body: JSON.stringify(body),
   });
   const data = (await res.json()) as { ok?: boolean; description?: string };
   return { ok: Boolean(data.ok), description: data.description };
@@ -82,18 +87,51 @@ export async function sendTelegramMessage(
 }
 
 /**
- * Arm host wake webhook when the sandbox is paused (so the next DM can resume).
- * Clear it when running so the in-sandbox daemon long-poll owns Telegram.
+ * Keep Telegram pointed at the right place for auto-resume.
+ *
+ * - **sandbox mode** (preferred): always ensure setWebhook → sandbox public URL.
+ *   Pause/resume does not change the webhook. E2B wakes the VM on traffic.
+ * - **host mode** (legacy): arm host webhook when paused; clear when running
+ *   so daemon long-poll owns Telegram.
  */
 export async function syncTelegramWakeWebhook(input: {
   botToken?: string;
   instanceId: string;
   wakeSecret?: string;
   sandboxState: string;
+  /** Prefer sandbox public URL webhook when available */
+  mode?: 'sandbox' | 'host';
+  sandboxId?: string;
+  sandboxWebhookUrl?: string;
+  telegramWebhookSecret?: string;
 }): Promise<string | null> {
   const token = (input.botToken || '').trim();
   if (!token) return null;
 
+  const mode =
+    input.mode ||
+    (input.sandboxWebhookUrl || input.sandboxId ? 'sandbox' : 'host');
+
+  if (mode === 'sandbox') {
+    const url =
+      (input.sandboxWebhookUrl || '').trim() ||
+      (input.sandboxId
+        ? buildSandboxTelegramWebhookUrl(input.sandboxId)
+        : '');
+    if (!url) {
+      return 'sandbox webhook: missing sandboxId/url — cannot setWebhook';
+    }
+    const wh = await setSandboxTelegramWebhook(
+      token,
+      url,
+      input.telegramWebhookSecret,
+    );
+    return wh.ok
+      ? `sandbox webhook armed (E2B auto-resume): ${url}`
+      : `sandbox setWebhook failed: ${wh.description || 'unknown'}`;
+  }
+
+  // Legacy host arm/clear
   if (input.sandboxState === 'paused') {
     const secret = (input.wakeSecret || '').trim();
     if (!secret) return 'paused: no wakeSecret — cannot arm host webhook';
@@ -108,7 +146,6 @@ export async function syncTelegramWakeWebhook(input: {
   }
 
   if (input.sandboxState === 'running') {
-    // Daemon will also deleteWebhook on start; host must not steal getUpdates.
     const wh = await deleteTelegramWebhook(token);
     return wh.ok
       ? `running: host webhook cleared (daemon long-poll)`

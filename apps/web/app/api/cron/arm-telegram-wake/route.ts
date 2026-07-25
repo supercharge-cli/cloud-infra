@@ -19,9 +19,9 @@ function mapE2bToStatus(state: string, prev: InstanceStatus): InstanceStatus {
  * Periodically:
  * 1) Sync Mongo status from live E2B state (pause often happens without a user
  *    opening the dashboard).
- * 2) Arm host Telegram webhooks for paused sandboxes so the next DM can
- *    auto-resume via gateway Sandbox.connect.
- * 3) Clear host webhooks while running so the daemon long-poll owns Telegram.
+ * 2) Ensure Telegram webhooks for auto-resume:
+ *    - sandbox mode: setWebhook → sandbox public URL (E2B traffic wakes VM)
+ *    - host mode: arm host webhook when paused; clear when running (long-poll)
  *
  * Prefer E2B lifecycle webhook (`/api/e2b/lifecycle`) for instant pause arming;
  * this cron is a daily safety net (Hobby: max 1 run/day — see apps/web/vercel.json).
@@ -94,11 +94,18 @@ export async function GET(req: Request) {
 
     let action: string | null = null;
     if (inst.telegramBotToken) {
+      const mode =
+        inst.telegramWebhookMode ||
+        (inst.sandboxTelegramWebhookUrl ? 'sandbox' : 'host');
       action = await syncTelegramWakeWebhook({
         botToken: inst.telegramBotToken,
         instanceId: inst.id,
         wakeSecret: inst.wakeSecret,
         sandboxState: state,
+        mode,
+        sandboxId: inst.sandboxId,
+        sandboxWebhookUrl: inst.sandboxTelegramWebhookUrl,
+        telegramWebhookSecret: inst.telegramWebhookSecret,
       });
     } else {
       action = 'no telegram token';

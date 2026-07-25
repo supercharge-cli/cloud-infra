@@ -638,6 +638,13 @@ export type ConfigInput = {
    * false/omit = pairing required (recommended). First message gets a code; approve in dashboard.
    */
   allowAllUsers?: boolean;
+  /**
+   * Sandbox Telegram webhook (E2B auto-resume). When set, daemon listens on
+   * TELEGRAM_WEBHOOK_PORT and Telegram setWebhook points at the public URL.
+   */
+  telegramWebhookUrl?: string;
+  telegramWebhookSecret?: string;
+  telegramWebhookPort?: number;
 };
 
 /** Write AI + chat-channel config into the sandbox (no daemon start). */
@@ -724,6 +731,15 @@ export async function writeSandboxConfig(
   if (discordBotToken) channels.push('discord');
   if (slackBotToken) channels.push('slack');
 
+  // Sandbox webhook mode (E2B auto-resume on HTTP to public URL)
+  const tgWebhookUrl = (input.telegramWebhookUrl || '').trim();
+  const tgWebhookSecret = (input.telegramWebhookSecret || '').trim();
+  const tgWebhookPort = Math.floor(
+    Number(input.telegramWebhookPort) || (tgWebhookUrl ? 8788 : 0),
+  );
+  const sandboxTgWebhook =
+    Boolean(telegramBotToken) && Boolean(tgWebhookUrl) && tgWebhookPort > 0;
+
   const envBody =
     [
       telegramBotToken ? `TELEGRAM_BOT_TOKEN=${telegramBotToken}` : '',
@@ -744,6 +760,19 @@ export async function writeSandboxConfig(
       baseUrl ? `XIBECODE_BASE_URL=${baseUrl}` : '',
       baseUrl && provider !== 'anthropic' ? `OPENAI_BASE_URL=${baseUrl}` : '',
       `XIBECODE_DAEMON_WORKDIR=/home/user/workspace`,
+      // E2B: Telegram → sandbox public URL → auto-resume (not long-poll)
+      sandboxTgWebhook ? `TELEGRAM_WEBHOOK_MODE=1` : '',
+      sandboxTgWebhook ? `XIBECODE_TELEGRAM_WEBHOOK_MODE=1` : '',
+      sandboxTgWebhook ? `TELEGRAM_WEBHOOK_PORT=${tgWebhookPort}` : '',
+      sandboxTgWebhook ? `XIBECODE_TELEGRAM_WEBHOOK_PORT=${tgWebhookPort}` : '',
+      sandboxTgWebhook ? `TELEGRAM_WEBHOOK_URL=${tgWebhookUrl}` : '',
+      sandboxTgWebhook ? `XIBECODE_TELEGRAM_WEBHOOK_URL=${tgWebhookUrl}` : '',
+      sandboxTgWebhook && tgWebhookSecret
+        ? `TELEGRAM_WEBHOOK_SECRET=${tgWebhookSecret}`
+        : '',
+      sandboxTgWebhook && tgWebhookSecret
+        ? `XIBECODE_TELEGRAM_WEBHOOK_SECRET=${tgWebhookSecret}`
+        : '',
     ]
       .filter((line) => line !== '')
       .join('\n') + '\n';
@@ -804,7 +833,7 @@ export async function writeSandboxConfig(
   );
   logs.push(
     redact(
-      `config saved OK · channels=${channels.join('+') || 'none'} · pairing=${openAccess ? 'OFF (open access)' : 'ON (approve in dashboard)'} · provider=${provider} model=${model || '(none)'} baseUrl=${baseUrl || '(none)'}\n${verify.stdout || ''}`,
+      `config saved OK · channels=${channels.join('+') || 'none'} · pairing=${openAccess ? 'OFF (open access)' : 'ON (approve in dashboard)'} · tgWebhook=${sandboxTgWebhook ? tgWebhookUrl : 'off (long-poll)'} · provider=${provider} model=${model || '(none)'} baseUrl=${baseUrl || '(none)'}\n${verify.stdout || ''}`,
     ),
   );
 
@@ -1028,15 +1057,25 @@ export async function restartDaemon(
   sessionId: string,
   sandboxId?: string,
 ): Promise<{ ok: boolean; logs: string[] }> {
+  // Webhook mode (TELEGRAM_WEBHOOK_PORT set): do NOT deleteWebhook — Telegram
+  // must keep posting to the sandbox public URL so E2B can auto-resume on traffic.
+  // Long-poll mode: clear webhook so getUpdates can bind.
   const setupCmd = [
     'set +e',
     'set -a',
     '[ -f /home/user/.xibecode/daemon.env ] && . /home/user/.xibecode/daemon.env',
     '[ -f /home/user/.xibecode/gateway.env ] && . /home/user/.xibecode/gateway.env',
     'set +a',
-    'if [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}" ]; then',
+    'WEBHOOK_MODE=0',
+    'if [ -n "${TELEGRAM_WEBHOOK_PORT:-}${XIBECODE_TELEGRAM_WEBHOOK_PORT:-}" ] || [ "${TELEGRAM_WEBHOOK_MODE:-}" = "1" ] || [ "${XIBECODE_TELEGRAM_WEBHOOK_MODE:-}" = "1" ]; then',
+    '  WEBHOOK_MODE=1',
+    'fi',
+    'if [ "$WEBHOOK_MODE" != "1" ] && [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}" ]; then',
     '  TOK="${TELEGRAM_BOT_TOKEN:-$XIBECODE_TELEGRAM_BOT_TOKEN}"',
     '  curl -sS -m 10 -X POST "https://api.telegram.org/bot${TOK}/deleteWebhook" -d "drop_pending_updates=false" >/dev/null 2>&1 || true',
+    '  echo "telegram: long-poll mode (host webhook cleared)"',
+    'elif [ "$WEBHOOK_MODE" = "1" ]; then',
+    '  echo "telegram: sandbox webhook mode port=${TELEGRAM_WEBHOOK_PORT:-8788} url=${TELEGRAM_WEBHOOK_URL:-unset}"',
     'fi',
     'if [ -f /tmp/xibecode-daemon.pid ]; then kill "$(cat /tmp/xibecode-daemon.pid)" 2>/dev/null; sleep 1; fi',
     'pkill -f "xibecode daemon" 2>/dev/null || true',
@@ -1050,6 +1089,13 @@ export async function restartDaemon(
     '  if [ -f /tmp/xibecode-daemon.pid ] && kill -0 "$(cat /tmp/xibecode-daemon.pid)" 2>/dev/null; then OK=1; break; fi',
     'done',
     'if [ "$OK" = "1" ]; then echo "xibecode daemon: running"; else echo "xibecode daemon: not found"; fi',
+    'if [ "$WEBHOOK_MODE" = "1" ]; then',
+    '  WP="${TELEGRAM_WEBHOOK_PORT:-8788}"',
+    '  for j in 1 2 3 4 5; do',
+    '    if curl -sS -m 2 "http://127.0.0.1:${WP}/health" 2>/dev/null | grep -q ok; then echo "telegram webhook: listening :${WP}"; break; fi',
+    '    sleep 1',
+    '  done',
+    'fi',
     'echo "--- daemon pid ---"',
     'cat /tmp/xibecode-daemon.pid 2>/dev/null || true',
     'echo "--- daemon log ---"',
@@ -1090,6 +1136,9 @@ export async function setupAiAndTelegram(
     slackBotToken?: string;
     slackAppToken?: string;
     sandboxId?: string;
+    telegramWebhookUrl?: string;
+    telegramWebhookSecret?: string;
+    telegramWebhookPort?: number;
   },
 ): Promise<{ ok: boolean; logs: string[] }> {
   const w = await writeSandboxConfig(sessionId, {
@@ -1103,6 +1152,23 @@ export async function setupAiAndTelegram(
 
 export function getGatewayUrl(): string {
   return gatewayBase();
+}
+
+/** Public host for a port inside the sandbox (E2B getHost / preview URL). */
+export async function getSandboxPreviewHost(
+  sessionId: string,
+  port: number,
+): Promise<string | null> {
+  try {
+    const res = await gwFetch(
+      `/sessions/${encodeURIComponent(sessionId)}/preview-host?port=${port}`,
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { host?: string };
+    return (data.host || '').trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 export type SandboxLiveState = {

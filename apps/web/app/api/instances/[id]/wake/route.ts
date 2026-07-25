@@ -41,14 +41,21 @@ export async function POST(_req: Request, ctx: Ctx) {
     const logs = [...(result.logs || [])];
     const fullyUp = result.ok && result.daemonOk !== false;
 
-    // Running + daemon up → clear host webhook so daemon long-poll owns Telegram.
-    // Otherwise keep/arm host webhook so the next Telegram DM can retry wake.
+    // Sandbox webhook mode: keep Telegram on sandbox public URL (E2B auto-resume).
+    // Host mode: clear when running (long-poll); arm when wake incomplete.
     if (inst.telegramBotToken) {
+      const mode =
+        inst.telegramWebhookMode ||
+        (inst.sandboxTelegramWebhookUrl ? 'sandbox' : 'host');
       const tg = await syncTelegramWakeWebhook({
         botToken: inst.telegramBotToken,
         instanceId: inst.id,
         wakeSecret: inst.wakeSecret,
         sandboxState: fullyUp ? 'running' : 'paused',
+        mode,
+        sandboxId: inst.sandboxId,
+        sandboxWebhookUrl: inst.sandboxTelegramWebhookUrl,
+        telegramWebhookSecret: inst.telegramWebhookSecret,
       });
       if (tg) logs.push(tg);
     }

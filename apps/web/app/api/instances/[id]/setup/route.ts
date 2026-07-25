@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
-import { setupAiAndTelegram } from '@/lib/gateway-client';
+import { getSandboxPreviewHost, setupAiAndTelegram } from '@/lib/gateway-client';
+import {
+  buildSandboxTelegramWebhookUrl,
+  newTelegramWebhookSecret,
+  SANDBOX_TG_WEBHOOK_PORT,
+  setSandboxTelegramWebhook,
+} from '@/lib/sandbox-telegram';
 import { getInstance, updateInstance } from '@/lib/store';
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -45,6 +51,21 @@ export async function POST(req: Request, ctx: Ctx) {
   }
 
   try {
+    let sandboxWebhookUrl: string | undefined;
+    let tgWebhookSecret: string | undefined;
+    let webhookMode: 'sandbox' | 'host' = 'host';
+
+    if (telegramBotToken && inst.sandboxId) {
+      webhookMode = 'sandbox';
+      tgWebhookSecret = inst.telegramWebhookSecret || newTelegramWebhookSecret();
+      const host = await getSandboxPreviewHost(inst.sessionId, SANDBOX_TG_WEBHOOK_PORT);
+      sandboxWebhookUrl = buildSandboxTelegramWebhookUrl(
+        inst.sandboxId,
+        host,
+        SANDBOX_TG_WEBHOOK_PORT,
+      );
+    }
+
     const result = await setupAiAndTelegram(inst.sessionId, {
       provider: String(body.provider || 'openai'),
       apiKey,
@@ -55,12 +76,35 @@ export async function POST(req: Request, ctx: Ctx) {
       slackBotToken: slackBotToken || undefined,
       slackAppToken: slackAppToken || undefined,
       sandboxId: inst.sandboxId,
+      telegramWebhookUrl: sandboxWebhookUrl,
+      telegramWebhookSecret: tgWebhookSecret,
+      telegramWebhookPort: sandboxWebhookUrl ? SANDBOX_TG_WEBHOOK_PORT : undefined,
     });
+
+    const logs = [...result.logs];
+    if (webhookMode === 'sandbox' && telegramBotToken && sandboxWebhookUrl) {
+      await new Promise((r) => setTimeout(r, 1200));
+      const wh = await setSandboxTelegramWebhook(
+        telegramBotToken,
+        sandboxWebhookUrl,
+        tgWebhookSecret,
+      );
+      logs.push(
+        wh.ok
+          ? `Telegram sandbox webhook → ${sandboxWebhookUrl}`
+          : `setWebhook failed: ${wh.description || 'unknown'}`,
+      );
+    }
+
     const instance = await updateInstance(user.id, inst.id, {
       aiConfigured: result.ok,
       telegramConfigured: result.ok,
-      lastError: result.ok ? undefined : result.logs.join('\n').slice(0, 500),
+      lastError: result.ok ? undefined : logs.join('\n').slice(0, 500),
       status: result.ok ? 'running' : 'error',
+      ...(telegramBotToken ? { telegramBotToken } : {}),
+      telegramWebhookMode: webhookMode,
+      ...(sandboxWebhookUrl ? { sandboxTelegramWebhookUrl: sandboxWebhookUrl } : {}),
+      ...(tgWebhookSecret ? { telegramWebhookSecret: tgWebhookSecret } : {}),
       config: {
         provider: String(body.provider || 'openai'),
         model: String(body.model || ''),
@@ -71,7 +115,13 @@ export async function POST(req: Request, ctx: Ctx) {
         hasSlackToken: Boolean(slackBotToken && slackAppToken),
       },
     });
-    return NextResponse.json({ ok: result.ok, logs: result.logs, instance });
+    return NextResponse.json({
+      ok: result.ok,
+      logs,
+      instance,
+      telegramWebhookMode: webhookMode,
+      sandboxTelegramWebhookUrl: sandboxWebhookUrl || null,
+    });
   } catch (e) {
     await updateInstance(user.id, inst.id, {
       status: 'error',
