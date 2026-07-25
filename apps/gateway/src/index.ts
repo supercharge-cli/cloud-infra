@@ -1151,15 +1151,20 @@ const server = createServer(async (req, res) => {
               'nohup xibecode daemon --workdir /home/user/workspace >/tmp/xibecode-daemon.log 2>&1 &',
               'echo $! > /tmp/xibecode-daemon.pid',
               'OK=0',
-              'for i in 1 2 3 4 5 6 7 8 9 10; do',
+              // Resume + npm cold start can take >10s; poll pidfile + process name
+              'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do',
               '  sleep 1',
               '  if pgrep -f "xibecode daemon" >/dev/null 2>&1; then OK=1; break; fi',
+              '  if [ -f /tmp/xibecode-daemon.pid ] && kill -0 "$(cat /tmp/xibecode-daemon.pid)" 2>/dev/null; then OK=1; break; fi',
+              '  if pgrep -af "xibecode|node" 2>/dev/null | grep -qi "xibecode"; then OK=1; break; fi',
               'done',
               'if [ "$OK" = "1" ]; then echo DAEMON_OK; else echo DAEMON_FAIL; fi',
+              'echo "--- daemon pid ---"',
+              'cat /tmp/xibecode-daemon.pid 2>/dev/null || true',
               'echo "--- daemon log (tail) ---"',
-              'tail -40 /tmp/xibecode-daemon.log 2>/dev/null || true',
+              'tail -50 /tmp/xibecode-daemon.log 2>/dev/null || true',
             ].join('\n'),
-            timeout: 90,
+            timeout: 120,
           });
           const out = `${r.stdout || ''}\n${r.stderr || ''}`;
           daemon = { ok: out.includes('DAEMON_OK'), logs: [out.slice(0, 2000)] };

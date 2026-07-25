@@ -1032,18 +1032,30 @@ export async function restartDaemon(
     'set +e',
     'set -a',
     '[ -f /home/user/.xibecode/daemon.env ] && . /home/user/.xibecode/daemon.env',
+    '[ -f /home/user/.xibecode/gateway.env ] && . /home/user/.xibecode/gateway.env',
     'set +a',
+    'if [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}" ]; then',
+    '  TOK="${TELEGRAM_BOT_TOKEN:-$XIBECODE_TELEGRAM_BOT_TOKEN}"',
+    '  curl -sS -m 10 -X POST "https://api.telegram.org/bot${TOK}/deleteWebhook" -d "drop_pending_updates=false" >/dev/null 2>&1 || true',
+    'fi',
     'if [ -f /tmp/xibecode-daemon.pid ]; then kill "$(cat /tmp/xibecode-daemon.pid)" 2>/dev/null; sleep 1; fi',
+    'pkill -f "xibecode daemon" 2>/dev/null || true',
+    'sleep 1',
     'nohup xibecode daemon --workdir /home/user/workspace >/tmp/xibecode-daemon.log 2>&1 &',
     'echo $! > /tmp/xibecode-daemon.pid',
-    'sleep 3',
+    'OK=0',
+    'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do',
+    '  sleep 1',
+    '  if pgrep -f "xibecode daemon" >/dev/null 2>&1; then OK=1; break; fi',
+    '  if [ -f /tmp/xibecode-daemon.pid ] && kill -0 "$(cat /tmp/xibecode-daemon.pid)" 2>/dev/null; then OK=1; break; fi',
+    'done',
+    'if [ "$OK" = "1" ]; then echo "xibecode daemon: running"; else echo "xibecode daemon: not found"; fi',
     'echo "--- daemon pid ---"',
     'cat /tmp/xibecode-daemon.pid 2>/dev/null || true',
     'echo "--- daemon log ---"',
-    'head -80 /tmp/xibecode-daemon.log 2>/dev/null || true',
+    'tail -80 /tmp/xibecode-daemon.log 2>/dev/null || true',
     'echo "--- processes ---"',
     'ps -o pid,user,comm -C node 2>/dev/null | head -15 || true',
-    'pgrep -f "xibecode daemon" >/dev/null && echo "xibecode daemon: running" || echo "xibecode daemon: not found"',
     'echo RESTART_DONE',
   ].join('\n');
 
@@ -1055,8 +1067,13 @@ export async function restartDaemon(
     ),
   ];
   const ok =
+    out.includes('xibecode daemon: running') ||
     out.includes('RESTART_DONE') ||
     /telegram enabled|discord enabled|slack enabled/i.test(out);
+  // Prefer explicit process check; RESTART_DONE alone can mean shell finished after a dead spawn
+  if (out.includes('xibecode daemon: not found') && !out.includes('xibecode daemon: running')) {
+    return { ok: false, logs };
+  }
   return { ok, logs };
 }
 
