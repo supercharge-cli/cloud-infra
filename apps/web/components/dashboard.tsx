@@ -1077,8 +1077,9 @@ export function Dashboard({ email }: { email: string }) {
               </p>
             ) : null}
             <p className="mb-3 text-xs text-zinc-500">
-              Values below are loaded from the sandbox env. Edit any field, then Save (or Save &amp;
-              restart). XibeCode supports Telegram, Discord, and Slack — set any one (or several).
+              Values below are loaded from the sandbox env. Edit any field, then save — the coding
+              bot restarts automatically. XibeCode supports Telegram, Discord, and Slack (any one
+              or several).
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Provider">
@@ -1179,18 +1180,18 @@ export function Dashboard({ email }: { email: string }) {
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => saveConfig(false)}
-                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-900 disabled:opacity-50"
+                onClick={() => saveConfig(true)}
+                className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
               >
-                Save config
+                Save &amp; start bot
               </button>
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => saveConfig(true)}
-                className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
+                onClick={() => saveConfig(false)}
+                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-900 disabled:opacity-50"
               >
-                Save & restart
+                Save env only
               </button>
             </div>
           </div>

@@ -124,8 +124,11 @@ export async function PUT(req: Request, ctx: Ctx) {
 
     const name = body.name?.trim();
     let logs = [...result.logs];
+    // Always start/restart the bot after a successful config write so users
+    // don't get a silent "saved env but no daemon" state (Save-only was easy to miss).
+    const shouldRestart = body.restart !== false;
     let restartOk = true;
-    if (body.restart) {
+    if (shouldRestart) {
       const r = await restartDaemon(inst.sessionId, inst.sandboxId);
       logs = [...logs, ...r.logs];
       restartOk = r.ok;
