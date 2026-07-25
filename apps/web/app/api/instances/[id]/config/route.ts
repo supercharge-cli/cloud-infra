@@ -10,7 +10,6 @@ import {
   buildSandboxTelegramWebhookUrl,
   newTelegramWebhookSecret,
   SANDBOX_TG_WEBHOOK_PORT,
-  setSandboxTelegramWebhook,
 } from '@/lib/sandbox-telegram';
 import { ensureWakeSecret, getInstance, updateInstance } from '@/lib/store';
 import {
@@ -137,24 +136,18 @@ export async function PUT(req: Request, ctx: Ctx) {
       result.meta.hasTelegramToken || result.meta.hasDiscordToken || result.meta.hasSlackToken;
 
     if (webhookMode === 'sandbox' && token && sandboxWebhookUrl) {
-      if (body.restart) {
-        await new Promise((r) => setTimeout(r, 1500));
-      }
-      const wh = await setSandboxTelegramWebhook(token, sandboxWebhookUrl, tgWebhookSecret);
+      // While *running*, bot long-polls (deleteWebhook already done in restartDaemon).
+      // Do NOT setWebhook here — that steals getUpdates. Host arms the template
+      // public URL automatically when the sandbox pauses (lifecycle + cron).
       logs.push(
-        wh.ok
-          ? `Telegram: template wake URL (E2B auto-resume) → ${sandboxWebhookUrl}`
-          : `Telegram setWebhook failed: ${wh.description || 'unknown'}`,
+        `Telegram auto-wake ready (no user action): when paused, webhook → ${sandboxWebhookUrl}`,
       );
       logs.push(
-        'Paused DMs hit the template wake-http on the sandbox (not the bot). E2B resumes the VM; bot stays long-poll.',
-      );
-      logs.push(
-        'Needs E2B template with /opt/vectra/wake-http — rebuild xibecode-full-sandbox if missing.',
+        'Users only paste the bot token once. Hosting sets Telegram webhook on pause; E2B auto-resumes on the next DM.',
       );
     } else if (token || result.meta.hasTelegramToken) {
       logs.push(
-        'Telegram: long-poll mode (no sandboxId or webhook URL). Host wake webhook arms when paused.',
+        'Telegram: long-poll while running; host wake webhook arms automatically when paused.',
       );
       const url = wakeWebhookUrl(inst.id, wakeSecret);
       if (url) logs.push(`Host wake URL ready: ${url}`);

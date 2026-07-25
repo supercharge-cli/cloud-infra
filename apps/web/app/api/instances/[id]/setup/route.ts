@@ -5,7 +5,6 @@ import {
   buildSandboxTelegramWebhookUrl,
   newTelegramWebhookSecret,
   SANDBOX_TG_WEBHOOK_PORT,
-  setSandboxTelegramWebhook,
 } from '@/lib/sandbox-telegram';
 import { getInstance, updateInstance } from '@/lib/store';
 
@@ -82,17 +81,11 @@ export async function POST(req: Request, ctx: Ctx) {
     });
 
     const logs = [...result.logs];
-    if (webhookMode === 'sandbox' && telegramBotToken && sandboxWebhookUrl) {
-      await new Promise((r) => setTimeout(r, 1200));
-      const wh = await setSandboxTelegramWebhook(
-        telegramBotToken,
-        sandboxWebhookUrl,
-        tgWebhookSecret,
-      );
+    if (webhookMode === 'sandbox' && sandboxWebhookUrl) {
+      // Store URL only — setWebhook is armed automatically on pause (lifecycle/cron).
+      // While running the bot long-polls; setting webhook now would break getUpdates.
       logs.push(
-        wh.ok
-          ? `Telegram sandbox webhook → ${sandboxWebhookUrl}`
-          : `setWebhook failed: ${wh.description || 'unknown'}`,
+        `Telegram auto-wake registered: ${sandboxWebhookUrl} (armed when sandbox pauses — no user steps)`,
       );
     }
 
