@@ -79,10 +79,9 @@ const sandboxTemplate =
  */
 const sandboxTimeoutMs = Math.max(
   60_000,
-  // Idle before lifecycle pause. 2m for wake/auto-resume testing (was 30m).
-  // Production: set XIBECODE_E2B_SANDBOX_TIMEOUT_MS=1800000. After auto-resume E2B
-  // enforces a ≥5m window — see e2b.dev/docs/sandbox/auto-resume
-  Number(process.env.XIBECODE_E2B_SANDBOX_TIMEOUT_MS || 2 * 60 * 1000),
+  // Idle before lifecycle pause (default 15m). Override with XIBECODE_E2B_SANDBOX_TIMEOUT_MS.
+  // After auto-resume E2B enforces a ≥5m window — see e2b.dev/docs/sandbox/auto-resume
+  Number(process.env.XIBECODE_E2B_SANDBOX_TIMEOUT_MS || 15 * 60 * 1000),
 );
 /**
  * E2B Pro continuous *running* cap is 24h. Pause+resume resets that window.

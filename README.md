@@ -58,7 +58,7 @@ Follows [E2B auto-resume](https://e2b.dev/docs/sandbox/auto-resume):
 
 ```ts
 Sandbox.create({
-  timeoutMs: 2 * 60 * 1000, // testing; prod often 30m via XIBECODE_E2B_SANDBOX_TIMEOUT_MS
+  timeoutMs: 15 * 60 * 1000, // default idle; override XIBECODE_E2B_SANDBOX_TIMEOUT_MS
   lifecycle: { onTimeout: 'pause', autoResume: true }, // full memory snapshot
 })
 ```
@@ -140,7 +140,7 @@ APIs:
 | `XIBECODE_E2B_TEMPLATE` | `xibecode-full-sandbox` | Published template id/alias |
 | `XIBECODE_E2B_ON_TIMEOUT` | `pause` | `pause` (snapshot) or `kill` |
 | `XIBECODE_E2B_AUTO_RESUME` | `true` | Wake on SDK/HTTP when paused |
-| `XIBECODE_E2B_SANDBOX_TIMEOUT_MS` | `120000` (2m, testing) | Idle before lifecycle pause; use `1800000` in prod |
+| `XIBECODE_E2B_SANDBOX_TIMEOUT_MS` | `900000` (15m) | Idle before lifecycle pause |
 | `XIBECODE_E2B_MAX_CONTINUOUS_MS` | `82800000` (~23h) | Pause/resume before E2B 24h hard limit; `0` = off |
 
 ## Local dev
