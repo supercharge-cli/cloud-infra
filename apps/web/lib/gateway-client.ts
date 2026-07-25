@@ -639,8 +639,8 @@ export type ConfigInput = {
    */
   allowAllUsers?: boolean;
   /**
-   * Sandbox Telegram webhook (E2B auto-resume). When set, daemon listens on
-   * TELEGRAM_WEBHOOK_PORT and Telegram setWebhook points at the public URL.
+   * Template wake HTTP (E2B auto-resume doorbell on :8788 — not the bot).
+   * When set, hosting starts /opt/vectra/wake-http and Telegram may setWebhook there.
    */
   telegramWebhookUrl?: string;
   telegramWebhookSecret?: string;
@@ -731,13 +731,13 @@ export async function writeSandboxConfig(
   if (discordBotToken) channels.push('discord');
   if (slackBotToken) channels.push('slack');
 
-  // Sandbox webhook mode (E2B auto-resume on HTTP to public URL)
+  // Template wake HTTP (E2B doorbell on public URL) — separate from the bot long-poll
   const tgWebhookUrl = (input.telegramWebhookUrl || '').trim();
   const tgWebhookSecret = (input.telegramWebhookSecret || '').trim();
   const tgWebhookPort = Math.floor(
     Number(input.telegramWebhookPort) || (tgWebhookUrl ? 8788 : 0),
   );
-  const sandboxTgWebhook =
+  const sandboxWakeHttp =
     Boolean(telegramBotToken) && Boolean(tgWebhookUrl) && tgWebhookPort > 0;
 
   const envBody =
@@ -760,18 +760,12 @@ export async function writeSandboxConfig(
       baseUrl ? `XIBECODE_BASE_URL=${baseUrl}` : '',
       baseUrl && provider !== 'anthropic' ? `OPENAI_BASE_URL=${baseUrl}` : '',
       `XIBECODE_DAEMON_WORKDIR=/home/user/workspace`,
-      // E2B: Telegram → sandbox public URL → auto-resume (not long-poll)
-      sandboxTgWebhook ? `TELEGRAM_WEBHOOK_MODE=1` : '',
-      sandboxTgWebhook ? `XIBECODE_TELEGRAM_WEBHOOK_MODE=1` : '',
-      sandboxTgWebhook ? `TELEGRAM_WEBHOOK_PORT=${tgWebhookPort}` : '',
-      sandboxTgWebhook ? `XIBECODE_TELEGRAM_WEBHOOK_PORT=${tgWebhookPort}` : '',
-      sandboxTgWebhook ? `TELEGRAM_WEBHOOK_URL=${tgWebhookUrl}` : '',
-      sandboxTgWebhook ? `XIBECODE_TELEGRAM_WEBHOOK_URL=${tgWebhookUrl}` : '',
-      sandboxTgWebhook && tgWebhookSecret
+      // Template wake HTTP only (does NOT enable bot webhook mode)
+      sandboxWakeHttp ? `VECTRA_WAKE_PORT=${tgWebhookPort}` : '',
+      sandboxWakeHttp ? `VECTRA_TG_WEBHOOK_URL=${tgWebhookUrl}` : '',
+      sandboxWakeHttp ? `TELEGRAM_WEBHOOK_URL=${tgWebhookUrl}` : '',
+      sandboxWakeHttp && tgWebhookSecret
         ? `TELEGRAM_WEBHOOK_SECRET=${tgWebhookSecret}`
-        : '',
-      sandboxTgWebhook && tgWebhookSecret
-        ? `XIBECODE_TELEGRAM_WEBHOOK_SECRET=${tgWebhookSecret}`
         : '',
     ]
       .filter((line) => line !== '')
@@ -833,7 +827,7 @@ export async function writeSandboxConfig(
   );
   logs.push(
     redact(
-      `config saved OK · channels=${channels.join('+') || 'none'} · pairing=${openAccess ? 'OFF (open access)' : 'ON (approve in dashboard)'} · tgWebhook=${sandboxTgWebhook ? tgWebhookUrl : 'off (long-poll)'} · provider=${provider} model=${model || '(none)'} baseUrl=${baseUrl || '(none)'}\n${verify.stdout || ''}`,
+      `config saved OK · channels=${channels.join('+') || 'none'} · pairing=${openAccess ? 'OFF (open access)' : 'ON (approve in dashboard)'} · templateWake=${sandboxWakeHttp ? tgWebhookUrl : 'off'} · provider=${provider} model=${model || '(none)'} baseUrl=${baseUrl || '(none)'}\n${verify.stdout || ''}`,
     ),
   );
 
@@ -1057,25 +1051,26 @@ export async function restartDaemon(
   sessionId: string,
   sandboxId?: string,
 ): Promise<{ ok: boolean; logs: string[] }> {
-  // Webhook mode (TELEGRAM_WEBHOOK_PORT set): do NOT deleteWebhook — Telegram
-  // must keep posting to the sandbox public URL so E2B can auto-resume on traffic.
-  // Long-poll mode: clear webhook so getUpdates can bind.
+  // Bot stays long-poll. Template wake HTTP (:8788) is a separate process for E2B
+  // auto-resume when Telegram (or host) hits the sandbox public URL.
   const setupCmd = [
     'set +e',
     'set -a',
     '[ -f /home/user/.xibecode/daemon.env ] && . /home/user/.xibecode/daemon.env',
     '[ -f /home/user/.xibecode/gateway.env ] && . /home/user/.xibecode/gateway.env',
     'set +a',
-    'WEBHOOK_MODE=0',
-    'if [ -n "${TELEGRAM_WEBHOOK_PORT:-}${XIBECODE_TELEGRAM_WEBHOOK_PORT:-}" ] || [ "${TELEGRAM_WEBHOOK_MODE:-}" = "1" ] || [ "${XIBECODE_TELEGRAM_WEBHOOK_MODE:-}" = "1" ]; then',
-    '  WEBHOOK_MODE=1',
+    // Start template wake doorbell first (must be running before pause snapshot)
+    'if [ -x /opt/vectra/wake-http/start.sh ]; then',
+    '  /opt/vectra/wake-http/start.sh || true',
+    '  echo "template wake-http: started (or already up)"',
+    'else',
+    '  echo "template wake-http: missing /opt/vectra/wake-http (rebuild E2B template)"',
     'fi',
-    'if [ "$WEBHOOK_MODE" != "1" ] && [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}" ]; then',
+    // Bot long-poll: clear webhook so getUpdates works while running
+    'if [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}" ]; then',
     '  TOK="${TELEGRAM_BOT_TOKEN:-$XIBECODE_TELEGRAM_BOT_TOKEN}"',
     '  curl -sS -m 10 -X POST "https://api.telegram.org/bot${TOK}/deleteWebhook" -d "drop_pending_updates=false" >/dev/null 2>&1 || true',
-    '  echo "telegram: long-poll mode (host webhook cleared)"',
-    'elif [ "$WEBHOOK_MODE" = "1" ]; then',
-    '  echo "telegram: sandbox webhook mode port=${TELEGRAM_WEBHOOK_PORT:-8788} url=${TELEGRAM_WEBHOOK_URL:-unset}"',
+    '  echo "telegram bot: long-poll (webhook cleared while running)"',
     'fi',
     'if [ -f /tmp/xibecode-daemon.pid ]; then kill "$(cat /tmp/xibecode-daemon.pid)" 2>/dev/null; sleep 1; fi',
     'pkill -f "xibecode daemon" 2>/dev/null || true',
@@ -1089,13 +1084,8 @@ export async function restartDaemon(
     '  if [ -f /tmp/xibecode-daemon.pid ] && kill -0 "$(cat /tmp/xibecode-daemon.pid)" 2>/dev/null; then OK=1; break; fi',
     'done',
     'if [ "$OK" = "1" ]; then echo "xibecode daemon: running"; else echo "xibecode daemon: not found"; fi',
-    'if [ "$WEBHOOK_MODE" = "1" ]; then',
-    '  WP="${TELEGRAM_WEBHOOK_PORT:-8788}"',
-    '  for j in 1 2 3 4 5; do',
-    '    if curl -sS -m 2 "http://127.0.0.1:${WP}/health" 2>/dev/null | grep -q ok; then echo "telegram webhook: listening :${WP}"; break; fi',
-    '    sleep 1',
-    '  done',
-    'fi',
+    'WP="${VECTRA_WAKE_PORT:-8788}"',
+    'if curl -sS -m 2 "http://127.0.0.1:${WP}/health" 2>/dev/null | grep -q ok; then echo "template wake-http: listening :${WP}"; fi',
     'echo "--- daemon pid ---"',
     'cat /tmp/xibecode-daemon.pid 2>/dev/null || true',
     'echo "--- daemon log ---"',

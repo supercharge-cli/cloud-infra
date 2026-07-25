@@ -67,15 +67,16 @@ Activity that wakes a paused sandbox ([docs](https://e2b.dev/docs/sandbox/auto-r
 gateway SDK ops (`commands.run`, files) **or HTTP traffic to a service inside the VM**
 ([public URL](https://e2b.dev/docs/network/public-url)).
 
-**Preferred Telegram path (sandbox webhook):**
+**Preferred Telegram path (custom template wake HTTP, not the bot):**
 ```
 Telegram setWebhook → https://8788-{sandboxId}.e2b.app/telegram
-DM → E2B auto-resumes paused VM → xibecode daemon webhook handler
+DM → E2B auto-resumes paused VM → /opt/vectra/wake-http (template)
+    → restarts xibecode daemon long-poll (bot code unchanged)
 ```
-Configured automatically when you save AI + Telegram in the dashboard (needs
-xibecode with `TELEGRAM_WEBHOOK_PORT` support — Update CLI if needed).
+Bake wake-http into `xibecode-full-sandbox` (`sandbox/e2b-template/wake-http`).
+Dashboard save sets the webhook URL when Telegram is configured.
 
-**Legacy:** host Vercel wake webhook + long-poll (only if sandbox webhook mode off).
+**Legacy:** host Vercel wake webhook + long-poll (if no sandbox wake URL).
 
 1. **Instant path:** register an E2B project lifecycle webhook:
    - URL: `https://your-app.vercel.app/api/e2b/lifecycle`

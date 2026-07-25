@@ -1,16 +1,16 @@
 /**
- * Sandbox-native Telegram webhook (E2B auto-resume on request).
+ * Template wake HTTP public URL helpers (E2B auto-resume on request).
  *
  * Docs: https://e2b.dev/docs/sandbox/auto-resume
  *       https://e2b.dev/docs/network/public-url
  *
- * Flow:
- *   Telegram setWebhook → https://{port}-{sandboxId}.e2b.app/telegram
- *   DM hits that URL → E2B resumes paused sandbox (memory snapshot) →
- *   xibecode daemon HTTP handler processes the update.
+ * The wake server lives in the **custom E2B template** (`sandbox/e2b-template/wake-http`),
+ * NOT in the xibecode bot. Bot stays long-poll.
  *
- * Requires xibecode with TELEGRAM_WEBHOOK_PORT / TELEGRAM_WEBHOOK_URL support.
- * Prefer this over host (Vercel) wake webhook + long-poll.
+ * Flow when paused:
+ *   Telegram setWebhook → https://8788-{sandboxId}.e2b.app/telegram
+ *   DM hits that URL → E2B resumes VM → template service restarts bot long-poll
+ *   → user may resend once (webhook consumed first update).
  */
 
 import { nanoid } from 'nanoid';

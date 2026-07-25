@@ -143,14 +143,14 @@ export async function PUT(req: Request, ctx: Ctx) {
       const wh = await setSandboxTelegramWebhook(token, sandboxWebhookUrl, tgWebhookSecret);
       logs.push(
         wh.ok
-          ? `Telegram: sandbox webhook (E2B auto-resume) → ${sandboxWebhookUrl}`
+          ? `Telegram: template wake URL (E2B auto-resume) → ${sandboxWebhookUrl}`
           : `Telegram setWebhook failed: ${wh.description || 'unknown'}`,
       );
       logs.push(
-        'DMs hit the sandbox public URL; if paused, E2B resumes the VM (~0.2–1s) then the daemon handles the message.',
+        'Paused DMs hit the template wake-http on the sandbox (not the bot). E2B resumes the VM; bot stays long-poll.',
       );
       logs.push(
-        'Requires xibecode with TELEGRAM_WEBHOOK_PORT support — use Dashboard → Update CLI if wake fails.',
+        'Needs E2B template with /opt/vectra/wake-http — rebuild xibecode-full-sandbox if missing.',
       );
     } else if (token || result.meta.hasTelegramToken) {
       logs.push(

@@ -1141,11 +1141,9 @@ const server = createServer(async (req, res) => {
               '[ -f /home/user/.xibecode/daemon.env ] && . /home/user/.xibecode/daemon.env',
               '[ -f /home/user/.xibecode/gateway.env ] && . /home/user/.xibecode/gateway.env',
               'set +a',
-              // Sandbox webhook mode keeps setWebhook on public URL (E2B auto-resume).
-              // Long-poll mode: clear webhook so getUpdates can bind.
-              'WEBHOOK_MODE=0',
-              'if [ -n "${TELEGRAM_WEBHOOK_PORT:-}${XIBECODE_TELEGRAM_WEBHOOK_PORT:-}" ] || [ "${TELEGRAM_WEBHOOK_MODE:-}" = "1" ]; then WEBHOOK_MODE=1; fi',
-              'if [ "$WEBHOOK_MODE" != "1" ] && [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}" ]; then',
+              // Template wake HTTP (doorbell) + bot long-poll (separate)
+              'if [ -x /opt/vectra/wake-http/start.sh ]; then /opt/vectra/wake-http/start.sh || true; fi',
+              'if [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}" ]; then',
               '  TOK="${TELEGRAM_BOT_TOKEN:-$XIBECODE_TELEGRAM_BOT_TOKEN}"',
               '  curl -sS -m 10 -X POST "https://api.telegram.org/bot${TOK}/deleteWebhook" -d "drop_pending_updates=false" >/dev/null 2>&1 || true',
               'fi',
@@ -1155,7 +1153,6 @@ const server = createServer(async (req, res) => {
               'nohup xibecode daemon --workdir /home/user/workspace >/tmp/xibecode-daemon.log 2>&1 &',
               'echo $! > /tmp/xibecode-daemon.pid',
               'OK=0',
-              // Resume + npm cold start can take >10s; poll pidfile + process name
               'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do',
               '  sleep 1',
               '  if pgrep -f "xibecode daemon" >/dev/null 2>&1; then OK=1; break; fi',
@@ -1163,11 +1160,9 @@ const server = createServer(async (req, res) => {
               '  if pgrep -af "xibecode|node" 2>/dev/null | grep -qi "xibecode"; then OK=1; break; fi',
               'done',
               'if [ "$OK" = "1" ]; then echo DAEMON_OK; else echo DAEMON_FAIL; fi',
-              'if [ "$WEBHOOK_MODE" = "1" ]; then',
-              '  WP="${TELEGRAM_WEBHOOK_PORT:-8788}"',
-              '  curl -sS -m 2 "http://127.0.0.1:${WP}/health" 2>/dev/null | head -c 200 || true',
-              '  echo',
-              'fi',
+              'WP="${VECTRA_WAKE_PORT:-8788}"',
+              'curl -sS -m 2 "http://127.0.0.1:${WP}/health" 2>/dev/null | head -c 200 || true',
+              'echo',
               'echo "--- daemon pid ---"',
               'cat /tmp/xibecode-daemon.pid 2>/dev/null || true',
               'echo "--- daemon log (tail) ---"',

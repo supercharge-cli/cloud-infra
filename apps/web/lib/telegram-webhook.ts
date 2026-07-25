@@ -1,10 +1,12 @@
 /**
  * Telegram webhook helpers.
  *
- * Preferred (E2B auto-resume): Telegram → sandbox public URL
+ * Preferred (E2B auto-resume): Telegram → template wake HTTP public URL
  *   https://8788-{sandboxId}.e2b.app/telegram
- *   (daemon listens with TELEGRAM_WEBHOOK_PORT; traffic wakes paused VM)
+ *   (custom template /opt/vectra/wake-http — NOT the bot; traffic wakes paused VM)
  *   Docs: https://e2b.dev/docs/sandbox/auto-resume
+ *
+ * Bot stays long-poll while running. Template service restarts it after wake.
  *
  * Legacy host path: paused → Vercel host webhook → gateway SDK wake → long-poll.
  * Only used when telegramWebhookMode !== 'sandbox'.
