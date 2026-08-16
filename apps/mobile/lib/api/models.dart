@@ -133,10 +133,28 @@ class DashboardData {
   final PlanInfo? plan;
 }
 
+const imageExts = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'heic', 'heif'};
+
+bool looksLikeImage({String? name, String? mime, String? kind}) {
+  if (kind == 'photo') return true;
+  if (mime != null && mime.toLowerCase().startsWith('image/')) return true;
+  final ext = name?.split('.').last.toLowerCase();
+  return ext != null && imageExts.contains(ext);
+}
+
 class AppChatEvent {
   AppChatEvent(this.raw, {this.local = false});
   final Map<String, dynamic> raw;
   final bool local;
+
+  factory AppChatEvent.fromJson(Map<String, dynamic> j) {
+    final local = j['_local'] == true;
+    final raw = Map<String, dynamic>.from(j)..remove('_local');
+    return AppChatEvent(raw, local: local);
+  }
+
+  Map<String, dynamic> toJson() => {...raw, if (local) '_local': true};
+
   String get id => '${raw['id'] ?? ''}';
   String get type => '${raw['type'] ?? ''}';
   String get text =>
@@ -147,7 +165,21 @@ class AppChatEvent {
   String? get kind => raw['kind'] as String?;
   String? get title => raw['title'] as String?;
   String? get state => raw['state'] as String?;
+  String? get mime => raw['mime'] as String?;
+  String? get localPath => raw['localPath'] as String?;
+  String? get role => raw['role'] as String?;
+  int get ts => (raw['ts'] as num?)?.toInt() ?? 0;
+  int? get size => (raw['size'] as num?)?.toInt();
+  int? get tools => (raw['tools'] as num?)?.toInt();
+  int? get elapsedMs => (raw['elapsedMs'] as num?)?.toInt();
+  int? get pct => (raw['pct'] as num?)?.toInt();
   bool get isFinal => raw['final'] == true;
+  bool get isUser => local || type == 'user' || role == 'user';
+  bool get isImage => looksLikeImage(name: name, mime: mime, kind: kind);
+  bool get isTerminal => type == 'done' || type == 'error';
+
+  void setLocalPath(String path) => raw['localPath'] = path;
+
   List<String> get choices =>
       (raw['choices'] as List?)?.map((e) => '$e').toList() ?? const [];
   List<Map<String, dynamic>> get options =>
@@ -159,7 +191,7 @@ class AppChatEvent {
 }
 
 class BotCommand {
-  BotCommand({required this.command, required this.description});
+  const BotCommand({required this.command, required this.description});
   final String command;
   final String description;
 }

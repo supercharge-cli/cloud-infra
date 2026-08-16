@@ -233,17 +233,36 @@ class VectraClient {
     required Uint8List bytes,
     String? mime,
     String? caption,
-  }) =>
-      _json('POST', '/api/instances/$id/chat/upload', body: {
-        'text': caption ?? '',
-        'files': [
-          {
-            'name': name,
-            'contentBase64': base64Encode(bytes),
-            'mime': ?mime,
-          }
-        ],
-      }, timeout: const Duration(seconds: 90));
+  }) async {
+    final uri = _u('/api/instances/$id/chat/upload');
+    final req = http.MultipartRequest('POST', uri);
+    req.headers.addAll({
+      if (token != null && token!.isNotEmpty) 'authorization': 'Bearer $token',
+    });
+    if (caption != null && caption.isNotEmpty) req.fields['text'] = caption;
+    req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: name));
+    late http.StreamedResponse streamed;
+    try {
+      streamed = await req.send().timeout(const Duration(seconds: 90));
+    } on TimeoutException {
+      throw ApiException(0, 'Upload timed out');
+    } on http.ClientException catch (e) {
+      throw ApiException(0, 'Network error: ${e.message}');
+    }
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode >= 400) {
+      Map<String, dynamic> data = {};
+      try {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic>) data = decoded;
+      } catch (_) {}
+      throw ApiException(
+        res.statusCode,
+        _friendlyError(res.statusCode, data, res.reasonPhrase),
+        code: data['code'] as String?,
+      );
+    }
+  }
 
   Future<DownloadedFile> downloadFile(String id, String fileId) async {
     final uri = _u('/api/instances/$id/chat/files/$fileId');

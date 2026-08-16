@@ -4,8 +4,10 @@ import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:gal/gal.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -14,8 +16,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../api/client.dart';
 import '../api/models.dart';
+import '../chat/chat_store.dart';
+import '../chat/commands.dart';
+import '../chat/notifications.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import '../widgets/media.dart';
 import '../widgets/ui.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -27,13 +33,15 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   final events = <AppChatEvent>[];
   final answered = <String>{};
+  final fetching = <String>{};
+  late final ChatStore store;
   StreamSubscription<AppChatEvent>? _sub;
-  List<BotCommand> commands = [];
+  List<BotCommand> commands = defaultBotCommands;
   CloudInstance? inst;
   Map<String, dynamic>? cli;
   bool sending = false;
@@ -41,25 +49,52 @@ class _ChatScreenState extends State<ChatScreen> {
   bool reconnecting = false;
   bool disposed = false;
   bool paymentBlocked = false;
+  bool showKickoff = false;
+  bool backgrounded = false;
   String? error;
   String connectLabel = 'Connecting to sandbox…';
   String? lastServerId;
+  String? lastAssistantText;
+  DateTime? turnStartedAt;
+  int toolCount = 0;
+  Timer? _tick;
 
   VectraClient get api => context.read<SessionController>().client;
   String get id => widget.instanceId;
+  bool get working => turnStartedAt != null;
+  String get instanceName => inst?.name ?? widget.instance?.name ?? 'Chat';
 
-  bool get working {
-    if (sending) return true;
-    if (events.isEmpty) return false;
-    final last = events.last.type;
-    return last == 'typing' || last == 'tool';
-  }
+  Duration get elapsed =>
+      turnStartedAt == null ? Duration.zero : DateTime.now().difference(turnStartedAt!);
+
+  int get progressPct => TaskNotifications.softPercent(tools: toolCount, elapsed: elapsed);
 
   @override
   void initState() {
     super.initState();
-    inst = widget.instance;
+    store = ChatStore(id);
+    WidgetsBinding.instance.addObserver(this);
+    _input.addListener(() {
+      if (mounted) setState(() {});
+    });
     _boot();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      backgrounded = false;
+      _listen();
+      return;
+    }
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      backgrounded = true;
+      if (working) {
+        unawaited(_notifyProgress());
+      } else {
+        _sub?.cancel();
+      }
+    }
   }
 
   Future<void> _boot() async {
@@ -68,6 +103,19 @@ class _ChatScreenState extends State<ChatScreen> {
       paymentBlocked = false;
       connectLabel = inst?.isPaused == true ? 'Waking paused sandbox…' : 'Connecting to sandbox…';
     });
+    final snap = await store.load();
+    if (mounted && snap.events.isNotEmpty) {
+      setState(() {
+        events
+          ..clear()
+          ..addAll(snap.events);
+        answered
+          ..clear()
+          ..addAll(snap.answered);
+        connecting = false;
+      });
+      _scrollToEnd();
+    }
     try {
       inst = await api.getInstance(id);
       if (inst?.needsPayment == true) {
@@ -96,11 +144,12 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     _listen();
     api.commands(id).then((c) {
-      if (mounted) setState(() => commands = c);
+      if (mounted && c.isNotEmpty) setState(() => commands = c);
     }).catchError((_) {});
     api.cliVersion(id).then((c) {
       if (mounted) setState(() => cli = c);
     }).catchError((_) {});
+    unawaited(TaskNotifications.requestPermissions());
   }
 
   void _listen() {
@@ -115,6 +164,10 @@ class _ChatScreenState extends State<ChatScreen> {
       _scrollToEnd();
     }, onError: (e) {
       if (!mounted) return;
+      if (backgrounded) {
+        setState(() => reconnecting = true);
+        return;
+      }
       final pay = e is ApiException && e.paymentRequired;
       setState(() {
         connecting = false;
@@ -139,21 +192,21 @@ class _ChatScreenState extends State<ChatScreen> {
         }
         if (!disposed && mounted) {
           setState(() {
-            if (connecting) {
+            if (connecting && events.isEmpty) {
               error = e.message;
               connecting = false;
-            } else {
+            } else if (!backgrounded) {
               reconnecting = true;
             }
           });
         }
       } catch (e) {
-        if (!disposed && mounted && connecting) {
+        if (!disposed && mounted && connecting && events.isEmpty) {
           setState(() {
             error = e.toString();
             connecting = false;
           });
-        } else if (!disposed && mounted) {
+        } else if (!disposed && mounted && !backgrounded) {
           setState(() => reconnecting = true);
         }
       }
@@ -163,31 +216,121 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  bool _alreadyHave(AppChatEvent ev) {
+    if (ev.local || ev.id.isEmpty) return false;
+    return events.any((e) {
+      if (e.local || e.id != ev.id || e.type != ev.type) return false;
+      if (ev.ts > 0 && e.ts > 0) return (e.ts - ev.ts).abs() < 8000;
+      return e.text == ev.text && e.fileId == ev.fileId;
+    });
+  }
+
   void _ingest(AppChatEvent ev) {
     if (!ev.local && ev.id.isNotEmpty) {
       lastServerId = ev.id;
-      if (events.any((e) => !e.local && e.id == ev.id)) return;
+      if (_alreadyHave(ev)) return;
+    }
+    if (ev.type == 'progress') {
+      showKickoff = false;
+      if (ev.tools != null) toolCount = math.max(toolCount, ev.tools!);
+      unawaited(_notifyProgress());
+      _persist();
+      return;
+    }
+    if (ev.type == 'typing') {
+      return;
     }
     if (ev.type == 'done') {
-      sending = false;
-      events.removeWhere((e) => e.type == 'typing');
+      _endTurn();
       return;
     }
-    if (ev.type == 'text' || ev.type == 'error') sending = false;
-    if (ev.type == 'typing') {
-      events.removeWhere((e) => e.type == 'typing');
+    if (ev.type == 'error') {
+      lastAssistantText = ev.text;
       events.add(ev);
+      _endTurn(error: true, body: ev.text);
       return;
     }
+    if (ev.type == 'text' || ev.type == 'ask' || ev.type == 'approve' || ev.type == 'file') {
+      sending = false;
+      showKickoff = false;
+    }
+    if (ev.type == 'text' && ev.text.isNotEmpty) lastAssistantText = ev.text;
     if (ev.type == 'tool') {
-      events.removeWhere((e) => e.type == 'typing');
+      showKickoff = false;
+      if (ev.state != 'done') toolCount += 1;
       final i = events.lastIndexWhere((e) => e.type == 'tool' && e.state != 'done');
-      if (i >= 0) {
+      if (i >= 0 && ev.state == 'done') {
         events[i] = ev;
+        _persist();
+        unawaited(_notifyProgress());
+        return;
+      }
+    }
+    if (ev.type == 'file' && ev.role == 'user') {
+      final i = events.lastIndexWhere(
+        (e) => e.isUser && (e.type == 'file' || e.type == 'user') && e.name == ev.name && e.fileId == null,
+      );
+      if (i >= 0) {
+        events[i].raw['fileId'] = ev.fileId;
+        events[i].raw['kind'] = ev.kind ?? events[i].kind;
+        _persist();
         return;
       }
     }
     events.add(ev);
+    if (ev.type == 'file' && ev.fileId != null && ev.localPath == null) {
+      unawaited(_ensureLocalFile(ev, auto: ev.isImage));
+    }
+    _persist();
+    unawaited(_notifyProgress());
+  }
+
+  void _persist() {
+    store.scheduleSave(events: events, answered: answered, lastServerId: lastServerId);
+  }
+
+  void _beginTurn() {
+    turnStartedAt = DateTime.now();
+    toolCount = 0;
+    showKickoff = true;
+    sending = true;
+    error = null;
+    lastAssistantText = null;
+    _tick?.cancel();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || turnStartedAt == null) return;
+      setState(() {});
+      unawaited(_notifyProgress());
+    });
+    unawaited(TaskNotifications.startTurn(instanceId: id, name: instanceName));
+  }
+
+  void _endTurn({bool error = false, String? body}) {
+    sending = false;
+    showKickoff = false;
+    turnStartedAt = null;
+    _tick?.cancel();
+    _tick = null;
+    _persist();
+    unawaited(
+      TaskNotifications.finishTurn(
+        instanceId: id,
+        name: instanceName,
+        body: body ?? lastAssistantText,
+        error: error,
+      ),
+    );
+  }
+
+  Future<void> _notifyProgress() async {
+    if (turnStartedAt == null) return;
+    await TaskNotifications.updateProgress(
+      instanceId: id,
+      name: instanceName,
+      elapsed: elapsed,
+      tools: toolCount,
+      pct: progressPct,
+    );
   }
 
   void _scrollToEnd() {
@@ -205,9 +348,15 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     disposed = true;
+    WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
+    _tick?.cancel();
     _input.dispose();
     _scroll.dispose();
+    unawaited(store.save(events: events, answered: answered, lastServerId: lastServerId));
+    if (turnStartedAt == null) {
+      unawaited(TaskNotifications.cancelSilent());
+    }
     super.dispose();
   }
 
@@ -217,21 +366,22 @@ class _ChatScreenState extends State<ChatScreen> {
     _input.clear();
     HapticFeedback.lightImpact();
     setState(() {
-      sending = true;
-      error = null;
+      _beginTurn();
       events.add(AppChatEvent({
         'type': 'user',
         'text': t,
         'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
+        'ts': DateTime.now().millisecondsSinceEpoch,
       }, local: true));
     });
+    _persist();
     _scrollToEnd();
     try {
       await api.sendChat(id, t);
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        sending = false;
+        _endTurn(error: true, body: e.toString());
         error = e.toString();
       });
     }
@@ -242,40 +392,131 @@ class _ChatScreenState extends State<ChatScreen> {
     if (picked.isEmpty) return;
     final f = picked.first;
     final bytes = await f.readAsBytes();
+    final caption = _input.text.trim();
+    final mime = f.xFile.mimeType;
+    final image = looksLikeImage(name: f.name, mime: mime);
+    final localId = 'local-file-${DateTime.now().millisecondsSinceEpoch}';
+    final path = await store.saveMedia(name: f.name, bytes: bytes, id: localId);
     setState(() {
-      sending = true;
+      _beginTurn();
       events.add(AppChatEvent({
-        'type': 'user',
-        'text': 'Attached ${f.name}',
-        'id': 'local-file-${DateTime.now().millisecondsSinceEpoch}',
+        'type': 'file',
+        'role': 'user',
+        'text': caption,
+        'name': f.name,
+        'kind': image ? 'photo' : 'document',
+        'mime': mime,
+        'size': bytes.length,
+        'localPath': path,
+        'id': localId,
+        'ts': DateTime.now().millisecondsSinceEpoch,
       }, local: true));
     });
+    _input.clear();
+    _persist();
+    _scrollToEnd();
     try {
-      await api.upload(id, name: f.name, bytes: bytes, caption: _input.text.trim());
-      _input.clear();
+      await api.upload(id, name: f.name, bytes: bytes, caption: caption, mime: mime);
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        sending = false;
+        _endTurn(error: true, body: e.toString());
         error = e.toString();
       });
     }
   }
 
-  Future<void> _download(AppChatEvent ev) async {
+  Future<void> _ensureLocalFile(AppChatEvent ev, {bool auto = false}) async {
     final fileId = ev.fileId;
     if (fileId == null) return;
-    setState(() => error = null);
+    if (ev.localPath != null && File(ev.localPath!).existsSync()) return;
+    final cached = await store.existingMedia(fileId, ev.name);
+    if (cached != null) {
+      if (!mounted) return;
+      setState(() => ev.setLocalPath(cached));
+      _persist();
+      return;
+    }
+    if (!auto && fetching.contains(fileId)) return;
+    if (fetching.contains(fileId)) return;
+    fetching.add(fileId);
+    if (mounted) setState(() {});
     try {
       final file = await api.downloadFile(id, fileId);
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/${file.name}';
-      await File(path).writeAsBytes(file.bytes);
-      await SharePlus.instance.share(ShareParams(files: [XFile(path)], text: file.name));
+      final path = await store.saveMedia(name: file.name, bytes: file.bytes, id: fileId);
+      if (!mounted) return;
+      setState(() {
+        ev.setLocalPath(path);
+        ev.raw['name'] = file.name;
+        ev.raw['mime'] = file.mime;
+        ev.raw['size'] = file.bytes.length;
+      });
+      _persist();
+    } catch (e) {
+      if (mounted && !auto) setState(() => error = e.toString());
+    } finally {
+      fetching.remove(fileId);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _sharePath(String path, String name) async {
+    await SharePlus.instance.share(ShareParams(files: [XFile(path)], text: name));
+  }
+
+  Future<void> _saveImage(String path) async {
+    try {
+      final ok = await Gal.requestAccess();
+      if (ok == false) {
+        if (!mounted) return;
+        setState(() => error = 'Photo permission denied');
+        return;
+      }
+      await Gal.putImage(path);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved to gallery')));
     } catch (e) {
       if (!mounted) return;
       setState(() => error = e.toString());
     }
+  }
+
+  Future<void> _downloadFile(AppChatEvent ev) async {
+    await _ensureLocalFile(ev);
+    final path = ev.localPath;
+    if (path == null || !File(path).existsSync()) return;
+    try {
+      Directory? dest;
+      try {
+        dest = await getDownloadsDirectory();
+      } catch (_) {}
+      dest ??= await getApplicationDocumentsDirectory();
+      final out = '${dest.path}/${ev.name ?? File(path).uri.pathSegments.last}';
+      await File(path).copy(out);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved $out')));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => error = e.toString());
+    }
+  }
+
+  void _openImage(AppChatEvent ev) {
+    final path = ev.localPath;
+    if (path == null) {
+      unawaited(_ensureLocalFile(ev, auto: true));
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ImageLightbox(
+          path: path,
+          title: ev.name ?? 'Image',
+          onSave: () => _saveImage(path),
+          onShare: () => _sharePath(path, ev.name ?? 'image'),
+        ),
+      ),
+    );
   }
 
   Future<void> _customAnswer(AppChatEvent ev) async {
@@ -299,7 +540,20 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     if (text == null || text.isEmpty) return;
     setState(() => answered.add(ev.ref ?? ev.id));
+    _persist();
     await api.answer(id, ref: ev.ref, answer: text);
+  }
+
+  void _pickCommand(BotCommand c) {
+    if (commandSendsImmediately(c.command)) {
+      _input.clear();
+      _send('/${c.command}');
+      return;
+    }
+    _input.value = TextEditingValue(
+      text: '/${c.command} ',
+      selection: TextSelection.collapsed(offset: c.command.length + 2),
+    );
   }
 
   void _commands() {
@@ -311,10 +565,7 @@ class _ChatScreenState extends State<ChatScreen> {
         var q = '';
         return StatefulBuilder(
           builder: (ctx, setModal) {
-            final filtered = commands.where((c) {
-              if (q.isEmpty) return true;
-              return c.command.contains(q) || c.description.toLowerCase().contains(q);
-            }).toList();
+            final filtered = filterCommands(commands, q);
             return SafeArea(
               child: SizedBox(
                 height: MediaQuery.of(ctx).size.height * 0.7,
@@ -337,7 +588,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               subtitle: Text(c.description, style: const TextStyle(color: Vc.muted)),
                               onTap: () {
                                 Navigator.pop(ctx);
-                                _send('/${c.command}');
+                                _pickCommand(c);
                               },
                             ),
                           if (filtered.isEmpty)
@@ -375,11 +626,6 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Text(ev.text),
             ),
           ),
-        );
-      case 'typing':
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-          child: TypingDots(label: ev.text.isEmpty ? 'Working' : ev.text),
         );
       case 'tool':
         return Container(
@@ -426,6 +672,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           ? null
                           : () {
                               setState(() => answered.add(ev.ref ?? ev.id));
+                              _persist();
                               api.approve(id, c);
                             },
                       child: Text(c),
@@ -453,6 +700,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       ? null
                       : () {
                           setState(() => answered.add(ev.ref ?? ev.id));
+                          _persist();
                           api.answer(id, ref: ev.ref, index: i, answer: ev.choices[i]);
                         },
                 ),
@@ -490,6 +738,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       ? null
                       : () {
                           setState(() => answered.add(ev.ref ?? ev.id));
+                          _persist();
                           api.pick(id, ref: ev.ref, value: '${o['value']}', kind: ev.kind);
                         },
                 ),
@@ -497,11 +746,32 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         );
       case 'file':
-        return ListTile(
-          leading: Icon(ev.kind == 'photo' ? Icons.image : Icons.attach_file, color: Vc.green),
-          title: Text(ev.name ?? 'file'),
-          subtitle: const Text('Tap to save / share', style: TextStyle(color: Vc.muted)),
-          onTap: () => _download(ev),
+        final busy = ev.fileId != null && fetching.contains(ev.fileId);
+        if (ev.isImage) {
+          return ChatImageBubble(
+            event: ev,
+            downloading: busy,
+            onOpen: () => _openImage(ev),
+            onSave: () {
+              if (ev.localPath != null) {
+                unawaited(_saveImage(ev.localPath!));
+              } else {
+                unawaited(_ensureLocalFile(ev, auto: true));
+              }
+            },
+            onShare: () {
+              if (ev.localPath != null) unawaited(_sharePath(ev.localPath!, ev.name ?? 'image'));
+            },
+            onRetry: () => _ensureLocalFile(ev, auto: true),
+          );
+        }
+        return ChatFileCard(
+          event: ev,
+          downloading: busy,
+          onDownload: () => _downloadFile(ev),
+          onShare: () {
+            if (ev.localPath != null) unawaited(_sharePath(ev.localPath!, ev.name ?? 'file'));
+          },
         );
       case 'error':
         return Padding(
@@ -509,6 +779,8 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Text(ev.text, style: const TextStyle(color: Vc.red)),
         );
       case 'done':
+      case 'typing':
+      case 'progress':
         return const SizedBox.shrink();
       default:
         if (ev.text.isEmpty) return const SizedBox.shrink();
@@ -563,18 +835,55 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  String _liveLabel() {
+    final m = elapsed.inMinutes;
+    final s = elapsed.inSeconds % 60;
+    final clock = m <= 0 ? '${s}s' : '${m}m ${s.toString().padLeft(2, '0')}s';
+    return 'Working · $clock · $toolCount tool${toolCount == 1 ? '' : 's'}';
+  }
+
+  Widget _commandOverlay() {
+    final filtered = filterCommands(commands, _input.text);
+    return Material(
+      color: Vc.card,
+      elevation: 8,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 240),
+        child: ListView(
+          shrinkWrap: true,
+          padding: EdgeInsets.zero,
+          children: [
+            for (final c in filtered)
+              ListTile(
+                dense: true,
+                title: Text('/${c.command}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text(c.description, style: const TextStyle(color: Vc.muted, fontSize: 11)),
+                onTap: () => _pickCommand(c),
+              ),
+            if (filtered.isEmpty)
+              const ListTile(
+                dense: true,
+                title: Text('No matching commands', style: TextStyle(color: Vc.muted)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final name = inst?.name ?? widget.instance?.name ?? 'Chat';
     final updateReady = cli?['updateAvailable'] == true;
-    return Scaffold(
+    final palette = showCommandPalette(_input.text);
+    return WithForegroundTask(
+      child: Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            Text(instanceName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
             if (working)
-              const TypingDots(label: 'Agent')
+              Text(_liveLabel(), style: const TextStyle(fontSize: 11, color: Vc.green))
             else if (inst != null)
               Text(inst!.displayState, style: const TextStyle(fontSize: 11, color: Vc.muted)),
           ],
@@ -626,7 +935,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         title: 'Subscription needed',
                         detail: 'Renew this instance to keep chatting with the sandbox.',
                       )
-                    : events.isEmpty && !connecting
+                    : events.isEmpty && !connecting && !showKickoff
                         ? const EmptyState(
                             icon: Icons.chat_bubble_outline,
                             title: 'Start coding',
@@ -635,10 +944,19 @@ class _ChatScreenState extends State<ChatScreen> {
                         : ListView.builder(
                             controller: _scroll,
                             padding: const EdgeInsets.only(bottom: 12, top: 8),
-                            itemCount: events.length,
-                            itemBuilder: (ctx, i) => _bubble(events[i]),
+                            itemCount: events.length + (showKickoff ? 1 : 0),
+                            itemBuilder: (ctx, i) {
+                              if (i == events.length) {
+                                return const Padding(
+                                  padding: EdgeInsets.fromLTRB(12, 8, 12, 8),
+                                  child: TypingDots(label: 'on it'),
+                                );
+                              }
+                              return _bubble(events[i]);
+                            },
                           ),
               ),
+              if (palette) _commandOverlay(),
               if (paymentBlocked)
                 SafeArea(
                   child: Padding(
@@ -696,13 +1014,14 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
             ],
           ),
-          if (connecting)
+          if (connecting && events.isEmpty)
             BusyOverlay(
               message: connectLabel,
               detail: 'Waking the VM and opening the chat inbox',
             ),
         ],
       ),
+    ),
     );
   }
 }

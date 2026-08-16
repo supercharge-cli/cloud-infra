@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import 'api/models.dart';
+import 'chat/notifications.dart';
 import 'screens/account.dart';
 import 'screens/billing.dart';
 import 'screens/chat.dart';
@@ -22,6 +25,7 @@ const apiBase = String.fromEnvironment(
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(Vc.overlay);
+  unawaited(TaskNotifications.init());
   runApp(const VectraApp());
 }
 
@@ -78,6 +82,9 @@ class _VectraAppState extends State<VectraApp> {
         GoRoute(path: '/account', builder: (c, st) => const AccountScreen()),
       ],
     );
+    TaskNotifications.onOpenChat = (id) {
+      router.go('/chat/$id');
+    };
     session.load();
   }
 
