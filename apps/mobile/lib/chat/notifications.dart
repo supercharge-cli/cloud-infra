@@ -32,7 +32,7 @@ class TaskNotifications {
       const android = AndroidInitializationSettings('@drawable/ic_stat_vectra');
       const ios = DarwinInitializationSettings();
       await _plugin.initialize(
-        const InitializationSettings(android: android, iOS: ios),
+        settings: const InitializationSettings(android: android, iOS: ios),
         onDidReceiveNotificationResponse: (res) {
           final id = res.payload;
           if (id != null && id.isNotEmpty) onOpenChat?.call(id);
@@ -187,10 +187,10 @@ class TaskNotifications {
     required String label,
   }) async {
     await plugin.show(
-      progressId,
-      '$name · $pct%',
-      label,
-      NotificationDetails(
+      id: progressId,
+      title: '$name · $pct%',
+      body: label,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           progressChannel,
           'Task progress',
@@ -222,7 +222,7 @@ class TaskNotifications {
   }) async {
     try {
       _activeId = null;
-      await _plugin.cancel(progressId);
+      await _plugin.cancel(id: progressId);
       if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
         await FlutterForegroundTask.stopService();
       }
@@ -241,10 +241,10 @@ class TaskNotifications {
         ? (error ? 'The turn ended with an error.' : 'Task finished.')
         : body.trim();
     await _plugin.show(
-      doneId,
-      error ? '$name failed' : '$name finished',
-      snippet,
-      NotificationDetails(
+      id: doneId,
+      title: error ? '$name failed' : '$name finished',
+      body: snippet,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           doneChannel,
           'Task complete',
@@ -262,7 +262,7 @@ class TaskNotifications {
   static Future<void> cancelSilent() async {
     try {
       _activeId = null;
-      await _plugin.cancel(progressId);
+      await _plugin.cancel(id: progressId);
       if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
         await FlutterForegroundTask.stopService();
       }
@@ -327,7 +327,7 @@ class _VectraTaskHandler extends TaskHandler {
     if (_notifReady) return;
     try {
       await _plugin.initialize(
-        const InitializationSettings(
+        settings: const InitializationSettings(
           android: AndroidInitializationSettings('@drawable/ic_stat_vectra'),
           iOS: DarwinInitializationSettings(),
         ),
@@ -447,7 +447,7 @@ class _VectraTaskHandler extends TaskHandler {
     _stopped = true;
     _http?.close(force: true);
     try {
-      await _plugin.cancel(TaskNotifications.progressId);
+      await _plugin.cancel(id: TaskNotifications.progressId);
       await TaskNotifications.showDone(
         instanceId: instanceId,
         name: _name,
