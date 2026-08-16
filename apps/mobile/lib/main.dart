@@ -10,6 +10,8 @@ import 'screens/instance_settings.dart';
 import 'screens/instances.dart';
 import 'screens/login.dart';
 import 'state/session.dart';
+import 'theme.dart';
+import 'widgets/ui.dart';
 
 const apiBase = String.fromEnvironment(
   'API_BASE',
@@ -69,12 +71,17 @@ class VectraApp extends StatelessWidget {
           );
           return MaterialApp.router(
             title: 'Vectra Cloud',
-            theme: ThemeData(
-              brightness: Brightness.dark,
-              colorSchemeSeed: const Color(0xFF22C55E),
-              useMaterial3: true,
-            ),
+            theme: Vc.dark(),
             routerConfig: router,
+            builder: (context, child) {
+              if (!s.ready) {
+                return const Scaffold(
+                  backgroundColor: Vc.bg,
+                  body: BusyOverlay(message: 'Loading Vectra…'),
+                );
+              }
+              return child ?? const SizedBox.shrink();
+            },
           );
         },
       ),

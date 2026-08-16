@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../state/session.dart';
+import '../theme.dart';
+import '../widgets/ui.dart';
 
 class BillingScreen extends StatefulWidget {
   const BillingScreen({super.key, this.instanceId});
@@ -15,6 +17,7 @@ class BillingScreen extends StatefulWidget {
 class _BillingScreenState extends State<BillingScreen> {
   Map<String, dynamic>? cfg;
   String? error;
+  bool loading = true;
   bool busy = false;
 
   @override
@@ -29,7 +32,7 @@ class _BillingScreenState extends State<BillingScreen> {
     } catch (e) {
       error = e.toString();
     }
-    if (mounted) setState(() {});
+    if (mounted) setState(() => loading = false);
   }
 
   Future<void> _pay(String currency) async {
@@ -41,12 +44,7 @@ class _BillingScreenState extends State<BillingScreen> {
         instanceId: widget.instanceId,
         currency: currency,
       );
-      // Checkout lives on the website until native Razorpay keys are wired.
-      final base = api.baseUrl;
-      await launchUrl(
-        Uri.parse('$base/dashboard'),
-        mode: LaunchMode.externalApplication,
-      );
+      await launchUrl(Uri.parse('${api.baseUrl}/dashboard'), mode: LaunchMode.externalApplication);
     } catch (e) {
       error = e.toString();
     }
@@ -58,28 +56,35 @@ class _BillingScreenState extends State<BillingScreen> {
     final plan = cfg?['plan'] as Map<String, dynamic>?;
     return Scaffold(
       appBar: AppBar(title: const Text('Billing')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+      body: Stack(
         children: [
-          if (error != null) Text(error!, style: const TextStyle(color: Colors.redAccent)),
-          if (plan != null) ...[
-            Text('${plan['label'] ?? plan['name'] ?? 'Plan'}', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            Text('₹${plan['priceInr']} or \$${plan['priceUsd']} / ${plan['periodDays']} days'),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: busy ? null : () => _pay('INR'),
-              child: const Text('Pay in INR'),
+          if (loading)
+            const Center(child: CircularProgressIndicator(color: Vc.green))
+          else
+            ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (error != null) Text(error!, style: const TextStyle(color: Vc.red)),
+                if (plan != null) ...[
+                  Text('${plan['label'] ?? 'Plan'}', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  Text(
+                    '₹${plan['priceInr']} or \$${plan['priceUsd']} / ${plan['periodDays']} days',
+                    style: const TextStyle(color: Vc.muted),
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton(onPressed: busy ? null : () => _pay('INR'), child: const Text('Pay in INR')),
+                  const SizedBox(height: 8),
+                  OutlinedButton(onPressed: busy ? null : () => _pay('USD'), child: const Text('Pay in USD')),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Checkout finishes on the dashboard (Razorpay). Return here after payment.',
+                    style: TextStyle(color: Vc.muted),
+                  ),
+                ],
+              ],
             ),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: busy ? null : () => _pay('USD'),
-              child: const Text('Pay in USD'),
-            ),
-            const SizedBox(height: 16),
-            const Text('Checkout completes on the dashboard (Razorpay). Come back here after payment.'),
-          ] else
-            const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator())),
+          if (busy) const BusyOverlay(message: 'Opening checkout…'),
         ],
       ),
     );

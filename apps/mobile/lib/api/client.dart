@@ -104,23 +104,77 @@ class VectraClient {
     return AuthUser.fromJson(data['user'] as Map<String, dynamic>);
   }
 
-  Future<List<CloudInstance>> instances() async {
+  Future<DashboardData> dashboard() async {
     final data = await _json('GET', '/api/instances');
     final list = (data['instances'] as List?) ?? const [];
-    return list
-        .whereType<Map>()
-        .map((e) => CloudInstance.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
+    return DashboardData(
+      instances: list
+          .whereType<Map>()
+          .map((e) => CloudInstance.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
+      quota: FreeQuota.fromJson(data['freeQuota'] as Map<String, dynamic>?),
+      plan: PlanInfo.fromJson(data['plan'] as Map<String, dynamic>?),
+    );
   }
+
+  Future<List<CloudInstance>> instances() async => (await dashboard()).instances;
 
   Future<CloudInstance> createInstance(String name) async {
     final data = await _json('POST', '/api/instances', body: {'name': name});
     return CloudInstance.fromJson(data['instance'] as Map<String, dynamic>);
   }
 
-  Future<void> wake(String id) => _json('POST', '/api/instances/$id/wake');
-  Future<void> destroy(String id) =>
-      _json('DELETE', '/api/instances/$id');
+  Future<Map<String, dynamic>> wake(String id) =>
+      _json('POST', '/api/instances/$id/wake');
+  Future<Map<String, dynamic>> restart(String id) =>
+      _json('POST', '/api/instances/$id/restart');
+  Future<void> destroy(String id) => _json('DELETE', '/api/instances/$id');
+
+  Future<Map<String, dynamic>> getConfig(String id) =>
+      _json('GET', '/api/instances/$id/config');
+
+  Future<Map<String, dynamic>> pairing(String id) =>
+      _json('GET', '/api/instances/$id/pairing');
+
+  Future<Map<String, dynamic>> approvePair(
+    String id, {
+    required String code,
+    String platform = 'telegram',
+  }) =>
+      _json('POST', '/api/instances/$id/pairing', body: {
+        'code': code,
+        'platform': platform,
+      });
+
+  Future<Map<String, dynamic>> logs(
+    String id, {
+    String source = 'all',
+    int lines = 200,
+  }) =>
+      _json('GET', '/api/instances/$id/logs', query: {
+        'source': source,
+        'lines': '$lines',
+      });
+
+  Future<ExecResult> exec(
+    String id, {
+    required String command,
+    String cwd = '/home/user/workspace',
+    int timeout = 120,
+  }) async {
+    final data = await _json('POST', '/api/instances/$id/exec', body: {
+      'command': command,
+      'cwd': cwd,
+      'timeout': timeout,
+    });
+    return ExecResult.fromJson(data);
+  }
+
+  Future<Map<String, dynamic>> cliVersion(String id) =>
+      _json('GET', '/api/instances/$id/cli-version');
+
+  Future<Map<String, dynamic>> cliUpdate(String id) =>
+      _json('POST', '/api/instances/$id/cli-update');
 
   Future<void> sendChat(String id, String text) =>
       _json('POST', '/api/instances/$id/chat', body: {'text': text});
