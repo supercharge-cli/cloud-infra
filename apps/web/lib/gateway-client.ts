@@ -1259,7 +1259,9 @@ export async function readSandboxLogs(
 
 /** Query live sandbox state (paused still exists and is resumable). */
 export async function getSandboxState(sandboxId: string): Promise<SandboxLiveState> {
-  const res = await gwFetch(`/sandboxes/${encodeURIComponent(sandboxId)}`);
+  const res = await gwFetch(`/sandboxes/${encodeURIComponent(sandboxId)}`, {
+    signal: AbortSignal.timeout(8_000),
+  });
   const text = await res.text();
   let data: Partial<SandboxLiveState> & { success?: boolean; message?: string } = {};
   try {

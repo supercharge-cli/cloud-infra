@@ -51,18 +51,18 @@ export async function requireChatInstance(id: string): Promise<
 }
 
 export async function ensureInbox(inst: Instance): Promise<void> {
-  await bootstrapAppInbox(inst.sessionId, inst.sandboxId).catch(() => undefined);
   try {
     const health = await appInboxFetch(
       inst.sessionId,
       '/health',
-      {},
+      { signal: AbortSignal.timeout(4_000) },
       { sandboxId: inst.sandboxId },
     );
     if (health.ok) return;
   } catch {
-    /* wake */
+    /* wake only when inbox is actually down */
   }
+  await bootstrapAppInbox(inst.sessionId, inst.sandboxId).catch(() => undefined);
   await wakeSession(inst.sessionId, {
     sandboxId: inst.sandboxId,
     restartDaemon: true,

@@ -31,6 +31,42 @@ function mapE2bToStatus(state: string, prev: InstanceStatus): InstanceStatus {
   return prev;
 }
 
+async function refreshLiveStates(userId: string, rows: Instance[]): Promise<void> {
+  await Promise.all(
+    rows.map(async (inst) => {
+      if (!inst.sandboxId || inst.status === 'destroyed') return;
+      try {
+        const live = await getSandboxState(inst.sandboxId);
+        const nextStatus = mapE2bToStatus(live.state, inst.status);
+        if (nextStatus !== inst.status) {
+          await updateInstance(userId, inst.id, {
+            status: nextStatus,
+            lastError:
+              live.state === 'missing'
+                ? (live.message || 'Sandbox no longer exists on the cloud provider').slice(0, 500)
+                : nextStatus === 'paused'
+                  ? undefined
+                  : inst.lastError,
+          });
+        }
+        if (
+          inst.telegramBotToken &&
+          (live.state === 'paused' || live.state === 'running')
+        ) {
+          void syncTelegramWakeWebhook({
+            botToken: inst.telegramBotToken,
+            instanceId: inst.id,
+            wakeSecret: inst.wakeSecret,
+            sandboxState: live.state,
+          }).catch(() => undefined);
+        }
+      } catch {
+        /* next list/refresh will retry */
+      }
+    }),
+  );
+}
+
 /** List always returns Mongo-owned instances (including paused) so the user can resume. */
 export async function GET() {
   const user = await getSessionUser();
@@ -43,70 +79,26 @@ export async function GET() {
   const freeAvailable = Math.max(0, freeLimit - freeUsed);
 
   const rows = await listInstances(user.id);
-  const instances = await Promise.all(
-    rows.map(async (inst) => {
-      let liveState: string | undefined;
-      let resumable = true;
-      let liveMessage: string | undefined;
 
-      // Sync billing status (free tier stays active)
-      const billingStatus = billingStatusForInstance(inst);
-      if (inst.billingStatus !== billingStatus) {
-        const u = await updateInstance(user.id, inst.id, { billingStatus });
-        if (u) Object.assign(inst, u);
-      }
+  // Do not wait on E2B here — one live probe per sandbox is 1–3s and
+  // makes the dashboard/app feel like "the DB is slow". Return Mongo
+  // status immediately; refresh live state in the background.
+  const instances = rows.map((inst) => {
+    const billingStatus = billingStatusForInstance(inst);
+    if (inst.billingStatus !== billingStatus) {
+      void updateInstance(user.id, inst.id, { billingStatus }).catch(() => undefined);
+    }
+    return {
+      ...publicInstance(inst as Instance),
+      liveState: inst.status,
+      resumable: inst.status !== 'destroyed' && inst.status !== 'missing',
+      paid: hasInstanceAccess(inst),
+      isFree: Boolean(inst.isFree),
+      billingStatus,
+    };
+  });
 
-      if (inst.sandboxId && inst.status !== 'destroyed') {
-        try {
-          const live = await getSandboxState(inst.sandboxId);
-          liveState = live.state;
-          resumable = live.resumable;
-          liveMessage = live.message;
-
-          const nextStatus = mapE2bToStatus(live.state, inst.status);
-          if (nextStatus !== inst.status) {
-            const updated = await updateInstance(user.id, inst.id, {
-              status: nextStatus,
-              lastError:
-                live.state === 'missing'
-                  ? (live.message || 'Sandbox no longer exists on the cloud provider').slice(0, 500)
-                  : nextStatus === 'paused'
-                    ? undefined
-                    : inst.lastError,
-            });
-            if (updated) Object.assign(inst, updated);
-          }
-
-          // Arm host Telegram webhook only while paused so the next DM can
-          // auto-resume via E2B connect. Clear it while running so daemon long-poll works.
-          if (
-            inst.telegramBotToken &&
-            (live.state === 'paused' || live.state === 'running')
-          ) {
-            void syncTelegramWakeWebhook({
-              botToken: inst.telegramBotToken,
-              instanceId: inst.id,
-              wakeSecret: inst.wakeSecret,
-              sandboxState: live.state,
-            }).catch(() => undefined);
-          }
-        } catch {
-          liveState = 'unknown';
-          resumable = true;
-        }
-      }
-
-      return {
-        ...publicInstance(inst as Instance),
-        liveState: liveState || inst.status,
-        resumable,
-        liveMessage,
-        paid: hasInstanceAccess(inst),
-        isFree: Boolean(inst.isFree),
-        billingStatus: billingStatusForInstance(inst),
-      };
-    }),
-  );
+  void refreshLiveStates(user.id, rows).catch(() => undefined);
 
   const plan = getPlan();
   return NextResponse.json({
