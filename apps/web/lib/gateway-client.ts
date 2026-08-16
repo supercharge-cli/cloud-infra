@@ -3,6 +3,14 @@
  * API keys for the cloud provider stay on the gateway, not in the browser.
  */
 
+import {
+  envKeysForProvider,
+  parseSavedProviders,
+  slotFromActive,
+  upsertSavedProvider,
+  type SavedProvider,
+} from './saved-providers';
+
 function gatewayBase(): string {
   let base =
     process.env.XIBECODE_SANDBOX_GATEWAY_URL?.trim() ||
@@ -359,6 +367,8 @@ const API_KEY_ENV_NAMES = [
   'ANTHROPIC_API_KEY',
   'ROUTINGRUN_API_KEY',
   'OPENROUTER_API_KEY',
+  'NOUS_API_KEY',
+  'HERMES_API_KEY',
   'ZENLLM_API_KEY',
   'DEEPSEEK_API_KEY',
   'GOOGLE_API_KEY',
@@ -392,6 +402,15 @@ function apiKeyFromEnv(env: Record<string, string>): string {
   return '';
 }
 
+export type SavedProviderView = {
+  id: string;
+  provider: string;
+  model?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  apiKeyHint?: string;
+};
+
 export type SandboxConfigView = {
   provider?: string;
   model?: string;
@@ -411,6 +430,7 @@ export type SandboxConfigView = {
   telegramHint?: string;
   discordHint?: string;
   slackHint?: string;
+  savedProviders?: SavedProviderView[];
 };
 
 function hint(secret: string | undefined): string | undefined {
@@ -425,6 +445,18 @@ function emptyConfigView(): SandboxConfigView {
     hasDiscordToken: false,
     hasSlackToken: false,
     allowAllUsers: false,
+    savedProviders: [],
+  };
+}
+
+function toSavedView(slot: SavedProvider): SavedProviderView {
+  return {
+    id: slot.id,
+    provider: slot.provider,
+    model: slot.model,
+    baseUrl: slot.baseUrl,
+    apiKey: slot.apiKey,
+    apiKeyHint: hint(slot.apiKey),
   };
 }
 
@@ -485,6 +517,22 @@ function viewFromSources(
     'openai',
   );
   const slackOk = Boolean(slackBot && slackApp);
+  const current = slotFromActive({
+    provider: provider || 'openai',
+    apiKey,
+    baseUrl,
+    model,
+  });
+  const saved = upsertSavedProvider(
+    parseSavedProviders(profile.savedProviders),
+    current || {
+      id: provider || 'openai',
+      provider: provider || 'openai',
+      apiKey: apiKey || undefined,
+      baseUrl: baseUrl || undefined,
+      model: model || undefined,
+    },
+  );
   return {
     provider: provider || 'openai',
     model: model || '',
@@ -503,6 +551,7 @@ function viewFromSources(
     telegramHint: hint(tg),
     discordHint: hint(dc),
     slackHint: slackOk ? hint(slackBot) : undefined,
+    savedProviders: saved.map(toSavedView),
   };
 }
 
@@ -627,6 +676,8 @@ export type ConfigInput = {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  /** Full list from the editor. Omitted = keep existing + upsert current. */
+  savedProviders?: SavedProvider[];
   /** Vectra instance id — used to mint public vision URLs. */
   instanceId?: string;
   telegramBotToken?: string;
@@ -708,6 +759,17 @@ export async function writeSandboxConfig(
       meta: existing,
     };
   }
+  const incomingSaved = Array.isArray(input.savedProviders)
+    ? parseSavedProviders(input.savedProviders)
+    : parseSavedProviders(prevProfile.savedProviders);
+  const currentSlot = slotFromActive({ provider, apiKey, baseUrl, model });
+  const savedProviders = currentSlot
+    ? upsertSavedProvider(incomingSaved, currentSlot)
+    : incomingSaved;
+  for (const slot of savedProviders) {
+    if (slot.apiKey) secrets.push(slot.apiKey);
+  }
+
   secrets.push(apiKey, telegramBotToken, discordBotToken, slackBotToken, slackAppToken);
 
   const inboxSecret =
@@ -748,11 +810,18 @@ export async function writeSandboxConfig(
       slackAppToken ? `SLACK_APP_TOKEN=${slackAppToken}` : '',
       slackAppToken ? `XIBECODE_SLACK_APP_TOKEN=${slackAppToken}` : '',
       openAccess ? `GATEWAY_ALLOW_ALL_USERS=true` : `GATEWAY_ALLOW_ALL_USERS=false`,
-      provider === 'anthropic' ? `ANTHROPIC_API_KEY=${apiKey}` : `OPENAI_API_KEY=${apiKey}`,
-      // clear the other provider key so conf/env don't fight
-      provider === 'anthropic' ? `OPENAI_API_KEY=` : `ANTHROPIC_API_KEY=`,
       `XIBECODE_API_KEY=${apiKey}`,
       `XIBECODE_PROVIDER=${provider}`,
+      ...savedProviders.flatMap((slot) =>
+        slot.apiKey
+          ? envKeysForProvider(slot.provider).map((k) => `${k}=${slot.apiKey}`)
+          : [],
+      ),
+      // Active key still lands on the generic env names older CLI reads.
+      provider === 'anthropic' ? `ANTHROPIC_API_KEY=${apiKey}` : '',
+      provider === 'openai' || !envKeysForProvider(provider).length
+        ? `OPENAI_API_KEY=${apiKey}`
+        : '',
       model ? `XIBECODE_MODEL=${model}` : '',
       baseUrl ? `XIBECODE_BASE_URL=${baseUrl}` : '',
       baseUrl && provider !== 'anthropic' ? `OPENAI_BASE_URL=${baseUrl}` : '',
@@ -788,6 +857,7 @@ export async function writeSandboxConfig(
     ...(model ? { model } : {}),
     ...(baseUrl ? { baseUrl } : prevProfile.baseUrl ? { baseUrl: prevProfile.baseUrl } : {}),
     apiKey,
+    savedProviders,
   };
   const profileJson = JSON.stringify(mergedProfile, null, 2);
 
@@ -859,6 +929,7 @@ export async function writeSandboxConfig(
     telegramHint: hint(telegramBotToken),
     discordHint: hint(discordBotToken),
     slackHint: slackBotToken ? hint(slackBotToken) : undefined,
+    savedProviders: savedProviders.map(toSavedView),
   };
   return { ok: true, logs, meta: existing };
 }

@@ -49,6 +49,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   final cwd = TextEditingController(text: '/home/user/workspace');
 
   List<String> modelChoices = const [];
+  List<Map<String, String>> savedProviders = [];
   CloudInstance? inst;
   Map<String, dynamic>? config;
   Map<String, dynamic>? pairing;
@@ -100,6 +101,75 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     if (hint.isNotEmpty) return hint;
     if (sandbox[flag] == true) return 'Set on sandbox';
     return 'Not set';
+  }
+
+  String _slotId(String p, String url) {
+    final id = p.trim().toLowerCase();
+    if (id.isEmpty) return 'custom';
+    if (id == 'custom' && url.trim().isNotEmpty) {
+      try {
+        return 'custom:${Uri.parse(url).host}';
+      } catch (_) {
+        return 'custom';
+      }
+    }
+    return id;
+  }
+
+  Map<String, String> _snapshotCurrent() {
+    return {
+      'id': _slotId(provider.text, baseUrl.text),
+      'provider': provider.text.trim().isEmpty ? 'custom' : provider.text.trim(),
+      'model': model.text.trim(),
+      'baseUrl': baseUrl.text.trim(),
+      'apiKey': apiKey.text.trim(),
+    };
+  }
+
+  List<Map<String, String>> _upsertLocal(List<Map<String, String>> list, Map<String, String> slot) {
+    final id = slot['id'] ?? '';
+    final idx = list.indexWhere((s) => s['id'] == id);
+    if (idx < 0) return [...list, slot];
+    final prev = list[idx];
+    final next = {
+      ...prev,
+      ...slot,
+      'apiKey': (slot['apiKey'] ?? '').isNotEmpty ? slot['apiKey']! : (prev['apiKey'] ?? ''),
+    };
+    return [for (var i = 0; i < list.length; i++) i == idx ? next : list[i]];
+  }
+
+  void _addAnotherProvider() {
+    setState(() {
+      savedProviders = _upsertLocal(savedProviders, _snapshotCurrent());
+      provider.clear();
+      model.clear();
+      baseUrl.clear();
+      apiKey.clear();
+    });
+  }
+
+  void _useSavedProvider(Map<String, String> slot) {
+    setState(() {
+      provider.text = slot['provider'] ?? '';
+      model.text = slot['model'] ?? '';
+      baseUrl.text = slot['baseUrl'] ?? '';
+      if ((slot['apiKey'] ?? '').isNotEmpty) apiKey.text = slot['apiKey']!;
+    });
+  }
+
+  void _removeSavedProvider(String id) {
+    final next = savedProviders.where((s) => s['id'] != id).toList();
+    final fill = _slotId(provider.text, baseUrl.text) == id && next.isNotEmpty ? next.first : null;
+    setState(() {
+      savedProviders = next;
+      if (fill != null) {
+        provider.text = fill['provider'] ?? '';
+        model.text = fill['model'] ?? '';
+        baseUrl.text = fill['baseUrl'] ?? '';
+        if ((fill['apiKey'] ?? '').isNotEmpty) apiKey.text = fill['apiKey']!;
+      }
+    });
   }
 
   String get _secretCacheKey => 'instance-secrets:$id';
@@ -159,6 +229,21 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       model.text = _str(sandbox, stored, 'model');
       baseUrl.text = _str(sandbox, stored, 'baseUrl');
       apiKey.text = _str(sandbox, stored, 'apiKey');
+      final rawSaved = sandbox['savedProviders'] ?? stored['savedProviders'];
+      savedProviders = [];
+      if (rawSaved is List) {
+        for (final item in rawSaved) {
+          if (item is! Map) continue;
+          savedProviders.add({
+            'id': '${item['id'] ?? item['provider'] ?? ''}',
+            'provider': '${item['provider'] ?? ''}',
+            'model': '${item['model'] ?? ''}',
+            'baseUrl': '${item['baseUrl'] ?? ''}',
+            'apiKey': '${item['apiKey'] ?? ''}',
+            'apiKeyHint': '${item['apiKeyHint'] ?? ''}',
+          });
+        }
+      }
       telegram.text = _str(sandbox, stored, 'telegramBotToken');
       discord.text = _str(sandbox, stored, 'discordBotToken');
       slackBot.text = _str(sandbox, stored, 'slackBotToken');
@@ -199,6 +284,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
         'provider': provider.text.trim(),
         'model': model.text.trim(),
         'baseUrl': baseUrl.text.trim(),
+        'savedProviders': _upsertLocal(savedProviders, _snapshotCurrent()),
         if (apiKey.text.trim().isNotEmpty) 'apiKey': apiKey.text.trim(),
         if (telegram.text.trim().isNotEmpty) 'telegramBotToken': telegram.text.trim(),
         if (discord.text.trim().isNotEmpty) 'discordBotToken': discord.text.trim(),
@@ -434,6 +520,38 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                           controller: apiKey,
                           label: 'API key',
                           hint: 'sk-… or provider key',
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Saved providers keep their own key (like Hermes). Add another without wiping this one.',
+                            style: const TextStyle(color: Vc.muted, fontSize: 12),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final s in savedProviders)
+                              InputChip(
+                                label: Text(
+                                  [
+                                    s['provider'] ?? s['id'] ?? '',
+                                    if ((s['model'] ?? '').trim().isNotEmpty) s['model']!,
+                                  ].join(' · '),
+                                ),
+                                selected: _slotId(provider.text, baseUrl.text) == s['id'],
+                                onPressed: () => _useSavedProvider(s),
+                                onDeleted: () => _removeSavedProvider(s['id'] ?? ''),
+                              ),
+                            ActionChip(
+                              avatar: const Icon(Icons.add, size: 16, color: Vc.green),
+                              label: const Text('Add another provider'),
+                              onPressed: _addAnotherProvider,
+                            ),
+                          ],
                         ),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,

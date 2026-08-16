@@ -66,6 +66,13 @@ export async function PUT(req: Request, ctx: Ctx) {
     apiKey?: string;
     baseUrl?: string;
     model?: string;
+    savedProviders?: Array<{
+      id?: string;
+      provider?: string;
+      apiKey?: string;
+      baseUrl?: string;
+      model?: string;
+    }>;
     telegramBotToken?: string;
     discordBotToken?: string;
     slackBotToken?: string;
@@ -104,6 +111,7 @@ export async function PUT(req: Request, ctx: Ctx) {
       apiKey: body.apiKey,
       baseUrl: body.baseUrl,
       model: body.model,
+      savedProviders: body.savedProviders,
       telegramBotToken: body.telegramBotToken,
       discordBotToken: body.discordBotToken,
       slackBotToken: body.slackBotToken,

@@ -5,6 +5,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { BRAND } from '@/lib/brand';
 import type { Instance } from '@/lib/store';
 
+type SavedSlot = {
+  id: string;
+  provider: string;
+  model?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  apiKeyHint?: string;
+};
+
 type ConfigView = {
   provider?: string;
   model?: string;
@@ -23,6 +32,7 @@ type ConfigView = {
   telegramHint?: string;
   discordHint?: string;
   slackHint?: string;
+  savedProviders?: SavedSlot[];
 };
 
 type PairingView = {
@@ -122,6 +132,7 @@ export function Dashboard({ email }: { email: string }) {
   const [slackAppToken, setSlackAppToken] = useState('');
   const [allowAll, setAllowAll] = useState(false);
   const [pairCode, setPairCode] = useState('');
+  const [savedProviders, setSavedProviders] = useState<SavedSlot[]>([]);
 
   // Command pane (shell in sandbox)
   const [cmdInput, setCmdInput] = useState('');
@@ -352,6 +363,7 @@ export function Dashboard({ email }: { email: string }) {
         setSlackBotToken(s?.slackBotToken || '');
         setSlackAppToken(s?.slackAppToken || '');
         setAllowAll(Boolean(s?.allowAllUsers));
+        setSavedProviders(Array.isArray(s?.savedProviders) ? s.savedProviders : []);
         fetch(`/api/instances/${id}/models`)
           .then((r) => r.json())
           .then((d) => {
@@ -378,6 +390,7 @@ export function Dashboard({ email }: { email: string }) {
         setSlackBotToken('');
         setSlackAppToken('');
         setAllowAll(false);
+        setSavedProviders([]);
         setError(cData.error || 'Config load failed');
       }
       if (pRes.ok) setPairing(pData.pairing);
@@ -453,11 +466,73 @@ export function Dashboard({ email }: { email: string }) {
     setCliDismissed((m) => ({ ...m, [selected]: cliUpdate.latest! }));
   }
 
+  function slotId(p: string, url?: string) {
+    const id = (p || 'custom').trim().toLowerCase() || 'custom';
+    if (id === 'custom' && url) {
+      try {
+        return `custom:${new URL(url).host}`;
+      } catch {
+        return 'custom';
+      }
+    }
+    return id;
+  }
+
+  function snapshotCurrent(): SavedSlot {
+    return {
+      id: slotId(provider, baseUrl),
+      provider: provider.trim() || 'custom',
+      model: model || undefined,
+      baseUrl: baseUrl || undefined,
+      apiKey: apiKey || undefined,
+    };
+  }
+
+  function upsertLocal(list: SavedSlot[], slot: SavedSlot): SavedSlot[] {
+    const idx = list.findIndex((s) => s.id === slot.id);
+    if (idx < 0) return [...list, slot];
+    const prev = list[idx]!;
+    const next = {
+      ...prev,
+      ...slot,
+      apiKey: slot.apiKey || prev.apiKey,
+      baseUrl: slot.baseUrl ?? prev.baseUrl,
+      model: slot.model ?? prev.model,
+    };
+    return list.map((s, i) => (i === idx ? next : s));
+  }
+
+  function addAnotherProvider() {
+    const cur = snapshotCurrent();
+    if (cur.provider) setSavedProviders((list) => upsertLocal(list, cur));
+    setProvider('');
+    setModel('');
+    setBaseUrl('');
+    setApiKey('');
+  }
+
+  function useSavedProvider(slot: SavedSlot) {
+    setProvider(slot.provider);
+    setModel(slot.model || '');
+    setBaseUrl(slot.baseUrl || '');
+    if (slot.apiKey) setApiKey(slot.apiKey);
+  }
+
+  function removeSavedProvider(id: string) {
+    setSavedProviders((list) => list.filter((s) => s.id !== id));
+    if (slotId(provider, baseUrl) === id) {
+      const next = savedProviders.find((s) => s.id !== id);
+      if (next) useSavedProvider(next);
+    }
+  }
+
   async function saveConfig(restart: boolean) {
     if (!selected) return;
     setBusy(true);
     setLogs('');
     try {
+      const current = snapshotCurrent();
+      const slots = current.provider ? upsertLocal(savedProviders, current) : savedProviders;
       const res = await fetch(`/api/instances/${selected}/config`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
@@ -466,6 +541,7 @@ export function Dashboard({ email }: { email: string }) {
           apiKey: apiKey || undefined,
           baseUrl,
           model,
+          savedProviders: slots,
           telegramBotToken: telegramToken || undefined,
           discordBotToken: discordToken || undefined,
           slackBotToken: slackBotToken || undefined,
@@ -1150,6 +1226,48 @@ export function Dashboard({ email }: { email: string }) {
                   className="field"
                 />
               </Field>
+              <div className="sm:col-span-2">
+                <p className="mb-2 text-xs text-zinc-500">
+                  Saved providers keep their own key and URL (like Hermes). Add another without
+                  wiping this one, then pick it from <code>/model</code> in the app.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {savedProviders.map((s) => {
+                    const active = slotId(provider, baseUrl) === s.id;
+                    return (
+                      <div
+                        key={s.id}
+                        className={`flex items-center gap-1 rounded-full border px-2 py-1 text-xs ${
+                          active
+                            ? 'border-emerald-700 bg-emerald-950/40 text-emerald-200'
+                            : 'border-zinc-800 bg-zinc-900 text-zinc-300'
+                        }`}
+                      >
+                        <button type="button" onClick={() => useSavedProvider(s)}>
+                          {s.provider}
+                          {s.model ? ` · ${s.model}` : ''}
+                          {s.apiKeyHint ? ` · ${s.apiKeyHint}` : ''}
+                        </button>
+                        <button
+                          type="button"
+                          className="pl-1 text-zinc-500 hover:text-red-400"
+                          onClick={() => removeSavedProvider(s.id)}
+                          aria-label={`Remove ${s.provider}`}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={addAnotherProvider}
+                    className="rounded-full border border-dashed border-zinc-700 px-3 py-1 text-xs text-zinc-400 hover:border-emerald-700 hover:text-emerald-300"
+                  >
+                    + Add another provider
+                  </button>
+                </div>
+              </div>
               <Field label="Telegram bot token">
                 <input
                   value={telegramToken}

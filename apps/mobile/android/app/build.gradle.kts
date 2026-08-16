@@ -29,6 +29,18 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Phones only: one "universal" APK with 32-bit + 64-bit ARM.
+        // Skip x86 / x86_64 emulator libs so the APK stays smaller.
+        ndk {
+            abiFilters.clear()
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+        }
+    }
+
+    packaging {
+        jniLibs {
+            excludes += setOf("**/x86/**", "**/x86_64/**")
+        }
     }
 
     buildTypes {
