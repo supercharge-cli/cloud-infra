@@ -11,6 +11,7 @@ class TaskNotifications {
   static bool _ready = false;
   static bool _fgReady = false;
   static String? _activeId;
+  static int _turnGen = 0;
 
   static const _progressId = 7101;
   static const _doneId = 7102;
@@ -86,6 +87,7 @@ class TaskNotifications {
     required String name,
   }) async {
     try {
+      _turnGen += 1;
       _activeId = instanceId;
       await init();
       await initForeground();
@@ -120,6 +122,7 @@ class TaskNotifications {
     required int pct,
   }) async {
     if (_activeId != instanceId) return;
+    final gen = _turnGen;
     try {
     final label = 'Working · ${_fmt(elapsed)} · $tools tool${tools == 1 ? '' : 's'}';
     if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
@@ -128,6 +131,7 @@ class TaskNotifications {
         notificationText: label,
       );
     }
+    if (_activeId != instanceId || _turnGen != gen) return;
     const android = AndroidNotificationDetails(
       _progressChannel,
       'Task progress',
@@ -143,6 +147,7 @@ class TaskNotifications {
       onlyAlertOnce: true,
       icon: '@drawable/ic_stat_vectra',
     );
+    if (_activeId != instanceId || _turnGen != gen) return;
     await _plugin.show(
       _progressId,
       '$name · $pct%',
@@ -177,11 +182,12 @@ class TaskNotifications {
     bool error = false,
   }) async {
     try {
+    _activeId = null;
+    _turnGen += 1;
     await _plugin.cancel(_progressId);
     if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
       await FlutterForegroundTask.stopService();
     }
-    _activeId = null;
     await _plugin.show(
       _doneId,
       error ? '$name failed' : '$name finished',
@@ -204,11 +210,12 @@ class TaskNotifications {
 
   static Future<void> cancelSilent() async {
     try {
+    _activeId = null;
+    _turnGen += 1;
     await _plugin.cancel(_progressId);
     if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
       await FlutterForegroundTask.stopService();
     }
-    _activeId = null;
     } catch (_) {
       _activeId = null;
     }
