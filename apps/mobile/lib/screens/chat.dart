@@ -337,6 +337,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       showKickoff = false;
     }
     if (ev.type == 'text' && ev.text.isNotEmpty) lastAssistantText = ev.text;
+    if (ev.type == 'text' && _isModelSwitchNote(ev.text) && _justPickedModel) {
+      _persist();
+      return;
+    }
     if (ev.type == 'tool') {
       showKickoff = false;
       if (ev.state != 'done') toolCount += 1;
@@ -750,9 +754,60 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
     );
     if (text == null || text.isEmpty) return;
-    setState(() => answered.add(ev.ref ?? ev.id));
+    setState(() => _rememberPick(ev, text, label: text));
     _persist();
     await api.pick(id, ref: ev.ref, value: text, kind: ev.kind ?? 'model');
+  }
+
+  String _pickerLabel(AppChatEvent ev, String value) {
+    for (final o in ev.options) {
+      if ('${o['value']}' == value) {
+        return '${o['label'] ?? o['value']}';
+      }
+    }
+    return value;
+  }
+
+  void _rememberPick(AppChatEvent ev, String value, {String? label}) {
+    ev.raw['picked'] = value;
+    ev.raw['pickedLabel'] = label ?? _pickerLabel(ev, value);
+    answered.add(ev.ref ?? ev.id);
+  }
+
+  bool _isModelSwitchNote(String text) {
+    final t = text.trim();
+    return RegExp(
+      r'^(✓\s*)?model (switched|set) to\b',
+      caseSensitive: false,
+    ).hasMatch(t);
+  }
+
+  bool get _justPickedModel {
+    for (var i = events.length - 1; i >= 0; i--) {
+      final e = events[i];
+      if (e.type == 'picker' &&
+          (e.kind == 'model' || (e.title ?? '').toLowerCase() == 'model') &&
+          answered.contains(e.ref ?? e.id)) {
+        return true;
+      }
+      if (e.type == 'user' || e.type == 'text' || e.type == 'ask' || e.type == 'tool') {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  Widget _switchNote(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: Center(
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Vc.muted, fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
   }
 
   void _pickCommand(BotCommand c) {
@@ -1039,6 +1094,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final locked = answered.contains(ev.ref ?? ev.id);
     final opts = ev.options;
     final key = ev.ref ?? ev.id;
+    if (locked) {
+      final name = '${ev.raw['pickedLabel'] ?? ev.raw['picked'] ?? ''}'.trim();
+      final isModel = ev.kind == 'model' || (ev.title ?? '').toLowerCase() == 'model';
+      if (name.isEmpty) {
+        return _switchNote(isModel ? 'Model switched' : 'Selection saved');
+      }
+      return _switchNote(isModel ? 'Model switched to $name' : 'Switched to $name');
+    }
     final total = opts.length;
     final pages = total == 0 ? 1 : ((total + pageSize - 1) / pageSize).floor();
     final page = (pickerPage[key] ?? 0).clamp(0, pages - 1);
@@ -1074,7 +1137,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   unawaited(_customModel(ev));
                                   return;
                                 }
-                                setState(() => answered.add(key));
+                                setState(() => _rememberPick(ev, value, label: '${o['label'] ?? o['value']}'));
                                 _persist();
                                 api.pick(id, ref: ev.ref, value: value, kind: ev.kind);
                               },
