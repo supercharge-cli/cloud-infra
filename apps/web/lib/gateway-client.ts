@@ -1411,6 +1411,14 @@ print("ok")
   }).catch(() => undefined);
 }
 
+export function sandboxPublicBase(sandboxId: string, port: number): string {
+  const domain =
+    process.env.XIBECODE_E2B_PREVIEW_DOMAIN?.trim() ||
+    process.env.E2B_DOMAIN?.trim() ||
+    'e2b.app';
+  return `https://${port}-${sandboxId}.${domain}`;
+}
+
 export async function appInboxUrl(
   sessionId: string,
   sandboxId?: string,
@@ -1419,10 +1427,11 @@ export async function appInboxUrl(
     await ensureGatewaySession(sessionId, sandboxId).catch(() => undefined);
   }
   const host = await getSandboxPreviewHost(sessionId, APP_INBOX_PORT);
-  if (!host) {
-    throw new Error('App inbox host unavailable (sandbox not reachable on :8790)');
-  }
-  return host.replace(/\/$/, '');
+  if (host) return host.replace(/\/$/, '');
+  if (sandboxId) return sandboxPublicBase(sandboxId, APP_INBOX_PORT);
+  throw new Error(
+    'App inbox host unavailable. Wake the sandbox and tap Update CLI (needs xibecode 1.17.5+ for port 8790).',
+  );
 }
 
 export async function appInboxFetch(

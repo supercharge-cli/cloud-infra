@@ -50,23 +50,37 @@ export async function requireChatInstance(id: string): Promise<
   return { ok: true, inst };
 }
 
-export async function ensureInbox(inst: Instance): Promise<void> {
+async function inboxHealthy(inst: Instance): Promise<boolean> {
   try {
     const health = await appInboxFetch(
       inst.sessionId,
       '/health',
-      { signal: AbortSignal.timeout(4_000) },
+      { signal: AbortSignal.timeout(5_000) },
       { sandboxId: inst.sandboxId },
     );
-    if (health.ok) return;
+    return health.ok;
   } catch {
-    /* wake only when inbox is actually down */
+    return false;
   }
+}
+
+export async function ensureInbox(inst: Instance): Promise<void> {
+  if (await inboxHealthy(inst)) return;
+
   await bootstrapAppInbox(inst.sessionId, inst.sandboxId).catch(() => undefined);
   await wakeSession(inst.sessionId, {
     sandboxId: inst.sandboxId,
     restartDaemon: true,
   });
+
+  for (let i = 0; i < 8; i++) {
+    await new Promise((r) => setTimeout(r, 750));
+    if (await inboxHealthy(inst)) return;
+  }
+
+  throw new Error(
+    'App inbox not reachable on :8790 after wake. Open Control → Update CLI (need xibecode 1.17.5+) then try chat again.',
+  );
 }
 
 export async function proxyInbox(
