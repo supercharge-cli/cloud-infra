@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "cloud.vectra.vectra_cloud"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
