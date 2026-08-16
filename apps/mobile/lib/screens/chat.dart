@@ -84,13 +84,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       backgrounded = false;
+      unawaited(TaskNotifications.leaveBackground());
       _listen();
       return;
     }
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       backgrounded = true;
       if (working) {
-        unawaited(_notifyProgress());
+        unawaited(TaskNotifications.enterBackground());
       } else {
         _sub?.cancel();
       }

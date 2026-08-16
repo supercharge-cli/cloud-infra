@@ -12,11 +12,19 @@ class TaskNotifications {
   static bool _fgReady = false;
   static String? _activeId;
   static int _turnGen = 0;
+  static bool _backgrounded = false;
+  static String _name = 'Chat';
+  static Duration _elapsed = Duration.zero;
+  static int _tools = 0;
+  static int _pct = 8;
 
   static const _progressId = 7101;
   static const _doneId = 7102;
   static const _progressChannel = 'vectra_task_silent';
   static const _doneChannel = 'vectra_task_done';
+
+  static String get _label =>
+      'Working · ${_fmt(_elapsed)} · $_tools tool${_tools == 1 ? '' : 's'}';
 
   static Future<void> init() async {
     if (_ready) return;
@@ -40,9 +48,9 @@ class TaskNotifications {
     if (_fgReady) return;
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'vectra_fg_task',
-        channelName: 'Live task',
-        channelDescription: 'Keeps a sandbox turn alive in the background',
+        channelId: _progressChannel,
+        channelName: 'Task progress',
+        channelDescription: 'Silent live progress for the current sandbox turn',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
         playSound: false,
@@ -89,28 +97,20 @@ class TaskNotifications {
     try {
       _turnGen += 1;
       _activeId = instanceId;
+      _name = name;
+      _elapsed = Duration.zero;
+      _tools = 0;
+      _pct = 8;
+      _backgrounded = false;
       await init();
-      await initForeground();
       await requestPermissions();
-      if (Platform.isAndroid) {
-        final running = await FlutterForegroundTask.isRunningService;
-        if (!running) {
-          await FlutterForegroundTask.startService(
-            serviceId: 7100,
-            serviceTypes: [ForegroundServiceTypes.dataSync],
-            notificationTitle: '$name · working',
-            notificationText: 'Starting…',
-            callback: vectraFgCallback,
-          );
-        }
+      // One live notification only: the progress bar. The Android
+      // foreground service is started later if the app is backgrounded.
+      await _plugin.cancel(_progressId);
+      if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.stopService();
       }
-      await updateProgress(
-        instanceId: instanceId,
-        name: name,
-        elapsed: Duration.zero,
-        tools: 0,
-        pct: 8,
-      );
+      await _showProgressBar();
     } catch (_) {}
   }
 
@@ -122,41 +122,77 @@ class TaskNotifications {
     required int pct,
   }) async {
     if (_activeId != instanceId) return;
+    _name = name;
+    _elapsed = elapsed;
+    _tools = tools;
+    _pct = pct;
     final gen = _turnGen;
     try {
-    final label = 'Working · ${_fmt(elapsed)} · $tools tool${tools == 1 ? '' : 's'}';
-    if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
+      if (_backgrounded && Platform.isAndroid) {
+        await _ensureForegroundService();
+        if (_activeId != instanceId || _turnGen != gen) return;
+        return;
+      }
+      await _showProgressBar();
+    } catch (_) {}
+  }
+
+  /// Keep the process alive in the background with a single notification.
+  /// Replaces the progress-bar tile so Android does not show two.
+  static Future<void> enterBackground() async {
+    if (_activeId == null) return;
+    _backgrounded = true;
+    if (!Platform.isAndroid) return;
+    try {
+      await _plugin.cancel(_progressId);
+      await _ensureForegroundService();
+    } catch (_) {}
+  }
+
+  static Future<void> leaveBackground() async {
+    _backgrounded = false;
+    try {
+      if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.stopService();
+      }
+      if (_activeId != null) await _showProgressBar();
+    } catch (_) {}
+  }
+
+  static Future<void> _ensureForegroundService() async {
+    await initForeground();
+    final title = '$_name · $_pct%';
+    final running = await FlutterForegroundTask.isRunningService;
+    if (!running) {
+      await FlutterForegroundTask.startService(
+        serviceId: _progressId,
+        serviceTypes: [ForegroundServiceTypes.dataSync],
+        notificationTitle: title,
+        notificationText: _label,
+        callback: vectraFgCallback,
+      );
+    } else {
       await FlutterForegroundTask.updateService(
-        notificationTitle: '$name · $pct%',
-        notificationText: label,
+        notificationTitle: title,
+        notificationText: _label,
       );
     }
-    if (_activeId != instanceId || _turnGen != gen) return;
-    const android = AndroidNotificationDetails(
-      _progressChannel,
-      'Task progress',
-      channelDescription: 'Silent live progress for the current sandbox turn',
-      importance: Importance.low,
-      priority: Priority.low,
-      playSound: false,
-      enableVibration: false,
-      ongoing: true,
-      silent: true,
-      showProgress: true,
-      maxProgress: 100,
-      onlyAlertOnce: true,
-      icon: '@drawable/ic_stat_vectra',
-    );
-    if (_activeId != instanceId || _turnGen != gen) return;
+  }
+
+  static Future<void> _showProgressBar() async {
+    if (_activeId == null) return;
+    final gen = _turnGen;
+    await init();
+    if (_activeId == null || _turnGen != gen) return;
     await _plugin.show(
       _progressId,
-      '$name · $pct%',
-      label,
+      '$_name · $_pct%',
+      _label,
       NotificationDetails(
         android: AndroidNotificationDetails(
           _progressChannel,
           'Task progress',
-          channelDescription: android.channelDescription,
+          channelDescription: 'Silent live progress for the current sandbox turn',
           importance: Importance.low,
           priority: Priority.low,
           playSound: false,
@@ -165,14 +201,13 @@ class TaskNotifications {
           silent: true,
           showProgress: true,
           maxProgress: 100,
-          progress: pct,
+          progress: _pct,
           onlyAlertOnce: true,
           icon: '@drawable/ic_stat_vectra',
         ),
       ),
-      payload: instanceId,
+      payload: _activeId,
     );
-    } catch (_) {}
   }
 
   static Future<void> finishTurn({
@@ -182,40 +217,44 @@ class TaskNotifications {
     bool error = false,
   }) async {
     try {
-    _activeId = null;
-    _turnGen += 1;
-    await _plugin.cancel(_progressId);
-    if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
-      await FlutterForegroundTask.stopService();
-    }
-    await _plugin.show(
-      _doneId,
-      error ? '$name failed' : '$name finished',
-      (body == null || body.trim().isEmpty) ? (error ? 'The turn ended with an error.' : 'Task finished.') : body.trim(),
-      NotificationDetails(
-        android: AndroidNotificationDetails(
-          _doneChannel,
-          'Task complete',
-          channelDescription: 'Fires once when a sandbox turn finishes',
-          importance: Importance.defaultImportance,
-          priority: Priority.defaultPriority,
-          icon: '@drawable/ic_stat_vectra',
+      _activeId = null;
+      _turnGen += 1;
+      _backgrounded = false;
+      await _plugin.cancel(_progressId);
+      if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.stopService();
+      }
+      await _plugin.show(
+        _doneId,
+        error ? '$name failed' : '$name finished',
+        (body == null || body.trim().isEmpty)
+            ? (error ? 'The turn ended with an error.' : 'Task finished.')
+            : body.trim(),
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _doneChannel,
+            'Task complete',
+            channelDescription: 'Fires once when a sandbox turn finishes',
+            importance: Importance.defaultImportance,
+            priority: Priority.defaultPriority,
+            icon: '@drawable/ic_stat_vectra',
+          ),
+          iOS: const DarwinNotificationDetails(),
         ),
-        iOS: const DarwinNotificationDetails(),
-      ),
-      payload: instanceId,
-    );
+        payload: instanceId,
+      );
     } catch (_) {}
   }
 
   static Future<void> cancelSilent() async {
     try {
-    _activeId = null;
-    _turnGen += 1;
-    await _plugin.cancel(_progressId);
-    if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
-      await FlutterForegroundTask.stopService();
-    }
+      _activeId = null;
+      _turnGen += 1;
+      _backgrounded = false;
+      await _plugin.cancel(_progressId);
+      if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.stopService();
+      }
     } catch (_) {
       _activeId = null;
     }
