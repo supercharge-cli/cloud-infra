@@ -5,12 +5,17 @@ First-party chat + console for hosted sandboxes. Talks only to the website API
 
 ## Run
 
-```bash
-# against local web (apps/web on :3001)
-flutter run --dart-define=API_BASE=http://127.0.0.1:3001
+Default API is **`https://infra.xibeai.in`** (`env.json` / `API_BASE`).
 
-# production
-flutter run --dart-define=API_BASE=https://your-app.vercel.app
+```bash
+# production (default)
+flutter run --dart-define-from-file=env.json
+
+# or rely on the compiled default
+flutter run
+
+# local web (apps/web on :3001)
+flutter run --dart-define=API_BASE=http://127.0.0.1:3001
 ```
 
 Android emulator cannot reach host `127.0.0.1` — use `http://10.0.2.2:3001`.

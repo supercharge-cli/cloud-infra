@@ -15,7 +15,7 @@ import 'widgets/ui.dart';
 
 const apiBase = String.fromEnvironment(
   'API_BASE',
-  defaultValue: 'http://127.0.0.1:3001',
+  defaultValue: 'https://infra.xibeai.in',
 );
 
 void main() {
