@@ -6,21 +6,21 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:gal/gal.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../api/client.dart';
 import '../api/models.dart';
 import '../chat/chat_store.dart';
 import '../chat/commands.dart';
+import '../chat/draft.dart';
 import '../chat/notifications.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import '../widgets/markdown.dart';
 import '../widgets/media.dart';
 import '../widgets/ui.dart';
 
@@ -58,6 +58,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   DateTime? turnStartedAt;
   int toolCount = 0;
   Timer? _tick;
+  final pending = <DraftAttach>[];
 
   VectraClient get api => context.read<SessionController>().client;
   String get id => widget.instanceId;
@@ -303,7 +304,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       setState(() {});
       unawaited(_notifyProgress());
     });
-    unawaited(TaskNotifications.startTurn(instanceId: id, name: instanceName));
+    unawaited(TaskNotifications.startTurn(
+      instanceId: id,
+      name: instanceName,
+      apiBase: api.baseUrl,
+      token: api.token,
+      since: lastServerId,
+    ));
   }
 
   void _endTurn({bool error = false, String? body}) {
@@ -363,22 +370,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _send([String? text]) async {
     final t = (text ?? _input.text).trim();
-    if (t.isEmpty || sending) return;
+    if (sending) return;
+    if (t.isEmpty && pending.isEmpty) return;
+    final drafts = List<DraftAttach>.from(pending);
     _input.clear();
     HapticFeedback.lightImpact();
     setState(() {
       _beginTurn();
-      events.add(AppChatEvent({
-        'type': 'user',
-        'text': t,
-        'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
-        'ts': DateTime.now().millisecondsSinceEpoch,
-      }, local: true));
+      pending.clear();
+      if (t.isNotEmpty) {
+        events.add(AppChatEvent({
+          'type': 'user',
+          'text': t,
+          'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
+          'ts': DateTime.now().millisecondsSinceEpoch,
+          'format': 'markdown',
+        }, local: true));
+      }
+      for (final f in drafts) {
+        events.add(AppChatEvent({
+          'type': 'file',
+          'role': 'user',
+          'text': drafts.length == 1 ? t : '',
+          'name': f.name,
+          'kind': f.isImage ? 'photo' : 'document',
+          'mime': f.mime,
+          'size': f.size,
+          'localPath': f.path,
+          'id': f.id,
+          'ts': DateTime.now().millisecondsSinceEpoch,
+        }, local: true));
+      }
     });
     _persist();
     _scrollToEnd();
     try {
-      await api.sendChat(id, t);
+      if (drafts.isEmpty) {
+        await api.sendChat(id, t);
+      } else {
+        await api.uploadFiles(
+          id,
+          caption: t,
+          files: [
+            for (final f in drafts) (name: f.name, bytes: f.bytes, mime: f.mime),
+          ],
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -389,42 +426,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _attach() async {
+    if (sending) return;
     final picked = await FilePicker.pickFiles();
     if (picked.isEmpty) return;
-    final f = picked.first;
-    final bytes = await f.readAsBytes();
-    final caption = _input.text.trim();
-    final mime = f.xFile.mimeType;
-    final image = looksLikeImage(name: f.name, mime: mime);
-    final localId = 'local-file-${DateTime.now().millisecondsSinceEpoch}';
-    final path = await store.saveMedia(name: f.name, bytes: bytes, id: localId);
-    setState(() {
-      _beginTurn();
-      events.add(AppChatEvent({
-        'type': 'file',
-        'role': 'user',
-        'text': caption,
-        'name': f.name,
-        'kind': image ? 'photo' : 'document',
-        'mime': mime,
-        'size': bytes.length,
-        'localPath': path,
-        'id': localId,
-        'ts': DateTime.now().millisecondsSinceEpoch,
-      }, local: true));
-    });
-    _input.clear();
-    _persist();
-    _scrollToEnd();
-    try {
-      await api.upload(id, name: f.name, bytes: bytes, caption: caption, mime: mime);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _endTurn(error: true, body: e.toString());
-        error = e.toString();
-      });
+    for (final f in picked) {
+      if (pending.length >= 12) break;
+      final bytes = await f.readAsBytes();
+      if (bytes.isEmpty) continue;
+      final mime = f.xFile.mimeType;
+      final localId = 'draft-${DateTime.now().millisecondsSinceEpoch}-${f.name}';
+      final path = await store.saveMedia(name: f.name, bytes: bytes, id: localId);
+      pending.add(DraftAttach(
+        id: localId,
+        name: f.name,
+        bytes: Uint8List.fromList(bytes),
+        path: path,
+        mime: mime,
+        kind: looksLikeImage(name: f.name, mime: mime) ? 'photo' : 'document',
+      ));
     }
+    if (mounted) setState(() {});
   }
 
   Future<void> _ensureLocalFile(AppChatEvent ev, {bool auto = false}) async {
@@ -624,7 +645,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 color: Vc.greenDim,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: Text(ev.text),
+              child: ChatMarkdown(data: ev.text),
             ),
           ),
         );
@@ -662,7 +683,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             children: [
               const Text('Approval needed', style: TextStyle(fontWeight: FontWeight.w700, color: Vc.amber)),
               const SizedBox(height: 8),
-              MarkdownBody(data: ev.text, styleSheet: _md, onTapLink: _openLink),
+              ChatMarkdown(data: ev.text),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -689,7 +710,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              MarkdownBody(data: ev.text, styleSheet: _md, onTapLink: _openLink),
+              ChatMarkdown(data: ev.text),
               const SizedBox(height: 8),
               for (var i = 0; i < ev.choices.length; i++)
                 ListTile(
@@ -800,28 +821,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: Vc.cardBorder),
               ),
-              child: MarkdownBody(
-                data: ev.text,
-                selectable: true,
-                styleSheet: _md,
-                onTapLink: _openLink,
-              ),
+              child: ChatMarkdown(data: ev.text),
             ),
           ),
         );
     }
   }
-
-  void _openLink(String text, String? href, String? title) {
-    if (href == null) return;
-    launchUrl(Uri.parse(href), mode: LaunchMode.externalApplication);
-  }
-
-  MarkdownStyleSheet get _md => MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-        p: const TextStyle(color: Colors.white, height: 1.4),
-        code: const TextStyle(backgroundColor: Color(0xFF18181B), fontSize: 12),
-        a: const TextStyle(color: Vc.green),
-      );
 
   Widget _card({required Widget child}) {
     return Container(
@@ -957,6 +962,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             },
                           ),
               ),
+              if (pending.isNotEmpty)
+                DraftTray(
+                  items: pending,
+                  onRemove: (f) => setState(() => pending.remove(f)),
+                ),
               if (palette) _commandOverlay(),
               if (paymentBlocked)
                 SafeArea(
@@ -1000,7 +1010,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           ),
                         ),
                         IconButton(
-                          onPressed: sending ? null : () => _send(),
+                          onPressed: sending || (_input.text.trim().isEmpty && pending.isEmpty)
+                              ? null
+                              : () => _send(),
                           icon: sending
                               ? const SizedBox(
                                   width: 18,

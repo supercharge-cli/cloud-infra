@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../api/models.dart';
+import '../chat/draft.dart';
 import '../theme.dart';
 
 class ChatImageBubble extends StatelessWidget {
@@ -211,6 +212,82 @@ class ImageLightbox extends StatelessWidget {
           maxScale: 5,
           child: Image.file(File(path)),
         ),
+      ),
+    );
+  }
+}
+
+class DraftTray extends StatelessWidget {
+  const DraftTray({super.key, required this.items, required this.onRemove});
+  final List<DraftAttach> items;
+  final ValueChanged<DraftAttach> onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 88,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        itemCount: items.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (ctx, i) {
+          final f = items[i];
+          return SizedBox(
+            width: 72,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF18181B),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Vc.cardBorder),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: f.isImage && f.path != null && File(f.path!).existsSync()
+                          ? Image.file(File(f.path!), fit: BoxFit.cover)
+                          : f.isImage
+                              ? Image.memory(f.bytes, fit: BoxFit.cover)
+                              : Padding(
+                                  padding: const EdgeInsets.all(6),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.insert_drive_file_outlined, color: Vc.green, size: 22),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        f.name,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(fontSize: 9, color: Vc.muted),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: -6,
+                  right: -6,
+                  child: GestureDetector(
+                    onTap: () => onRemove(f),
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: const BoxDecoration(color: Color(0xFF27272A), shape: BoxShape.circle),
+                      child: const Icon(Icons.close, size: 14, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }

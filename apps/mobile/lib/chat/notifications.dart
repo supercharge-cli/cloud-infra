@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -11,17 +13,15 @@ class TaskNotifications {
   static bool _ready = false;
   static bool _fgReady = false;
   static String? _activeId;
-  static int _turnGen = 0;
-  static bool _backgrounded = false;
   static String _name = 'Chat';
   static Duration _elapsed = Duration.zero;
   static int _tools = 0;
   static int _pct = 8;
 
-  static const _progressId = 7101;
-  static const _doneId = 7102;
-  static const _progressChannel = 'vectra_task_silent';
-  static const _doneChannel = 'vectra_task_done';
+  static const progressId = 7101;
+  static const doneId = 7102;
+  static const progressChannel = 'vectra_task_silent';
+  static const doneChannel = 'vectra_task_done';
 
   static String get _label =>
       'Working · ${_fmt(_elapsed)} · $_tools tool${_tools == 1 ? '' : 's'}';
@@ -48,9 +48,9 @@ class TaskNotifications {
     if (_fgReady) return;
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
-        channelId: _progressChannel,
+        channelId: progressChannel,
         channelName: 'Task progress',
-        channelDescription: 'Silent live progress for the current sandbox turn',
+        channelDescription: 'Live sandbox turn progress',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
         playSound: false,
@@ -63,7 +63,7 @@ class TaskNotifications {
         playSound: false,
       ),
       foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(15000),
+        eventAction: ForegroundTaskEventAction.repeat(5000),
         autoRunOnBoot: false,
         autoRunOnMyPackageReplaced: false,
         allowWakeLock: true,
@@ -93,24 +93,47 @@ class TaskNotifications {
   static Future<void> startTurn({
     required String instanceId,
     required String name,
+    required String apiBase,
+    String? token,
+    String? since,
   }) async {
     try {
-      _turnGen += 1;
       _activeId = instanceId;
       _name = name;
       _elapsed = Duration.zero;
       _tools = 0;
       _pct = 8;
-      _backgrounded = false;
       await init();
       await requestPermissions();
-      // One live notification only: the progress bar. The Android
-      // foreground service is started later if the app is backgrounded.
-      await _plugin.cancel(_progressId);
-      if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
-        await FlutterForegroundTask.stopService();
+      await FlutterForegroundTask.saveData(key: 'apiBase', value: apiBase);
+      await FlutterForegroundTask.saveData(key: 'token', value: token ?? '');
+      await FlutterForegroundTask.saveData(key: 'instanceId', value: instanceId);
+      await FlutterForegroundTask.saveData(key: 'name', value: name);
+      await FlutterForegroundTask.saveData(key: 'since', value: since ?? '');
+      await FlutterForegroundTask.saveData(key: 'startedMs', value: DateTime.now().millisecondsSinceEpoch);
+      await FlutterForegroundTask.saveData(key: 'tools', value: 0);
+      // Start the service immediately so killing the UI still streams progress.
+      if (Platform.isAndroid) {
+        await initForeground();
+        await _plugin.cancel(progressId);
+        final running = await FlutterForegroundTask.isRunningService;
+        if (!running) {
+          await FlutterForegroundTask.startService(
+            serviceId: progressId,
+            serviceTypes: [ForegroundServiceTypes.dataSync],
+            notificationTitle: '$name · 8%',
+            notificationText: _label,
+            callback: vectraFgCallback,
+          );
+        } else {
+          await FlutterForegroundTask.updateService(
+            notificationTitle: '$name · 8%',
+            notificationText: _label,
+          );
+        }
+      } else {
+        await _showProgressBar();
       }
-      await _showProgressBar();
     } catch (_) {}
   }
 
@@ -126,73 +149,51 @@ class TaskNotifications {
     _elapsed = elapsed;
     _tools = tools;
     _pct = pct;
-    final gen = _turnGen;
     try {
-      if (_backgrounded && Platform.isAndroid) {
-        await _ensureForegroundService();
-        if (_activeId != instanceId || _turnGen != gen) return;
+      await FlutterForegroundTask.saveData(key: 'tools', value: tools);
+      if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.updateService(
+          notificationTitle: '$name · $pct%',
+          notificationText: _label,
+        );
         return;
       }
       await _showProgressBar();
     } catch (_) {}
   }
 
-  /// Keep the process alive in the background with a single notification.
-  /// Replaces the progress-bar tile so Android does not show two.
   static Future<void> enterBackground() async {
-    if (_activeId == null) return;
-    _backgrounded = true;
-    if (!Platform.isAndroid) return;
+    if (_activeId == null || !Platform.isAndroid) return;
     try {
-      await _plugin.cancel(_progressId);
-      await _ensureForegroundService();
-    } catch (_) {}
-  }
-
-  static Future<void> leaveBackground() async {
-    _backgrounded = false;
-    try {
-      if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
-        await FlutterForegroundTask.stopService();
+      await _plugin.cancel(progressId);
+      await initForeground();
+      if (!await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.startService(
+          serviceId: progressId,
+          serviceTypes: [ForegroundServiceTypes.dataSync],
+          notificationTitle: '$_name · $_pct%',
+          notificationText: _label,
+          callback: vectraFgCallback,
+        );
       }
-      if (_activeId != null) await _showProgressBar();
     } catch (_) {}
   }
 
-  static Future<void> _ensureForegroundService() async {
-    await initForeground();
-    final title = '$_name · $_pct%';
-    final running = await FlutterForegroundTask.isRunningService;
-    if (!running) {
-      await FlutterForegroundTask.startService(
-        serviceId: _progressId,
-        serviceTypes: [ForegroundServiceTypes.dataSync],
-        notificationTitle: title,
-        notificationText: _label,
-        callback: vectraFgCallback,
-      );
-    } else {
-      await FlutterForegroundTask.updateService(
-        notificationTitle: title,
-        notificationText: _label,
-      );
-    }
-  }
+  static Future<void> leaveBackground() async {}
 
   static Future<void> _showProgressBar() async {
     if (_activeId == null) return;
-    final gen = _turnGen;
     await init();
-    if (_activeId == null || _turnGen != gen) return;
+    if (_activeId == null) return;
     await _plugin.show(
-      _progressId,
+      progressId,
       '$_name · $_pct%',
       _label,
       NotificationDetails(
         android: AndroidNotificationDetails(
-          _progressChannel,
+          progressChannel,
           'Task progress',
-          channelDescription: 'Silent live progress for the current sandbox turn',
+          channelDescription: 'Live sandbox turn progress',
           importance: Importance.low,
           priority: Priority.low,
           playSound: false,
@@ -218,40 +219,47 @@ class TaskNotifications {
   }) async {
     try {
       _activeId = null;
-      _turnGen += 1;
-      _backgrounded = false;
-      await _plugin.cancel(_progressId);
+      await _plugin.cancel(progressId);
       if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
         await FlutterForegroundTask.stopService();
       }
-      await _plugin.show(
-        _doneId,
-        error ? '$name failed' : '$name finished',
-        (body == null || body.trim().isEmpty)
-            ? (error ? 'The turn ended with an error.' : 'Task finished.')
-            : body.trim(),
-        NotificationDetails(
-          android: AndroidNotificationDetails(
-            _doneChannel,
-            'Task complete',
-            channelDescription: 'Fires once when a sandbox turn finishes',
-            importance: Importance.defaultImportance,
-            priority: Priority.defaultPriority,
-            icon: '@drawable/ic_stat_vectra',
-          ),
-          iOS: const DarwinNotificationDetails(),
-        ),
-        payload: instanceId,
-      );
+      await showDone(instanceId: instanceId, name: name, body: body, error: error);
     } catch (_) {}
+  }
+
+  static Future<void> showDone({
+    required String instanceId,
+    required String name,
+    String? body,
+    bool error = false,
+  }) async {
+    await init();
+    final snippet = (body == null || body.trim().isEmpty)
+        ? (error ? 'The turn ended with an error.' : 'Task finished.')
+        : body.trim();
+    await _plugin.show(
+      doneId,
+      error ? '$name failed' : '$name finished',
+      snippet,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          doneChannel,
+          'Task complete',
+          channelDescription: 'Fires once when a sandbox turn finishes',
+          importance: Importance.defaultImportance,
+          priority: Priority.defaultPriority,
+          icon: '@drawable/ic_stat_vectra',
+        ),
+        iOS: const DarwinNotificationDetails(),
+      ),
+      payload: instanceId,
+    );
   }
 
   static Future<void> cancelSilent() async {
     try {
       _activeId = null;
-      _turnGen += 1;
-      _backgrounded = false;
-      await _plugin.cancel(_progressId);
+      await _plugin.cancel(progressId);
       if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
         await FlutterForegroundTask.stopService();
       }
@@ -274,12 +282,144 @@ void vectraFgCallback() {
 }
 
 class _VectraTaskHandler extends TaskHandler {
-  @override
-  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
+  bool _stopped = false;
+  HttpClient? _http;
+  DateTime _started = DateTime.now();
+  int _tools = 0;
+  String _since = '';
+  String _name = 'Chat';
+  String? _lastText;
 
   @override
-  void onRepeatEvent(DateTime timestamp) {}
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    _stopped = false;
+    _started = DateTime.fromMillisecondsSinceEpoch(
+      await FlutterForegroundTask.getData<int>(key: 'startedMs') ?? DateTime.now().millisecondsSinceEpoch,
+    );
+    _since = await FlutterForegroundTask.getData<String>(key: 'since') ?? '';
+    _name = await FlutterForegroundTask.getData<String>(key: 'name') ?? 'Chat';
+    _tools = await FlutterForegroundTask.getData<int>(key: 'tools') ?? 0;
+    unawaited(_loop());
+  }
 
   @override
-  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
+  void onRepeatEvent(DateTime timestamp) {
+    if (_stopped) return;
+    unawaited(_pushLive());
+  }
+
+  @override
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    _stopped = true;
+    _http?.close(force: true);
+    _http = null;
+  }
+
+  Future<void> _loop() async {
+    while (!_stopped) {
+      try {
+        await _connectOnce();
+      } catch (_) {}
+      if (_stopped) return;
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
+  }
+
+  Future<void> _connectOnce() async {
+    final base = await FlutterForegroundTask.getData<String>(key: 'apiBase');
+    final token = await FlutterForegroundTask.getData<String>(key: 'token');
+    final id = await FlutterForegroundTask.getData<String>(key: 'instanceId');
+    _name = await FlutterForegroundTask.getData<String>(key: 'name') ?? _name;
+    if (base == null || base.isEmpty || id == null || id.isEmpty) return;
+
+    final uri = Uri.parse('$base/api/instances/$id/chat/events').replace(
+      queryParameters: {
+        if (_since.isNotEmpty) 'since': _since,
+      },
+    );
+    final client = HttpClient();
+    _http = client;
+    try {
+      final req = await client.getUrl(uri);
+      req.headers.set(HttpHeaders.acceptHeader, 'text/event-stream');
+      if (token != null && token.isNotEmpty) {
+        req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      }
+      final res = await req.close().timeout(const Duration(seconds: 50));
+      if (res.statusCode >= 400) return;
+      var buf = '';
+      await for (final chunk in res.transform(utf8.decoder)) {
+        if (_stopped) return;
+        buf += chunk;
+        while (true) {
+          final i = buf.indexOf('\n\n');
+          if (i < 0) break;
+          final block = buf.substring(0, i);
+          buf = buf.substring(i + 2);
+          for (final line in block.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              final map = jsonDecode(line.substring(6));
+              if (map is Map<String, dynamic>) _onEvent(map, id);
+            } catch (_) {}
+          }
+        }
+      }
+    } finally {
+      client.close(force: true);
+      if (identical(_http, client)) _http = null;
+    }
+  }
+
+  void _onEvent(Map<String, dynamic> ev, String instanceId) {
+    final id = '${ev['id'] ?? ''}';
+    if (id.isNotEmpty) _since = id;
+    final type = '${ev['type'] ?? ''}';
+    if (type == 'tool' && ev['state'] != 'done') {
+      _tools += 1;
+    }
+    if (type == 'progress' && ev['tools'] is num) {
+      final n = (ev['tools'] as num).toInt();
+      if (n > _tools) _tools = n;
+    }
+    if (type == 'text' && '${ev['text'] ?? ''}'.isNotEmpty) {
+      _lastText = '${ev['text']}';
+    }
+    if (type == 'error' && '${ev['text'] ?? ''}'.isNotEmpty) {
+      _lastText = '${ev['text']}';
+    }
+    if (type == 'done' || type == 'error') {
+      unawaited(_complete(instanceId, error: type == 'error'));
+      return;
+    }
+    unawaited(_pushLive());
+  }
+
+  Future<void> _pushLive() async {
+    if (_stopped) return;
+    final elapsed = DateTime.now().difference(_started);
+    final pct = TaskNotifications.softPercent(tools: _tools, elapsed: elapsed);
+    final m = elapsed.inMinutes;
+    final s = elapsed.inSeconds % 60;
+    final clock = m <= 0 ? '${s}s' : '${m}m ${s.toString().padLeft(2, '0')}s';
+    await FlutterForegroundTask.updateService(
+      notificationTitle: '$_name · $pct%',
+      notificationText: 'Working · $clock · $_tools tool${_tools == 1 ? '' : 's'}',
+    );
+  }
+
+  Future<void> _complete(String instanceId, {required bool error}) async {
+    if (_stopped) return;
+    _stopped = true;
+    _http?.close(force: true);
+    try {
+      await TaskNotifications.showDone(
+        instanceId: instanceId,
+        name: _name,
+        body: _lastText,
+        error: error,
+      );
+    } catch (_) {}
+    await FlutterForegroundTask.stopService();
+  }
 }

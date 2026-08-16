@@ -233,14 +233,29 @@ class VectraClient {
     required Uint8List bytes,
     String? mime,
     String? caption,
+  }) =>
+      uploadFiles(id, files: [(name: name, bytes: bytes, mime: mime)], caption: caption);
+
+  Future<void> uploadFiles(
+    String id, {
+    required List<({String name, Uint8List bytes, String? mime})> files,
+    String? caption,
   }) async {
+    if (files.isEmpty) {
+      if (caption != null && caption.trim().isNotEmpty) {
+        await sendChat(id, caption.trim());
+      }
+      return;
+    }
     final uri = _u('/api/instances/$id/chat/upload');
     final req = http.MultipartRequest('POST', uri);
     req.headers.addAll({
       if (token != null && token!.isNotEmpty) 'authorization': 'Bearer $token',
     });
     if (caption != null && caption.isNotEmpty) req.fields['text'] = caption;
-    req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: name));
+    for (final f in files.take(12)) {
+      req.files.add(http.MultipartFile.fromBytes('file', f.bytes, filename: f.name));
+    }
     late http.StreamedResponse streamed;
     try {
       streamed = await req.send().timeout(const Duration(seconds: 90));
