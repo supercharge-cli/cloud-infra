@@ -11,6 +11,7 @@ class ApiException implements Exception {
   final int status;
   final String message;
   final String? code;
+  bool get paymentRequired => status == 402 || code == 'PAYMENT_REQUIRED';
   @override
   String toString() => message;
 }
@@ -21,6 +22,10 @@ class VectraClient {
   final String baseUrl;
   String? token;
 
+  static const _fast = Duration(seconds: 20);
+  static const _slow = Duration(seconds: 120);
+  static const _sseConnect = Duration(seconds: 50);
+
   Uri _u(String path, [Map<String, String>? q]) =>
       Uri.parse('$baseUrl$path').replace(queryParameters: q);
 
@@ -30,41 +35,58 @@ class VectraClient {
         if (token != null && token!.isNotEmpty) 'authorization': 'Bearer $token',
       };
 
+  String _friendlyError(int status, Map<String, dynamic> data, String? fallback) {
+    final raw = '${data['message'] ?? data['error'] ?? fallback ?? 'Request failed'}';
+    if (raw.trimLeft().startsWith('<')) {
+      return 'Server error $status. Try again.';
+    }
+    return raw;
+  }
+
   Future<Map<String, dynamic>> _json(
     String method,
     String path, {
     Object? body,
     Map<String, String>? query,
+    Duration? timeout,
   }) async {
     final uri = _u(path, query);
-    late http.Response res;
     final encoded = body == null ? null : jsonEncode(body);
-    switch (method) {
-      case 'GET':
-        res = await http.get(uri, headers: _headers);
-        break;
-      case 'DELETE':
-        res = await http.delete(uri, headers: _headers);
-        break;
-      case 'PUT':
-        res = await http.put(uri, headers: _headers, body: encoded);
-        break;
-      default:
-        res = await http.post(uri, headers: _headers, body: encoded);
+    final wait = timeout ?? (method == 'GET' ? _fast : _slow);
+    late http.Response res;
+    try {
+      switch (method) {
+        case 'GET':
+          res = await http.get(uri, headers: _headers).timeout(wait);
+          break;
+        case 'DELETE':
+          res = await http.delete(uri, headers: _headers).timeout(wait);
+          break;
+        case 'PUT':
+          res = await http.put(uri, headers: _headers, body: encoded).timeout(wait);
+          break;
+        default:
+          res = await http.post(uri, headers: _headers, body: encoded).timeout(wait);
+      }
+    } on TimeoutException {
+      throw ApiException(0, 'Request timed out. Check your connection.');
+    } on http.ClientException catch (e) {
+      throw ApiException(0, 'Network error: ${e.message}');
     }
+
     Map<String, dynamic> data = {};
     if (res.body.isNotEmpty) {
       try {
         final decoded = jsonDecode(res.body);
         if (decoded is Map<String, dynamic>) data = decoded;
       } catch (_) {
-        data = {'error': res.body};
+        data = {'error': _friendlyError(res.statusCode, const {}, res.reasonPhrase)};
       }
     }
     if (res.statusCode >= 400) {
       throw ApiException(
         res.statusCode,
-        '${data['error'] ?? data['message'] ?? res.reasonPhrase}',
+        _friendlyError(res.statusCode, data, res.reasonPhrase),
         code: data['code'] as String?,
       );
     }
@@ -78,7 +100,7 @@ class VectraClient {
     final data = await _json('POST', '/api/auth/login', body: {
       'email': email,
       'password': password,
-    });
+    }, timeout: _fast);
     return (
       user: AuthUser.fromJson(data['user'] as Map<String, dynamic>),
       token: '${data['token'] ?? ''}',
@@ -92,7 +114,7 @@ class VectraClient {
     final data = await _json('POST', '/api/auth/register', body: {
       'email': email,
       'password': password,
-    });
+    }, timeout: _fast);
     return (
       user: AuthUser.fromJson(data['user'] as Map<String, dynamic>),
       token: '${data['token'] ?? ''}',
@@ -100,12 +122,12 @@ class VectraClient {
   }
 
   Future<AuthUser> me() async {
-    final data = await _json('GET', '/api/me');
+    final data = await _json('GET', '/api/me', timeout: _fast);
     return AuthUser.fromJson(data['user'] as Map<String, dynamic>);
   }
 
   Future<DashboardData> dashboard() async {
-    final data = await _json('GET', '/api/instances');
+    final data = await _json('GET', '/api/instances', timeout: _fast);
     final list = (data['instances'] as List?) ?? const [];
     return DashboardData(
       instances: list
@@ -119,22 +141,28 @@ class VectraClient {
 
   Future<List<CloudInstance>> instances() async => (await dashboard()).instances;
 
+  Future<CloudInstance> getInstance(String id) async {
+    final data = await _json('GET', '/api/instances/$id', timeout: _slow);
+    return CloudInstance.fromJson(data['instance'] as Map<String, dynamic>);
+  }
+
   Future<CloudInstance> createInstance(String name) async {
-    final data = await _json('POST', '/api/instances', body: {'name': name});
+    final data = await _json('POST', '/api/instances', body: {'name': name}, timeout: _slow);
     return CloudInstance.fromJson(data['instance'] as Map<String, dynamic>);
   }
 
   Future<Map<String, dynamic>> wake(String id) =>
-      _json('POST', '/api/instances/$id/wake');
+      _json('POST', '/api/instances/$id/wake', timeout: _slow);
   Future<Map<String, dynamic>> restart(String id) =>
-      _json('POST', '/api/instances/$id/restart');
-  Future<void> destroy(String id) => _json('DELETE', '/api/instances/$id');
+      _json('POST', '/api/instances/$id/restart', timeout: _slow);
+  Future<void> destroy(String id) =>
+      _json('DELETE', '/api/instances/$id', timeout: _slow);
 
   Future<Map<String, dynamic>> getConfig(String id) =>
-      _json('GET', '/api/instances/$id/config');
+      _json('GET', '/api/instances/$id/config', timeout: _slow);
 
   Future<Map<String, dynamic>> pairing(String id) =>
-      _json('GET', '/api/instances/$id/pairing');
+      _json('GET', '/api/instances/$id/pairing', timeout: _slow);
 
   Future<Map<String, dynamic>> approvePair(
     String id, {
@@ -154,7 +182,7 @@ class VectraClient {
       _json('GET', '/api/instances/$id/logs', query: {
         'source': source,
         'lines': '$lines',
-      });
+      }, timeout: _slow);
 
   Future<ExecResult> exec(
     String id, {
@@ -166,37 +194,37 @@ class VectraClient {
       'command': command,
       'cwd': cwd,
       'timeout': timeout,
-    });
-    return ExecResult.fromJson(data);
+    }, timeout: Duration(seconds: timeout + 15));
+    return ExecResult.fromJson(data, command: command);
   }
 
   Future<Map<String, dynamic>> cliVersion(String id) =>
-      _json('GET', '/api/instances/$id/cli-version');
+      _json('GET', '/api/instances/$id/cli-version', timeout: _slow);
 
   Future<Map<String, dynamic>> cliUpdate(String id) =>
-      _json('POST', '/api/instances/$id/cli-update');
+      _json('POST', '/api/instances/$id/cli-update', timeout: const Duration(seconds: 180));
 
   Future<void> sendChat(String id, String text) =>
-      _json('POST', '/api/instances/$id/chat', body: {'text': text});
+      _json('POST', '/api/instances/$id/chat', body: {'text': text}, timeout: _slow);
 
   Future<void> stopChat(String id) =>
-      _json('POST', '/api/instances/$id/chat/stop');
+      _json('POST', '/api/instances/$id/chat/stop', timeout: _fast);
 
   Future<void> approve(String id, String choice) =>
       _json('POST', '/api/instances/$id/chat/approve', body: {'choice': choice});
 
   Future<void> answer(String id, {String? ref, String? answer, int? index}) =>
       _json('POST', '/api/instances/$id/chat/answer', body: {
-        if (ref != null) 'id': ref,
-        if (answer != null) 'answer': answer,
-        if (index != null) 'index': index,
+        'id': ?ref,
+        'answer': ?answer,
+        'index': ?index,
       });
 
   Future<void> pick(String id, {String? ref, String? value, String? kind}) =>
       _json('POST', '/api/instances/$id/chat/pick', body: {
-        if (ref != null) 'id': ref,
-        if (value != null) 'value': value,
-        if (kind != null) 'kind': kind,
+        'id': ?ref,
+        'value': ?value,
+        'kind': ?kind,
       });
 
   Future<void> upload(
@@ -212,13 +240,36 @@ class VectraClient {
           {
             'name': name,
             'contentBase64': base64Encode(bytes),
-            if (mime != null) 'mime': mime,
+            'mime': ?mime,
           }
         ],
-      });
+      }, timeout: const Duration(seconds: 90));
+
+  Future<DownloadedFile> downloadFile(String id, String fileId) async {
+    final uri = _u('/api/instances/$id/chat/files/$fileId');
+    late http.Response res;
+    try {
+      res = await http.get(uri, headers: {
+        'accept': '*/*',
+        if (token != null && token!.isNotEmpty) 'authorization': 'Bearer $token',
+      }).timeout(const Duration(seconds: 60));
+    } on TimeoutException {
+      throw ApiException(0, 'Download timed out');
+    }
+    if (res.statusCode >= 400) {
+      throw ApiException(res.statusCode, 'Could not download file');
+    }
+    final disp = res.headers['content-disposition'] ?? '';
+    final match = RegExp(r'filename="?([^"]+)"?').firstMatch(disp);
+    return DownloadedFile(
+      bytes: res.bodyBytes,
+      name: match?.group(1) ?? fileId,
+      mime: res.headers['content-type'],
+    );
+  }
 
   Future<List<BotCommand>> commands(String id) async {
-    final data = await _json('GET', '/api/instances/$id/chat/commands');
+    final data = await _json('GET', '/api/instances/$id/chat/commands', timeout: _slow);
     final list = (data['commands'] as List?) ?? const [];
     return list
         .whereType<Map>()
@@ -232,7 +283,7 @@ class VectraClient {
   }
 
   Future<Map<String, dynamic>> billingConfig() =>
-      _json('GET', '/api/billing/config');
+      _json('GET', '/api/billing/config', timeout: _fast);
 
   Future<Map<String, dynamic>> createOrder({
     required String purpose,
@@ -242,13 +293,24 @@ class VectraClient {
   }) =>
       _json('POST', '/api/billing/create-order', body: {
         'purpose': purpose,
-        if (name != null) 'name': name,
-        if (instanceId != null) 'instanceId': instanceId,
+        'name': ?name,
+        'instanceId': ?instanceId,
         'currency': currency,
-      });
+      }, timeout: _fast);
+
+  Future<Map<String, dynamic>> verifyPayment({
+    required String orderId,
+    required String paymentId,
+    required String signature,
+  }) =>
+      _json('POST', '/api/billing/verify', body: {
+        'razorpay_order_id': orderId,
+        'razorpay_payment_id': paymentId,
+        'razorpay_signature': signature,
+      }, timeout: _slow);
 
   Future<void> saveConfig(String id, Map<String, dynamic> body) =>
-      _json('PUT', '/api/instances/$id/config', body: body);
+      _json('PUT', '/api/instances/$id/config', body: body, timeout: _slow);
 
   Stream<AppChatEvent> events(String id, {String? since}) async* {
     final uri = _u('/api/instances/$id/chat/events', {
@@ -261,10 +323,19 @@ class VectraClient {
     });
     final client = http.Client();
     try {
-      final res = await client.send(req);
+      final res = await client.send(req).timeout(_sseConnect);
       if (res.statusCode >= 400) {
         final body = await res.stream.bytesToString();
-        throw ApiException(res.statusCode, body);
+        Map<String, dynamic> data = {};
+        try {
+          final decoded = jsonDecode(body);
+          if (decoded is Map<String, dynamic>) data = decoded;
+        } catch (_) {}
+        throw ApiException(
+          res.statusCode,
+          _friendlyError(res.statusCode, data, body),
+          code: data['code'] as String?,
+        );
       }
       var buf = '';
       await for (final chunk in res.stream.transform(utf8.decoder)) {
@@ -286,6 +357,8 @@ class VectraClient {
           }
         }
       }
+    } on TimeoutException {
+      throw ApiException(0, 'Chat inbox timed out while connecting.');
     } finally {
       client.close();
     }

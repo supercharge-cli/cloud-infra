@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -40,7 +41,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   String? msg;
   bool loading = true;
   bool allowAll = false;
-  ExecResult? lastExec;
+  final history = <ExecResult>[];
 
   VectraClient get api => context.read<SessionController>().client;
   String get id => widget.instanceId;
@@ -74,6 +75,9 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       msg = null;
     });
     try {
+      try {
+        inst = await api.getInstance(id);
+      } catch (_) {}
       final cfg = await api.getConfig(id);
       config = cfg;
       final stored = cfg['stored'] as Map<String, dynamic>? ?? {};
@@ -143,7 +147,9 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     final command = cmd.text.trim();
     if (command.isEmpty) return;
     await _run('Running command…', () async {
-      lastExec = await api.exec(id, command: command, cwd: cwd.text.trim());
+      final result = await api.exec(id, command: command, cwd: cwd.text.trim());
+      history.insert(0, result);
+      if (history.length > 12) history.removeLast();
     });
   }
 
@@ -194,10 +200,13 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
         ? Map<String, dynamic>.from(pairing!['pairing'] as Map)
         : pairing;
     final pending = (root?['pending'] as List?) ?? const [];
+    final approved = (root?['approved'] as List?) ?? const [];
+    final updateReady = cli?['updateAvailable'] == true;
     return Scaffold(
       appBar: AppBar(
         title: Text(inst?.name ?? 'Control'),
         actions: [
+          IconButton(onPressed: overlay == null ? _load : null, icon: const Icon(Icons.refresh)),
           IconButton(
             onPressed: () => context.push('/chat/$id', extra: inst),
             icon: const Icon(Icons.chat_bubble_outline),
@@ -215,13 +224,37 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                 if (msg != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(msg!, style: TextStyle(color: msg!.startsWith('Saved') || msg!.contains('OK') || msg!.contains('finished') || msg!.contains('sent') || msg!.contains('restarted') ? Vc.green : Vc.red)),
+                    child: Text(msg!, style: TextStyle(color: msg!.startsWith('Saved') || msg!.contains('OK') || msg!.contains('finished') || msg!.contains('sent') || msg!.contains('restarted') || msg!.contains('updated') ? Vc.green : Vc.red)),
+                  ),
+                if (updateReady)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1C1917),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Vc.amber.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Expanded(child: Text('CLI update available', style: TextStyle(color: Vc.amber))),
+                        TextButton(onPressed: overlay == null ? _updateCli : null, child: const Text('Update')),
+                      ],
+                    ),
                   ),
                 Row(
                   children: [
                     Text(inst?.name ?? id, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
                     const SizedBox(width: 8),
                     StateChip(inst?.displayState ?? 'unknown'),
+                    if (inst?.isFree == true) ...[
+                      const SizedBox(width: 6),
+                      const StateChip('free'),
+                    ],
+                    if (inst?.pastDue == true) ...[
+                      const SizedBox(width: 6),
+                      const StateChip('past_due'),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -272,6 +305,16 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                       title: Text('${(p as Map)['code'] ?? ''}'),
                       subtitle: Text('${p['platform'] ?? ''} · ${p['userId'] ?? ''}'),
                     ),
+                if (approved.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  const Text('Approved', style: TextStyle(color: Vc.muted, fontSize: 12)),
+                  for (final p in approved)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('${(p as Map)['platform'] ?? ''} · ${p['userId'] ?? ''}'),
+                    ),
+                ],
                 Row(
                   children: [
                     Expanded(
@@ -308,6 +351,19 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: logs.isEmpty
+                        ? null
+                        : () {
+                            Clipboard.setData(ClipboardData(text: logs));
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logs copied')));
+                          },
+                    icon: const Icon(Icons.copy, size: 16),
+                    label: const Text('Copy'),
+                  ),
+                ),
                 Container(
                   width: double.infinity,
                   constraints: const BoxConstraints(minHeight: 120, maxHeight: 240),
@@ -341,13 +397,16 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                     FilledButton(onPressed: overlay == null ? _exec : null, child: const Text('Run')),
                   ],
                 ),
-                if (lastExec != null) ...[
+                for (final lastExec in history.take(4)) ...[
                   const SizedBox(height: 8),
-                  Text('exit ${lastExec!.exitCode ?? '?'}', style: TextStyle(color: lastExec!.ok ? Vc.green : Vc.red)),
-                  if (lastExec!.stdout.isNotEmpty)
-                    Text(lastExec!.stdout, style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
-                  if (lastExec!.stderr.isNotEmpty)
-                    Text(lastExec!.stderr, style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Vc.red)),
+                  Text(
+                    '${lastExec.command ?? 'cmd'} · exit ${lastExec.exitCode ?? '?'}',
+                    style: TextStyle(color: lastExec.ok ? Vc.green : Vc.red, fontSize: 12),
+                  ),
+                  if (lastExec.stdout.isNotEmpty)
+                    Text(lastExec.stdout, style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
+                  if (lastExec.stderr.isNotEmpty)
+                    Text(lastExec.stderr, style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Vc.red)),
                 ],
                 const SizedBox(height: 20),
                 OutlinedButton(

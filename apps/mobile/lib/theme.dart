@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class Vc {
   static const bg = Color(0xFF050505);
@@ -11,6 +12,14 @@ class Vc {
   static const amber = Color(0xFFFBBF24);
   static const red = Color(0xFFF87171);
   static const blue = Color(0xFF60A5FA);
+
+  static const overlay = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    statusBarBrightness: Brightness.dark,
+    systemNavigationBarColor: bg,
+    systemNavigationBarIconBrightness: Brightness.light,
+  );
 
   static ThemeData dark() {
     final base = ThemeData(
@@ -30,6 +39,7 @@ class Vc {
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
+        systemOverlayStyle: overlay,
       ),
       cardTheme: CardThemeData(
         color: card,
@@ -75,6 +85,7 @@ class Vc {
         return green;
       case 'paused':
         return amber;
+      case 'past_due':
       case 'error':
       case 'destroyed':
       case 'missing':

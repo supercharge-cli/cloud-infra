@@ -16,6 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final password = TextEditingController();
   bool busy = false;
   bool signup = false;
+  bool showPass = false;
 
   @override
   void dispose() {
@@ -24,9 +25,21 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  String? _validate() {
+    final e = email.text.trim();
+    if (e.isEmpty || !e.contains('@')) return 'Enter a valid email.';
+    if (password.text.length < 6) return 'Password must be at least 6 characters.';
+    return null;
+  }
+
   Future<void> _submit() async {
-    setState(() => busy = true);
+    final problem = _validate();
     final session = context.read<SessionController>();
+    if (problem != null) {
+      session.setError(problem);
+      return;
+    }
+    setState(() => busy = true);
     await session.signIn(email.text.trim(), password.text, register: signup);
     if (mounted) setState(() => busy = false);
   }
@@ -65,13 +78,21 @@ class _LoginScreenState extends State<LoginScreen> {
                   controller: email,
                   keyboardType: TextInputType.emailAddress,
                   autofillHints: const [AutofillHints.email],
+                  textInputAction: TextInputAction.next,
                   decoration: const InputDecoration(labelText: 'Email'),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: password,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Password'),
+                  obscureText: !showPass,
+                  autofillHints: signup ? const [AutofillHints.newPassword] : const [AutofillHints.password],
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    suffixIcon: IconButton(
+                      onPressed: () => setState(() => showPass = !showPass),
+                      icon: Icon(showPass ? Icons.visibility_off : Icons.visibility, color: Vc.muted),
+                    ),
+                  ),
                   onSubmitted: (_) => _submit(),
                 ),
                 if (err != null) ...[
@@ -84,7 +105,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Text(signup ? 'Create account' : 'Sign in'),
                 ),
                 TextButton(
-                  onPressed: busy ? null : () => setState(() => signup = !signup),
+                  onPressed: busy
+                      ? null
+                      : () {
+                          context.read<SessionController>().setError(null);
+                          setState(() => signup = !signup);
+                        },
                   child: Text(
                     signup ? 'Have an account? Sign in' : 'New here? Create an account',
                     style: const TextStyle(color: Vc.muted),
@@ -93,7 +119,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ],
             ),
           ),
-          if (busy) const BusyOverlay(message: 'Signing in…'),
+          if (busy) BusyOverlay(message: signup ? 'Creating account…' : 'Signing in…'),
         ],
       ),
     );

@@ -128,6 +128,80 @@ class SectionTitle extends StatelessWidget {
   }
 }
 
+class ErrorBanner extends StatelessWidget {
+  const ErrorBanner({super.key, required this.message, this.onRetry, this.onDismiss});
+  final String message;
+  final VoidCallback? onRetry;
+  final VoidCallback? onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF450A0A),
+      child: ListTile(
+        dense: true,
+        title: Text(message, style: const TextStyle(color: Vc.red, fontSize: 13)),
+        trailing: onRetry != null
+            ? TextButton(onPressed: onRetry, child: const Text('Retry'))
+            : (onDismiss != null
+                ? IconButton(onPressed: onDismiss, icon: const Icon(Icons.close, size: 18, color: Vc.red))
+                : null),
+        onTap: onDismiss,
+      ),
+    );
+  }
+}
+
+class EmptyState extends StatelessWidget {
+  const EmptyState({super.key, required this.icon, required this.title, this.detail});
+  final IconData icon;
+  final String title;
+  final String? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 48, 28, 24),
+      child: Column(
+        children: [
+          Icon(icon, size: 36, color: Vc.faint),
+          const SizedBox(height: 14),
+          Text(title, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w600)),
+          if (detail != null) ...[
+            const SizedBox(height: 8),
+            Text(detail!, textAlign: TextAlign.center, style: const TextStyle(color: Vc.muted, height: 1.4)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class ReconnectBar extends StatelessWidget {
+  const ReconnectBar({super.key, this.message = 'Reconnecting…'});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFF1C1917),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Vc.amber),
+          ),
+          const SizedBox(width: 10),
+          Text(message, style: const TextStyle(color: Vc.amber, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
 class ControlButton extends StatelessWidget {
   const ControlButton({
     super.key,

@@ -46,6 +46,11 @@ class _InstancesScreenState extends State<InstancesScreen> {
     if (mounted) setState(() => loading = false);
   }
 
+  Future<void> _afterPush(Future<dynamic> nav) async {
+    await nav;
+    if (mounted) _reload();
+  }
+
   Future<void> _create() async {
     final name = await showDialog<String>(
       context: context,
@@ -54,19 +59,63 @@ class _InstancesScreenState extends State<InstancesScreen> {
         return AlertDialog(
           backgroundColor: Vc.card,
           title: const Text('New instance'),
-          content: TextField(controller: c, decoration: const InputDecoration(labelText: 'Name')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(controller: c, decoration: const InputDecoration(labelText: 'Name')),
+              const SizedBox(height: 12),
+              Text(
+                quota.canCreateFree
+                    ? 'Free slot available (${quota.used}/${quota.limit} used).'
+                    : 'Free quota used. Extra instances are paid.',
+                style: const TextStyle(color: Vc.muted, fontSize: 12),
+              ),
+            ],
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Create')),
+            if (!quota.canCreateFree)
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, 'pay:${c.text.trim()}'),
+                child: const Text('Pay & create'),
+              )
+            else ...[
+              OutlinedButton(
+                onPressed: () => Navigator.pop(ctx, 'pay:${c.text.trim()}'),
+                child: const Text('Pay extra'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, c.text.trim()),
+                child: const Text('Create free'),
+              ),
+            ],
           ],
         );
       },
     );
     if (name == null || name.isEmpty) return;
+    if (name.startsWith('pay:')) {
+      final paidName = name.substring(4);
+      if (paidName.isEmpty) return;
+      if (!mounted) return;
+      await _afterPush(context.push('/billing', extra: BillingArgs(name: paidName)));
+      return;
+    }
     setState(() => overlay = 'Provisioning sandbox…');
     try {
-      await api.createInstance(name);
+      final created = await api.createInstance(name);
       await _reload();
+      if (!mounted) return;
+      context.push('/chat/${created.id}', extra: created);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      if (e.paymentRequired) {
+        if (!mounted) return;
+        await _afterPush(context.push('/billing', extra: BillingArgs(name: name)));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -99,8 +148,8 @@ class _InstancesScreenState extends State<InstancesScreen> {
           ],
         ),
         actions: [
-          IconButton(onPressed: () => context.push('/billing'), icon: const Icon(Icons.payments_outlined)),
-          IconButton(onPressed: () => context.push('/account'), icon: const Icon(Icons.person_outline)),
+          IconButton(onPressed: () => _afterPush(context.push('/billing')), icon: const Icon(Icons.payments_outlined)),
+          IconButton(onPressed: () => _afterPush(context.push('/account')), icon: const Icon(Icons.person_outline)),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -108,7 +157,7 @@ class _InstancesScreenState extends State<InstancesScreen> {
         backgroundColor: Vc.green,
         foregroundColor: Colors.black,
         icon: const Icon(Icons.add),
-        label: const Text('Create'),
+        label: Text(quota.canCreateFree ? 'Create' : 'Pay & create'),
       ),
       body: Stack(
         children: [
@@ -131,14 +180,18 @@ class _InstancesScreenState extends State<InstancesScreen> {
                     child: Center(child: CircularProgressIndicator(color: Vc.green)),
                   )
                 else if (error != null)
-                  Text(error!, style: const TextStyle(color: Vc.red))
+                  Column(
+                    children: [
+                      Text(error!, style: const TextStyle(color: Vc.red)),
+                      const SizedBox(height: 12),
+                      OutlinedButton(onPressed: _reload, child: const Text('Retry')),
+                    ],
+                  )
                 else if (items.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 40),
-                    child: Text(
-                      'No instances yet. Create a free sandbox, then open Chat.',
-                      style: TextStyle(color: Vc.muted),
-                    ),
+                  const EmptyState(
+                    icon: Icons.cloud_outlined,
+                    title: 'No instances yet',
+                    detail: 'Create a free sandbox, then open Chat. Wake, billing, and AI config live in Control.',
                   )
                 else
                   for (final inst in items) _card(inst),
@@ -174,9 +227,9 @@ class _InstancesScreenState extends State<InstancesScreen> {
               ],
             ),
           ),
-          if (plan?.priceInr != null)
+          if (plan != null)
             Text(
-              '₹${plan!.priceInr} / \$${plan!.priceUsd}',
+              '${plan!.inrLabel} · ${plan!.usdLabel}',
               style: const TextStyle(color: Vc.muted, fontSize: 12),
             ),
         ],
@@ -191,11 +244,11 @@ class _InstancesScreenState extends State<InstancesScreen> {
         color: Vc.card,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: Vc.cardBorder),
+          side: BorderSide(color: inst.pastDue ? Vc.red.withValues(alpha: 0.5) : Vc.cardBorder),
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: () => context.push('/chat/${inst.id}', extra: inst),
+          onTap: () => _afterPush(context.push('/chat/${inst.id}', extra: inst)),
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Column(
@@ -212,8 +265,17 @@ class _InstancesScreenState extends State<InstancesScreen> {
                         padding: EdgeInsets.only(left: 6),
                         child: StateChip('free'),
                       ),
+                    if (inst.pastDue)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 6),
+                        child: StateChip('past_due'),
+                      ),
                   ],
                 ),
+                if (inst.liveMessage != null && inst.liveMessage!.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(inst.liveMessage!, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 12)),
+                ],
                 if (inst.lastError != null && inst.lastError!.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Text(inst.lastError!, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.red, fontSize: 12)),
@@ -221,11 +283,11 @@ class _InstancesScreenState extends State<InstancesScreen> {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    _mini('Chat', Icons.chat_bubble_outline, () => context.push('/chat/${inst.id}', extra: inst)),
+                    _mini('Chat', Icons.chat_bubble_outline, () => _afterPush(context.push('/chat/${inst.id}', extra: inst))),
                     const SizedBox(width: 8),
                     _mini(inst.isPaused ? 'Wake' : 'Wake', Icons.bolt, () => _wake(inst)),
                     const SizedBox(width: 8),
-                    _mini('Control', Icons.tune, () => context.push('/instance/${inst.id}', extra: inst)),
+                    _mini('Control', Icons.tune, () => _afterPush(context.push('/instance/${inst.id}', extra: inst))),
                   ],
                 ),
               ],

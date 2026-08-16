@@ -16,6 +16,7 @@ class FreeQuota {
   final int limit;
   final int used;
   final int available;
+  bool get canCreateFree => available > 0;
   factory FreeQuota.fromJson(Map<String, dynamic>? j) {
     if (j == null) return FreeQuota();
     final limit = (j['limit'] as num?)?.toInt() ?? 1;
@@ -25,19 +26,52 @@ class FreeQuota {
   }
 }
 
+class CurrencyPrice {
+  CurrencyPrice({this.priceLabel, this.buttonLabel, this.display});
+  final String? priceLabel;
+  final String? buttonLabel;
+  final num? display;
+  factory CurrencyPrice.fromJson(Map<String, dynamic>? j) {
+    if (j == null) return CurrencyPrice();
+    return CurrencyPrice(
+      priceLabel: j['priceLabel'] as String?,
+      buttonLabel: j['buttonLabel'] as String?,
+      display: j['display'] as num?,
+    );
+  }
+}
+
 class PlanInfo {
-  PlanInfo({this.label, this.priceInr, this.priceUsd, this.periodDays});
+  PlanInfo({
+    this.label,
+    this.priceInr,
+    this.priceUsd,
+    this.periodDays,
+    this.inr,
+    this.usd,
+  });
   final String? label;
   final num? priceInr;
   final num? priceUsd;
   final num? periodDays;
+  final CurrencyPrice? inr;
+  final CurrencyPrice? usd;
+
+  String get inrLabel => inr?.priceLabel ?? (priceInr != null ? '₹$priceInr/mo' : 'INR');
+  String get usdLabel => usd?.priceLabel ?? (priceUsd != null ? '\$$priceUsd/mo' : 'USD');
+  String get inrButton => inr?.buttonLabel ?? 'Pay in INR';
+  String get usdButton => usd?.buttonLabel ?? 'Pay in USD';
+
   factory PlanInfo.fromJson(Map<String, dynamic>? j) {
     if (j == null) return PlanInfo();
+    final currencies = j['currencies'] as Map<String, dynamic>?;
     return PlanInfo(
       label: j['label'] as String? ?? j['name'] as String?,
       priceInr: j['priceInr'] as num?,
       priceUsd: j['priceUsd'] as num?,
       periodDays: j['periodDays'] as num?,
+      inr: CurrencyPrice.fromJson(currencies?['INR'] as Map<String, dynamic>?),
+      usd: CurrencyPrice.fromJson(currencies?['USD'] as Map<String, dynamic>?),
     );
   }
 }
@@ -55,6 +89,7 @@ class CloudInstance {
     this.resumable = true,
     this.billingStatus,
     this.liveMessage,
+    this.paidUntil,
   });
   final String id;
   final String name;
@@ -67,10 +102,13 @@ class CloudInstance {
   final bool resumable;
   final String? billingStatus;
   final String? liveMessage;
+  final String? paidUntil;
 
   String get displayState => liveState ?? status;
   bool get isPaused => displayState.toLowerCase() == 'paused';
   bool get isRunning => displayState.toLowerCase() == 'running';
+  bool get needsPayment => !isFree && paid == false;
+  bool get pastDue => billingStatus == 'past_due' || needsPayment;
 
   factory CloudInstance.fromJson(Map<String, dynamic> j) => CloudInstance(
         id: '${j['id'] ?? ''}',
@@ -84,6 +122,7 @@ class CloudInstance {
         resumable: j['resumable'] != false,
         billingStatus: j['billingStatus'] as String?,
         liveMessage: j['liveMessage'] as String?,
+        paidUntil: j['paidUntil'] as String?,
       );
 }
 
@@ -101,11 +140,14 @@ class AppChatEvent {
   String get id => '${raw['id'] ?? ''}';
   String get type => '${raw['type'] ?? ''}';
   String get text =>
-      '${raw['text'] ?? raw['summary'] ?? raw['detail'] ?? raw['question'] ?? ''}';
+      '${raw['text'] ?? raw['summary'] ?? raw['detail'] ?? raw['question'] ?? raw['caption'] ?? ''}';
   String? get ref => raw['ref'] as String? ?? raw['id'] as String?;
   String? get fileId => raw['fileId'] as String?;
   String? get name => raw['name'] as String?;
   String? get kind => raw['kind'] as String?;
+  String? get title => raw['title'] as String?;
+  String? get state => raw['state'] as String?;
+  bool get isFinal => raw['final'] == true;
   List<String> get choices =>
       (raw['choices'] as List?)?.map((e) => '$e').toList() ?? const [];
   List<Map<String, dynamic>> get options =>
@@ -123,17 +165,40 @@ class BotCommand {
 }
 
 class ExecResult {
-  ExecResult({this.ok = false, this.exitCode, this.stdout = '', this.stderr = '', this.cwd});
+  ExecResult({
+    this.ok = false,
+    this.exitCode,
+    this.stdout = '',
+    this.stderr = '',
+    this.cwd,
+    this.command,
+  });
   final bool ok;
   final int? exitCode;
   final String stdout;
   final String stderr;
   final String? cwd;
-  factory ExecResult.fromJson(Map<String, dynamic> j) => ExecResult(
+  final String? command;
+  factory ExecResult.fromJson(Map<String, dynamic> j, {String? command}) => ExecResult(
         ok: j['ok'] == true,
         exitCode: (j['exitCode'] as num?)?.toInt(),
         stdout: '${j['stdout'] ?? ''}',
         stderr: '${j['stderr'] ?? j['message'] ?? ''}',
         cwd: j['cwd'] as String?,
+        command: command,
       );
+}
+
+class BillingArgs {
+  const BillingArgs({this.instanceId, this.name});
+  final String? instanceId;
+  final String? name;
+  bool get renew => instanceId != null && instanceId!.isNotEmpty;
+}
+
+class DownloadedFile {
+  DownloadedFile({required this.bytes, required this.name, this.mime});
+  final List<int> bytes;
+  final String name;
+  final String? mime;
 }

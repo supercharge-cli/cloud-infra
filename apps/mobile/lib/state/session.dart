@@ -32,6 +32,11 @@ class SessionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setError(String? value) {
+    error = value;
+    notifyListeners();
+  }
+
   Future<void> signIn(String email, String password, {bool register = false}) async {
     error = null;
     notifyListeners();
