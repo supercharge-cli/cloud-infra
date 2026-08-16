@@ -99,6 +99,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     }
 
     const result = await writeSandboxConfig(inst.sessionId, {
+      instanceId: inst.id,
       provider: body.provider,
       apiKey: body.apiKey,
       baseUrl: body.baseUrl,

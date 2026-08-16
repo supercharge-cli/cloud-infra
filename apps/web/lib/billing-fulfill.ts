@@ -16,6 +16,16 @@ import {
   type PendingOrder,
 } from './store';
 
+async function findPendingOrderWithRetry(razorpayOrderId: string) {
+  for (let i = 0; i < 4; i++) {
+    const pending = await findPendingOrderByRazorpayId(razorpayOrderId);
+    if (pending) return pending;
+    // payment.captured can beat our savePendingOrder write by a few hundred ms
+    await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+  }
+  return findPendingOrderByRazorpayId(razorpayOrderId);
+}
+
 export type FulfillResult =
   | {
       ok: true;
@@ -37,7 +47,7 @@ export async function fulfillPaidOrder(input: {
   /** When set, order must belong to this user (client verify). Webhook omits. */
   expectUserId?: string;
 }): Promise<FulfillResult> {
-  const pending = await findPendingOrderByRazorpayId(input.razorpayOrderId);
+  const pending = await findPendingOrderWithRetry(input.razorpayOrderId);
   if (!pending) {
     return { ok: false, error: 'Order not found', status: 404 };
   }

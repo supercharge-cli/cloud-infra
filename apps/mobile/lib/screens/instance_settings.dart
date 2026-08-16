@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../api/client.dart';
 import '../api/models.dart';
+import '../chat/cli_update.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/side_panel.dart';
@@ -20,6 +21,7 @@ const _providers = [
   'openrouter',
   'grok',
   'google',
+  'nous',
   'deepseek',
   'custom',
 ];
@@ -46,6 +48,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   final cmd = TextEditingController();
   final cwd = TextEditingController(text: '/home/user/workspace');
 
+  List<String> modelChoices = const [];
   CloudInstance? inst;
   Map<String, dynamic>? config;
   Map<String, dynamic>? pairing;
@@ -163,8 +166,13 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       allowAll = sandbox['allowAllUsers'] == true || stored['allowAllUsers'] == true;
       await _fillFromCacheIfMissing();
       await _cacheSecrets();
+      modelChoices = await api.models(id).catchError((_) => <String>[]);
       pairing = await api.pairing(id).catchError((_) => <String, dynamic>{});
       cli = await api.cliVersion(id).catchError((_) => <String, dynamic>{});
+      final info = CliVersion.fromJson(cli);
+      if (info.updateAvailable) {
+        await CliUpdateOffer.notifyOnce(instanceId: id, name: inst?.name ?? 'workspace', info: info);
+      }
     } catch (e) {
       msg = e.toString();
       await _fillFromCacheIfMissing();
@@ -374,18 +382,12 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                   ),
                   if (updateReady) ...[
                     const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1C1917),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Vc.amber.withValues(alpha: 0.4)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Expanded(child: Text('CLI update available', style: TextStyle(color: Vc.amber))),
-                          TextButton(onPressed: overlay == null ? _updateCli : null, child: const Text('Update')),
-                        ],
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: CliUpdateNote(
+                        info: CliVersion.fromJson(cli),
+                        busy: overlay != null,
+                        onUpdate: _updateCli,
                       ),
                     ),
                   ],
@@ -408,7 +410,23 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                           ),
                         ),
                         const SizedBox(height: 10),
-                        TextField(controller: model, decoration: const InputDecoration(labelText: 'Model')),
+                        TextField(
+                          controller: model,
+                          decoration: InputDecoration(
+                            labelText: 'Model',
+                            hintText: 'pick or type a custom id',
+                            suffixIcon: modelChoices.isEmpty
+                                ? null
+                                : PopupMenuButton<String>(
+                                    icon: const Icon(Icons.expand_more, color: Vc.muted),
+                                    onSelected: (v) => setState(() => model.text = v),
+                                    itemBuilder: (_) => [
+                                      for (final m in modelChoices.take(80))
+                                        PopupMenuItem(value: m, child: Text(m, overflow: TextOverflow.ellipsis)),
+                                    ],
+                                  ),
+                          ),
+                        ),
                         const SizedBox(height: 10),
                         TextField(controller: baseUrl, decoration: const InputDecoration(labelText: 'Base URL')),
                         const SizedBox(height: 10),

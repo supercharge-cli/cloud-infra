@@ -302,6 +302,23 @@ class VectraClient {
     );
   }
 
+  Future<Map<String, dynamic>> chatStatus(String id) =>
+      _json('GET', '/api/instances/$id/chat/status', timeout: _fast);
+
+  Future<List<String>> models(String id) async {
+    final data = await _json('GET', '/api/instances/$id/models', timeout: _slow);
+    final free = ((data['free'] as List?) ?? const []).map((e) => '$e').toList();
+    final live = ((data['models'] as List?) ?? const []).map((e) => '$e').toList();
+    final seen = <String>{};
+    final out = <String>[];
+    for (final id in [...free, ...live]) {
+      if (id.isEmpty || seen.contains(id)) continue;
+      seen.add(id);
+      out.add(id);
+    }
+    return out;
+  }
+
   Future<List<BotCommand>> commands(String id) async {
     final data = await _json('GET', '/api/instances/$id/chat/commands', timeout: _slow);
     final list = (data['commands'] as List?) ?? const [];

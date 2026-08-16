@@ -190,7 +190,7 @@ export async function POST(req: Request) {
       isFree: true,
     });
 
-    await bootstrapAppInbox(session.sessionId, session.sandboxId).catch(
+    await bootstrapAppInbox(session.sessionId, session.sandboxId, instance.id).catch(
       () => undefined,
     );
 

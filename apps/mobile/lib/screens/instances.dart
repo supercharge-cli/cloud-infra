@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../api/client.dart';
 import '../api/models.dart';
+import '../chat/cli_update.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/side_panel.dart';
@@ -22,6 +25,7 @@ class _InstancesScreenState extends State<InstancesScreen> {
   bool loading = true;
   String? error;
   String? overlay;
+  final cliById = <String, CliVersion>{};
 
   VectraClient get api => context.read<SessionController>().client;
 
@@ -45,6 +49,26 @@ class _InstancesScreenState extends State<InstancesScreen> {
       error = e.toString();
     }
     if (mounted) setState(() => loading = false);
+    unawaited(_checkCliUpdates());
+  }
+
+  Future<void> _checkCliUpdates() async {
+    final targets = items.where((i) => !i.pastDue && i.status != 'destroyed').take(8).toList();
+    for (final inst in targets) {
+      try {
+        final raw = await api.cliVersion(inst.id);
+        final info = CliVersion.fromJson(raw);
+        if (!mounted) return;
+        setState(() => cliById[inst.id] = info);
+        if (info.updateAvailable) {
+          await CliUpdateOffer.notifyOnce(
+            instanceId: inst.id,
+            name: inst.name,
+            info: info,
+          );
+        }
+      } catch (_) {}
+    }
   }
 
   Future<void> _afterPush(Future<dynamic> nav) async {
@@ -164,6 +188,23 @@ class _InstancesScreenState extends State<InstancesScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                 children: [
                   _quotaCard(),
+                  if (cliById.values.any((c) => c.updateAvailable)) ...[
+                    const SizedBox(height: 12),
+                    VcPanel(
+                      child: Row(
+                        children: [
+                          const Icon(Icons.system_update_alt, color: Vc.amber, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'A new XibeCode CLI is out. Open a workspace and tap Update — same as /update.',
+                              style: const TextStyle(fontSize: 13, height: 1.35),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   if (loading)
                     const Padding(
@@ -297,6 +338,11 @@ class _InstancesScreenState extends State<InstancesScreen> {
                       const Padding(
                         padding: EdgeInsets.only(left: 6),
                         child: StateChip('past_due'),
+                      ),
+                    if (cliById[inst.id]?.updateAvailable == true)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 6),
+                        child: StateChip('cli update'),
                       ),
                   ],
                 ),

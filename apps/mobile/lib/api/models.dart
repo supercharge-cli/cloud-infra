@@ -1,3 +1,5 @@
+import '../files/kinds.dart' show fileExt, imageExts;
+
 class AuthUser {
   AuthUser({required this.id, required this.email, this.role});
   final String id;
@@ -133,13 +135,12 @@ class DashboardData {
   final PlanInfo? plan;
 }
 
-const imageExts = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'heic', 'heif'};
-
 bool looksLikeImage({String? name, String? mime, String? kind}) {
   if (kind == 'photo') return true;
-  if (mime != null && mime.toLowerCase().startsWith('image/')) return true;
-  final ext = name?.split('.').last.toLowerCase();
-  return ext != null && imageExts.contains(ext);
+  if (mime != null && mime.toLowerCase().startsWith('image/')) {
+    return !mime.toLowerCase().contains('svg');
+  }
+  return imageExts.contains(fileExt(name));
 }
 
 class AppChatEvent {
@@ -167,12 +168,24 @@ class AppChatEvent {
   String? get state => raw['state'] as String?;
   String? get mime => raw['mime'] as String?;
   String? get localPath => raw['localPath'] as String?;
+  String? get url => raw['url'] as String?;
   String? get role => raw['role'] as String?;
   int get ts => (raw['ts'] as num?)?.toInt() ?? 0;
   int? get size => (raw['size'] as num?)?.toInt();
   int? get tools => (raw['tools'] as num?)?.toInt();
   int? get elapsedMs => (raw['elapsedMs'] as num?)?.toInt();
   int? get pct => (raw['pct'] as num?)?.toInt();
+  int? get used => (raw['used'] as num?)?.toInt();
+  int? get max => (raw['max'] as num?)?.toInt();
+  String? get modelId => raw['model'] as String?;
+  String? get label => raw['label'] as String?;
+  bool? get busy {
+    final v = raw['busy'];
+    if (v is bool) return v;
+    return null;
+  }
+  int? get startedAt => (raw['startedAt'] as num?)?.toInt();
+  String? get lastTool => raw['lastTool'] as String?;
   bool get isFinal => raw['final'] == true;
   bool get isUser => local || type == 'user' || role == 'user';
   bool get isImage => looksLikeImage(name: name, mime: mime, kind: kind);

@@ -627,6 +627,8 @@ export type ConfigInput = {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  /** Vectra instance id — used to mint public vision URLs. */
+  instanceId?: string;
   telegramBotToken?: string;
   discordBotToken?: string;
   slackBotToken?: string;
@@ -758,6 +760,16 @@ export async function writeSandboxConfig(
       inboxSecret ? `XIBECODE_APP_INBOX_SECRET=${inboxSecret}` : '',
       inboxSecret ? `XIBECODE_GATEWAY_TOKEN=${inboxSecret}` : '',
       `XIBECODE_APP_INBOX_PORT=8790`,
+      input.instanceId
+        ? `XIBECODE_INSTANCE_ID=${input.instanceId}`
+        : '',
+      input.instanceId
+        ? `XIBECODE_PUBLIC_MEDIA_BASE=${(
+            process.env.PUBLIC_BASE_URL?.trim() ||
+            process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+            'https://infra.xibeai.in'
+          ).replace(/\/$/, '')}/api/public/media/${encodeURIComponent(input.instanceId)}`
+        : '',
       // Template wake HTTP only (does NOT enable bot webhook mode)
       sandboxWakeHttp ? `VECTRA_WAKE_PORT=${tgWebhookPort}` : '',
       sandboxWakeHttp ? `VECTRA_TG_WEBHOOK_URL=${tgWebhookUrl}` : '',
@@ -1385,9 +1397,17 @@ function appInboxSecret(): string {
 export async function bootstrapAppInbox(
   sessionId: string,
   sandboxId?: string,
+  instanceId?: string,
 ): Promise<void> {
   const secret = appInboxSecret();
   if (!secret) return;
+  const site = (
+    process.env.PUBLIC_BASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    'https://infra.xibeai.in'
+  ).replace(/\/$/, '');
+  const mediaBase =
+    instanceId ? `${site}/api/public/media/${encodeURIComponent(instanceId)}` : '';
   const py = `
 import pathlib
 p = pathlib.Path("/home/user/.xibecode/daemon.env")
@@ -1398,6 +1418,8 @@ keys = {
   "XIBECODE_GATEWAY_TOKEN": ${JSON.stringify(secret)},
   "XIBECODE_APP_INBOX_PORT": "8790",
   "XIBECODE_DAEMON_WORKDIR": "/home/user/workspace",
+  ${mediaBase ? `"XIBECODE_PUBLIC_MEDIA_BASE": ${JSON.stringify(mediaBase)},` : ''}
+  ${instanceId ? `"XIBECODE_INSTANCE_ID": ${JSON.stringify(instanceId)},` : ''}
 }
 lines = [ln for ln in text.splitlines() if ln.strip() and ln.split("=",1)[0] not in keys]
 for k,v in keys.items():

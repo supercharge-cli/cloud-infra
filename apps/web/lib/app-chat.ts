@@ -64,23 +64,43 @@ async function inboxHealthy(inst: Instance): Promise<boolean> {
   }
 }
 
+const inboxLocks = new Map<string, Promise<void>>();
+
 export async function ensureInbox(inst: Instance): Promise<void> {
-  if (await inboxHealthy(inst)) return;
-
-  await bootstrapAppInbox(inst.sessionId, inst.sandboxId).catch(() => undefined);
-  await wakeSession(inst.sessionId, {
-    sandboxId: inst.sandboxId,
-    restartDaemon: true,
-  });
-
-  for (let i = 0; i < 8; i++) {
-    await new Promise((r) => setTimeout(r, 750));
+  const key = inst.id;
+  const pending = inboxLocks.get(key);
+  if (pending) {
+    await pending;
     if (await inboxHealthy(inst)) return;
   }
 
-  throw new Error(
-    'App inbox not reachable on :8790 after wake. Open Control → Update CLI (need xibecode 1.17.5+) then try chat again.',
-  );
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  inboxLocks.set(key, gate);
+
+  try {
+    if (await inboxHealthy(inst)) return;
+
+    await bootstrapAppInbox(inst.sessionId, inst.sandboxId, inst.id).catch(() => undefined);
+    await wakeSession(inst.sessionId, {
+      sandboxId: inst.sandboxId,
+      restartDaemon: true,
+    });
+
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 750));
+      if (await inboxHealthy(inst)) return;
+    }
+
+    throw new Error(
+      'App inbox not reachable on :8790 after wake. Open Control → Update CLI (need xibecode 1.17.5+) then try chat again.',
+    );
+  } finally {
+    release();
+    if (inboxLocks.get(key) === gate) inboxLocks.delete(key);
+  }
 }
 
 export async function proxyInbox(

@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api/models.dart';
 import '../chat/draft.dart';
+import '../files/kinds.dart';
 import '../theme.dart';
 
 class ChatImageBubble extends StatelessWidget {
@@ -102,12 +104,14 @@ class ChatFileCard extends StatelessWidget {
   const ChatFileCard({
     super.key,
     required this.event,
+    required this.onOpen,
     required this.onDownload,
     required this.onShare,
     this.downloading = false,
   });
 
   final AppChatEvent event;
+  final VoidCallback onOpen;
   final VoidCallback onDownload;
   final VoidCallback onShare;
   final bool downloading;
@@ -116,6 +120,7 @@ class ChatFileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final mine = event.isUser;
     final ready = event.localPath != null && File(event.localPath!).existsSync();
+    final kind = detectPreviewKind(name: event.name, mime: event.mime, kind: event.kind);
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -134,58 +139,182 @@ class ChatFileCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(
-                  event.isImage ? Icons.image : Icons.insert_drive_file_outlined,
-                  color: Vc.green,
-                  size: 22,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(event.name ?? 'file', maxLines: 2, overflow: TextOverflow.ellipsis),
-                      Text(
-                        [
-                          if (event.kind != null) event.kind!,
-                          if (event.size != null) _fmtSize(event.size!),
-                        ].join(' · '),
-                        style: const TextStyle(color: Vc.muted, fontSize: 11),
-                      ),
-                    ],
+            InkWell(
+              onTap: downloading ? null : onOpen,
+              borderRadius: BorderRadius.circular(10),
+              child: Row(
+                children: [
+                  Icon(kindIcon(kind), color: Vc.green, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(event.name ?? 'file', maxLines: 2, overflow: TextOverflow.ellipsis),
+                        Text(
+                          [
+                            kindLabel(kind),
+                            if (event.size != null) formatBytes(event.size!),
+                          ].join(' · '),
+                          style: const TextStyle(color: Vc.muted, fontSize: 11),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  Icon(
+                    downloading ? Icons.downloading : Icons.chevron_right,
+                    color: Vc.muted,
+                    size: 20,
+                  ),
+                ],
+              ),
             ),
             if (event.text.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(event.text, style: const TextStyle(fontSize: 13)),
               ),
-            Row(
+            Wrap(
+              spacing: 0,
               children: [
                 TextButton.icon(
-                  onPressed: downloading ? null : onDownload,
+                  onPressed: downloading ? null : onOpen,
                   icon: downloading
                       ? const SizedBox(
                           width: 14,
                           height: 14,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Vc.green),
                         )
-                      : Icon(ready ? Icons.download_done : Icons.download, size: 16),
-                  label: Text(ready ? 'Saved' : 'Download'),
+                      : const Icon(Icons.visibility_outlined, size: 16),
+                  label: Text(downloading ? 'Loading' : 'Open'),
+                ),
+                TextButton.icon(
+                  onPressed: downloading ? null : onDownload,
+                  icon: Icon(ready ? Icons.download_done : Icons.download, size: 16),
+                  label: Text(ready ? 'Saved' : 'Save'),
                 ),
                 TextButton.icon(
                   onPressed: ready ? onShare : null,
                   icon: const Icon(Icons.share_outlined, size: 16),
                   label: const Text('Share'),
                 ),
+                if (event.url != null && event.url!.startsWith('http'))
+                  TextButton.icon(
+                    onPressed: () {
+                      launchUrl(Uri.parse(event.url!), mode: LaunchMode.externalApplication);
+                    },
+                    icon: const Icon(Icons.link, size: 16),
+                    label: const Text('Link'),
+                  ),
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class ToolFold extends StatefulWidget {
+  const ToolFold({super.key, required this.tools, this.expanded = false});
+  final List<AppChatEvent> tools;
+  final bool expanded;
+
+  @override
+  State<ToolFold> createState() => _ToolFoldState();
+}
+
+class _ToolFoldState extends State<ToolFold> {
+  late bool open;
+
+  @override
+  void initState() {
+    super.initState();
+    open = widget.expanded;
+  }
+
+  @override
+  void didUpdateWidget(covariant ToolFold old) {
+    super.didUpdateWidget(old);
+    if (widget.expanded != old.expanded && widget.expanded) {
+      open = true;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.expanded) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [for (final ev in widget.tools) ToolLine(event: ev)],
+      );
+    }
+    final n = widget.tools.length;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 4, 56, 4),
+      decoration: BoxDecoration(
+        color: Vc.elevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Vc.cardBorder),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: open,
+          onExpansionChanged: (v) => setState(() => open = v),
+          dense: true,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+          childrenPadding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+          leading: const Icon(Icons.check_circle_outline, size: 18, color: Vc.green),
+          title: Text(
+            n == 1 ? '1 tool used' : '$n tools used',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          subtitle: Text(
+            'Tap to review',
+            style: const TextStyle(color: Vc.muted, fontSize: 11),
+          ),
+          children: [for (final ev in widget.tools) ToolLine(event: ev, inset: true)],
+        ),
+      ),
+    );
+  }
+}
+
+class ToolLine extends StatelessWidget {
+  const ToolLine({super.key, required this.event, this.inset = false});
+  final AppChatEvent event;
+  final bool inset;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: inset
+          ? const EdgeInsets.fromLTRB(8, 2, 8, 2)
+          : const EdgeInsets.fromLTRB(12, 4, 56, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: inset ? Vc.card : Vc.elevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Vc.cardBorder),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            event.state == 'done' ? Icons.check_circle_outline : Icons.build,
+            size: 16,
+            color: event.state == 'done' ? Vc.green : Vc.amber,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              event.name != null && event.name != event.text
+                  ? '${event.name} · ${event.text}'
+                  : event.text,
+              style: const TextStyle(fontSize: 12, color: Vc.muted),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -228,9 +357,10 @@ class ImageLightbox extends StatelessWidget {
 }
 
 class DraftTray extends StatelessWidget {
-  const DraftTray({super.key, required this.items, required this.onRemove});
+  const DraftTray({super.key, required this.items, required this.onRemove, this.onOpen});
   final List<DraftAttach> items;
   final ValueChanged<DraftAttach> onRemove;
+  final ValueChanged<DraftAttach>? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -249,35 +379,42 @@ class DraftTray extends StatelessWidget {
               clipBehavior: Clip.none,
               children: [
                 Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF18181B),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Vc.cardBorder),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: f.isImage && f.path != null && File(f.path!).existsSync()
-                          ? Image.file(File(f.path!), fit: BoxFit.cover)
-                          : f.isImage
-                              ? Image.memory(f.bytes, fit: BoxFit.cover)
-                              : Padding(
-                                  padding: const EdgeInsets.all(6),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      const Icon(Icons.insert_drive_file_outlined, color: Vc.green, size: 22),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        f.name,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(fontSize: 9, color: Vc.muted),
-                                      ),
-                                    ],
+                  child: GestureDetector(
+                    onTap: onOpen == null ? null : () => onOpen!(f),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF18181B),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Vc.cardBorder),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: f.isImage && f.path != null && File(f.path!).existsSync()
+                            ? Image.file(File(f.path!), fit: BoxFit.cover)
+                            : f.isImage
+                                ? Image.memory(f.bytes, fit: BoxFit.cover)
+                                : Padding(
+                                    padding: const EdgeInsets.all(6),
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          kindIcon(detectPreviewKind(name: f.name, mime: f.mime, kind: f.kind)),
+                                          color: Vc.green,
+                                          size: 22,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          f.name,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(fontSize: 9, color: Vc.muted),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
+                      ),
                     ),
                   ),
                 ),
@@ -303,8 +440,3 @@ class DraftTray extends StatelessWidget {
   }
 }
 
-String _fmtSize(int n) {
-  if (n < 1024) return '$n B';
-  if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(1)} KB';
-  return '${(n / (1024 * 1024)).toStringAsFixed(1)} MB';
-}

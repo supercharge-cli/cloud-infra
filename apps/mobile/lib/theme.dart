@@ -140,6 +140,7 @@ class Vc {
       case 'running':
         return green;
       case 'paused':
+      case 'cli update':
         return amber;
       case 'past_due':
       case 'error':

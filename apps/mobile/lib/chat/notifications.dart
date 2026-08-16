@@ -20,8 +20,10 @@ class TaskNotifications {
 
   static const progressId = 7101;
   static const doneId = 7102;
+  static const cliUpdateId = 7103;
   static const progressChannel = 'vectra_task_progress';
   static const doneChannel = 'vectra_task_done';
+  static const cliUpdateChannel = 'vectra_cli_update';
 
   static String get _label =>
       'Working · ${_fmt(_elapsed)} · $_tools tool${_tools == 1 ? '' : 's'}';
@@ -254,6 +256,32 @@ class TaskNotifications {
           icon: '@drawable/ic_stat_vectra',
         ),
         iOS: const DarwinNotificationDetails(),
+      ),
+      payload: instanceId,
+    );
+  }
+
+  static Future<void> showCliUpdate({
+    required String instanceId,
+    required String name,
+    required String current,
+    required String latest,
+  }) async {
+    await init();
+    await _plugin.show(
+      id: cliUpdateId,
+      title: 'XibeCode $latest is out',
+      body: '$name is on ${current.isEmpty ? 'an older CLI' : current}. Tap to open chat and update.',
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          cliUpdateChannel,
+          'CLI updates',
+          channelDescription: 'When a new XibeCode CLI is published',
+          importance: Importance.defaultImportance,
+          priority: Priority.defaultPriority,
+          icon: '@drawable/ic_stat_vectra',
+        ),
+        iOS: DarwinNotificationDetails(),
       ),
       payload: instanceId,
     );

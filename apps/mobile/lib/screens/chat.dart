@@ -15,11 +15,13 @@ import 'package:share_plus/share_plus.dart';
 import '../api/client.dart';
 import '../api/models.dart';
 import '../chat/chat_store.dart';
+import '../chat/cli_update.dart';
 import '../chat/commands.dart';
 import '../chat/draft.dart';
 import '../chat/notifications.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import '../widgets/file_viewer.dart';
 import '../widgets/markdown.dart';
 import '../widgets/media.dart';
 import '../widgets/side_panel.dart';
@@ -45,6 +47,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<BotCommand> commands = defaultBotCommands;
   CloudInstance? inst;
   Map<String, dynamic>? cli;
+  bool hideCliUpdate = false;
   bool sending = false;
   bool connecting = true;
   bool reconnecting = false;
@@ -58,6 +61,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String? lastAssistantText;
   DateTime? turnStartedAt;
   int toolCount = 0;
+  int? usageUsed;
+  int? usageMax;
+  int? usagePct;
+  String? usageLabel;
+  final pickerPage = <String, int>{};
   Timer? _tick;
   final pending = <DraftAttach>[];
 
@@ -117,7 +125,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ..addAll(snap.answered);
         connecting = false;
       });
-      _scrollToEnd();
+      _scrollToEnd(instant: true);
+      Future<void>.delayed(const Duration(milliseconds: 80), () {
+        if (mounted) _scrollToEnd(instant: true);
+      });
+      Future<void>.delayed(const Duration(milliseconds: 280), () {
+        if (mounted) _scrollToEnd(instant: true);
+      });
     }
     try {
       inst = await api.getInstance(id);
@@ -129,6 +143,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         });
         return;
       }
+      // New sandboxes have an empty inbox. Do not keep the full-screen
+      // "Connecting…" overlay until the first chat event — that never comes.
+      if (mounted) setState(() => connecting = false);
     } on ApiException catch (e) {
       if (e.paymentRequired) {
         if (!mounted) return;
@@ -139,7 +156,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         });
         return;
       }
-    } catch (_) {}
+      if (mounted) {
+        setState(() {
+          connecting = false;
+          error = e.message;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          connecting = false;
+          error = e.toString();
+        });
+      }
+    }
     if (inst?.isPaused == true) {
       try {
         await api.wake(id);
@@ -149,8 +179,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     api.commands(id).then((c) {
       if (mounted && c.isNotEmpty) setState(() => commands = c);
     }).catchError((_) {});
+    api.chatStatus(id).then((s) {
+      if (!mounted) return;
+      setState(() {
+        final u = s['usage'];
+        if (u is Map) {
+          usageUsed = (u['used'] as num?)?.toInt();
+          usageMax = (u['max'] as num?)?.toInt();
+          usagePct = (u['pct'] as num?)?.toInt();
+          usageLabel = u['label'] as String?;
+        }
+        final t = s['turn'];
+        if (t is Map && t['busy'] == true) {
+          final started = (t['startedAt'] as num?)?.toInt();
+          turnStartedAt = started != null && started > 0
+              ? DateTime.fromMillisecondsSinceEpoch(started)
+              : DateTime.now();
+          toolCount = (t['tools'] as num?)?.toInt() ?? toolCount;
+        }
+      });
+    }).catchError((_) {});
     api.cliVersion(id).then((c) {
-      if (mounted) setState(() => cli = c);
+      if (!mounted) return;
+      setState(() => cli = c);
+      unawaited(_maybeOfferCliUpdate(c));
     }).catchError((_) {});
     unawaited(TaskNotifications.requestPermissions());
   }
@@ -229,6 +281,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _ingest(AppChatEvent ev) {
+    if (ev.type == 'ready' || ev.type == 'hello' || ev.type == 'ping') {
+      return;
+    }
+    if (ev.type == 'status') {
+      final busy = ev.busy == true;
+      if (busy) {
+        if (ev.startedAt != null && ev.startedAt! > 0) {
+          turnStartedAt = DateTime.fromMillisecondsSinceEpoch(ev.startedAt!);
+        } else {
+          turnStartedAt ??= DateTime.now();
+        }
+        if (ev.tools != null) toolCount = ev.tools!;
+      } else {
+        turnStartedAt = null;
+      }
+      return;
+    }
+    if (ev.type == 'usage') {
+      usageUsed = ev.used;
+      usageMax = ev.max;
+      usagePct = ev.pct;
+      usageLabel = ev.label ?? ev.text;
+      if ((usageLabel == null || usageLabel!.isEmpty) && usageUsed != null && usageMax != null) {
+        usageLabel = '${_fmtTokens(usageUsed!)} / ${_fmtTokens(usageMax!)}';
+      }
+      return;
+    }
     if (!ev.local && ev.id.isNotEmpty) {
       lastServerId = ev.id;
       if (_alreadyHave(ev)) return;
@@ -342,16 +421,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _scrollToEnd() {
+  void _scrollToEnd({bool instant = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.animateTo(
-          _scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-        );
+      if (!_scroll.hasClients) return;
+      if (instant) {
+        _scroll.jumpTo(0);
+        return;
       }
+      _scroll.animateTo(
+        0,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
     });
+  }
+
+  List<List<AppChatEvent>> _grouped() {
+    final groups = <List<AppChatEvent>>[];
+    for (final ev in events) {
+      if (ev.type == 'tool' && groups.isNotEmpty && groups.last.first.type == 'tool') {
+        groups.last.add(ev);
+      } else {
+        groups.add([ev]);
+      }
+    }
+    return groups;
   }
 
   @override
@@ -367,6 +461,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       unawaited(TaskNotifications.cancelSilent());
     }
     super.dispose();
+  }
+
+  Future<void> _maybeOfferCliUpdate(Map<String, dynamic> raw) async {
+    final info = CliVersion.fromJson(raw);
+    if (!info.updateAvailable) return;
+    if (await CliUpdateOffer.isDismissed(id, info.latest)) {
+      if (mounted) setState(() => hideCliUpdate = true);
+      return;
+    }
+    await CliUpdateOffer.notifyOnce(
+      instanceId: id,
+      name: instanceName,
+      info: info,
+    );
+  }
+
+  Future<void> _runCliUpdate() async {
+    if (sending || working) return;
+    final latest = '${cli?['latest'] ?? ''}';
+    await _send('/update yes');
+    if (latest.isNotEmpty) {
+      await CliUpdateOffer.dismiss(id, latest);
+    }
+    if (mounted) setState(() => hideCliUpdate = true);
+  }
+
+  Future<void> _dismissCliUpdate() async {
+    final latest = '${cli?['latest'] ?? ''}';
+    await CliUpdateOffer.dismiss(id, latest);
+    if (mounted) setState(() => hideCliUpdate = true);
   }
 
   Future<void> _send([String? text]) async {
@@ -542,6 +666,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _openFile(AppChatEvent ev) async {
+    await _ensureLocalFile(ev, auto: true);
+    if (!mounted) return;
+    final path = ev.localPath;
+    if (path == null || !File(path).existsSync()) {
+      setState(() => error = 'Could not load ${ev.name ?? 'file'}');
+      return;
+    }
+    if (ev.isImage) {
+      _openImage(ev);
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => FileViewerScreen(
+          path: path,
+          title: ev.name ?? 'File',
+          mime: ev.mime,
+          onShare: () => unawaited(_sharePath(path, ev.name ?? 'file')),
+          onSave: () => unawaited(_downloadFile(ev)),
+        ),
+      ),
+    );
+  }
+
+  void _openDraft(DraftAttach f) {
+    final path = f.path;
+    if (path == null || !File(path).existsSync()) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => FileViewerScreen(
+          path: path,
+          title: f.name,
+          mime: f.mime,
+          onShare: () => unawaited(_sharePath(path, f.name)),
+        ),
+      ),
+    );
+  }
+
   Future<void> _customAnswer(AppChatEvent ev) async {
     final c = TextEditingController();
     final text = await showDialog<String>(
@@ -565,6 +729,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() => answered.add(ev.ref ?? ev.id));
     _persist();
     await api.answer(id, ref: ev.ref, answer: text);
+  }
+
+  Future<void> _customModel(AppChatEvent ev) async {
+    final c = TextEditingController();
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Vc.card,
+        title: const Text('Custom model'),
+        content: TextField(
+          controller: c,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'provider/model-id'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Use')),
+        ],
+      ),
+    );
+    if (text == null || text.isEmpty) return;
+    setState(() => answered.add(ev.ref ?? ev.id));
+    _persist();
+    await api.pick(id, ref: ev.ref, value: text, kind: ev.kind ?? 'model');
   }
 
   void _pickCommand(BotCommand c) {
@@ -656,31 +844,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
         );
       case 'tool':
-        return Container(
-          margin: const EdgeInsets.fromLTRB(12, 4, 56, 4),
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-          decoration: BoxDecoration(
-            color: Vc.elevated,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Vc.cardBorder),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                ev.state == 'done' ? Icons.check_circle_outline : Icons.build,
-                size: 16,
-                color: ev.state == 'done' ? Vc.green : Vc.amber,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  ev.name != null ? '${ev.name} · ${ev.text}' : ev.text,
-                  style: const TextStyle(fontSize: 12, color: Vc.muted),
-                ),
-              ),
-            ],
-          ),
-        );
+        return ToolLine(event: ev);
       case 'approve':
         final locked = answered.contains(ev.ref ?? ev.id);
         return _card(
@@ -711,68 +875,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
         );
       case 'ask':
-        final locked = answered.contains(ev.ref ?? ev.id);
-        return _card(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ChatMarkdown(data: ev.text),
-              const SizedBox(height: 8),
-              for (var i = 0; i < ev.choices.length; i++)
-                ListTile(
-                  dense: true,
-                  enabled: !locked,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('${i + 1}. ${ev.choices[i]}'),
-                  onTap: locked
-                      ? null
-                      : () {
-                          setState(() => answered.add(ev.ref ?? ev.id));
-                          _persist();
-                          api.answer(id, ref: ev.ref, index: i, answer: ev.choices[i]);
-                        },
-                ),
-              ListTile(
-                dense: true,
-                enabled: !locked,
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  '${ev.choices.length + 1}. Type your own…',
-                  style: const TextStyle(color: Vc.green),
-                ),
-                onTap: locked ? null : () => _customAnswer(ev),
-              ),
-            ],
-          ),
-        );
+        return _pagedAsk(ev);
       case 'picker':
-        final locked = answered.contains(ev.ref ?? ev.id);
-        return _card(
-          child: Column(
-            children: [
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(ev.title ?? ev.raw['title']?.toString() ?? 'Choose'),
-                subtitle: ev.text.isEmpty ? null : Text(ev.text, style: const TextStyle(color: Vc.muted, fontSize: 12)),
-              ),
-              for (final o in ev.options.take(30))
-                ListTile(
-                  dense: true,
-                  enabled: !locked,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('${o['label'] ?? o['value']}'),
-                  selected: o['current'] == true,
-                  onTap: locked
-                      ? null
-                      : () {
-                          setState(() => answered.add(ev.ref ?? ev.id));
-                          _persist();
-                          api.pick(id, ref: ev.ref, value: '${o['value']}', kind: ev.kind);
-                        },
-                ),
-            ],
-          ),
-        );
+        return _pagedPicker(ev);
       case 'file':
         final busy = ev.fileId != null && fetching.contains(ev.fileId);
         if (ev.isImage) {
@@ -796,6 +901,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return ChatFileCard(
           event: ev,
           downloading: busy,
+          onOpen: () => unawaited(_openFile(ev)),
           onDownload: () => _downloadFile(ev),
           onShare: () {
             if (ev.localPath != null) unawaited(_sharePath(ev.localPath!, ev.name ?? 'file'));
@@ -851,11 +957,204 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _pagedAsk(AppChatEvent ev) {
+    const pageSize = 10;
+    final locked = answered.contains(ev.ref ?? ev.id);
+    final choices = ev.choices;
+    final key = 'ask:${ev.ref ?? ev.id}';
+    final total = choices.length;
+    final pages = total == 0 ? 1 : ((total + pageSize - 1) / pageSize).floor();
+    final page = (pickerPage[key] ?? 0).clamp(0, pages - 1);
+    final start = page * pageSize;
+    final slice = choices.skip(start).take(pageSize).toList();
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ChatMarkdown(data: ev.text),
+          const SizedBox(height: 8),
+          if (total > pageSize)
+            Text(
+              '${start + 1}–${start + slice.length} of $total',
+              style: const TextStyle(color: Vc.muted, fontSize: 12),
+            ),
+          for (var i = 0; i < slice.length; i += 2)
+            Row(
+              children: [
+                for (var j = 0; j < 2 && i + j < slice.length; j++)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 6, bottom: 6),
+                      child: OutlinedButton(
+                        onPressed: locked
+                            ? null
+                            : () {
+                                final abs = start + i + j;
+                                setState(() => answered.add(ev.ref ?? ev.id));
+                                _persist();
+                                api.answer(id, ref: ev.ref, index: abs, answer: choices[abs]);
+                              },
+                        child: Text(
+                          '${start + i + j + 1}. ${slice[i + j]}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (slice.length - i == 1) const Expanded(child: SizedBox()),
+              ],
+            ),
+          if (pages > 1)
+            Row(
+              children: [
+                TextButton(
+                  onPressed: page <= 0 ? null : () => setState(() => pickerPage[key] = page - 1),
+                  child: const Text('◀ Prev'),
+                ),
+                Expanded(
+                  child: Text('${page + 1} / $pages', textAlign: TextAlign.center, style: const TextStyle(color: Vc.muted, fontSize: 12)),
+                ),
+                TextButton(
+                  onPressed: page >= pages - 1 ? null : () => setState(() => pickerPage[key] = page + 1),
+                  child: const Text('Next ▶'),
+                ),
+              ],
+            ),
+          ListTile(
+            dense: true,
+            enabled: !locked,
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Type your own…', style: TextStyle(color: Vc.green)),
+            onTap: locked ? null : () => _customAnswer(ev),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pagedPicker(AppChatEvent ev) {
+    const pageSize = 10;
+    final locked = answered.contains(ev.ref ?? ev.id);
+    final opts = ev.options;
+    final key = ev.ref ?? ev.id;
+    final total = opts.length;
+    final pages = total == 0 ? 1 : ((total + pageSize - 1) / pageSize).floor();
+    final page = (pickerPage[key] ?? 0).clamp(0, pages - 1);
+    final start = page * pageSize;
+    final slice = opts.skip(start).take(pageSize).toList();
+    return _card(
+      child: Column(
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(ev.title ?? ev.raw['title']?.toString() ?? 'Choose'),
+            subtitle: Text(
+              [
+                if (ev.text.isNotEmpty) ev.text,
+                if (total > pageSize) '${start + 1}–${start + slice.length} of $total',
+              ].where((s) => s.trim().isNotEmpty).join(' · '),
+              style: const TextStyle(color: Vc.muted, fontSize: 12),
+            ),
+          ),
+          for (var i = 0; i < slice.length; i += 2)
+            Row(
+              children: [
+                for (final o in slice.skip(i).take(2))
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 6, bottom: 6),
+                      child: OutlinedButton(
+                        onPressed: locked
+                            ? null
+                            : () {
+                                final value = '${o['value']}';
+                                if (value == '__custom__') {
+                                  unawaited(_customModel(ev));
+                                  return;
+                                }
+                                setState(() => answered.add(key));
+                                _persist();
+                                api.pick(id, ref: ev.ref, value: value, kind: ev.kind);
+                              },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: o['current'] == true ? Vc.green : Colors.white,
+                          side: BorderSide(color: o['current'] == true ? Vc.green : Vc.cardBorder),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                        ),
+                        child: Text(
+                          '${o['label'] ?? o['value']}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (slice.skip(i).length == 1) const Expanded(child: SizedBox()),
+              ],
+            ),
+          if (pages > 1)
+            Row(
+              children: [
+                TextButton(
+                  onPressed: page <= 0 ? null : () => setState(() => pickerPage[key] = page - 1),
+                  child: const Text('◀ Prev'),
+                ),
+                Expanded(
+                  child: Text(
+                    '${page + 1} / $pages',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Vc.muted, fontSize: 12),
+                  ),
+                ),
+                TextButton(
+                  onPressed: page >= pages - 1 ? null : () => setState(() => pickerPage[key] = page + 1),
+                  child: const Text('Next ▶'),
+                ),
+              ],
+            ),
+          ListTile(
+            dense: true,
+            enabled: !locked,
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Custom model…', style: TextStyle(color: Vc.green)),
+            onTap: locked ? null : () => unawaited(_customModel(ev)),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _liveLabel() {
     final m = elapsed.inMinutes;
     final s = elapsed.inSeconds % 60;
     final clock = m <= 0 ? '${s}s' : '${m}m ${s.toString().padLeft(2, '0')}s';
     return 'Working · $clock · $toolCount tool${toolCount == 1 ? '' : 's'}';
+  }
+
+  String _fmtTokens(int n) {
+    if (n < 1000) return '$n';
+    if (n < 10000) return '${(n / 1000).toStringAsFixed(1)}k';
+    if (n < 1000000) return '${(n / 1000).round()}k';
+    return '${(n / 1000000).toStringAsFixed(1)}m';
+  }
+
+  String? get _usageText {
+    if (usageLabel != null && usageLabel!.trim().isNotEmpty) return usageLabel;
+    if (usageUsed != null && usageMax != null) {
+      return '${_fmtTokens(usageUsed!)} / ${_fmtTokens(usageMax!)}';
+    }
+    return null;
+  }
+
+  Color get _usageColor {
+    final p = usagePct ?? 0;
+    if (p >= 90) return Vc.red;
+    if (p >= 75) return Vc.amber;
+    return Vc.muted;
   }
 
   Widget _commandOverlay() {
@@ -889,7 +1188,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final updateReady = cli?['updateAvailable'] == true;
+    final cliInfo = CliVersion.fromJson(cli);
+    final updateReady = cliInfo.updateAvailable && !hideCliUpdate;
     final palette = showCommandPalette(_input.text);
     return WithForegroundTask(
       child: AppScaffold(
@@ -906,12 +1206,40 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 children: [
                   StatusDot(inst!.displayState, size: 7),
                   const SizedBox(width: 6),
-                  Text(inst!.displayState, style: const TextStyle(fontSize: 11, color: Vc.muted)),
+                  Flexible(
+                    child: Text(
+                      _usageText == null
+                          ? inst!.displayState
+                          : '${inst!.displayState} · $_usageText',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: _usageText == null ? Vc.muted : _usageColor),
+                    ),
+                  ),
                 ],
               ),
           ],
         ),
         actions: [
+          if (_usageText != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Center(
+                child: Tooltip(
+                  message: usagePct != null ? 'Context ${usagePct}% of model window' : 'Context usage',
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _usageColor.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      usagePct != null ? '$_usageText · $usagePct%' : _usageText!,
+                      style: TextStyle(color: _usageColor, fontSize: 11, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           if (working)
             Padding(
               padding: const EdgeInsets.only(right: 4),
@@ -944,19 +1272,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           Column(
             children: [
               if (updateReady)
-                Material(
-                  color: const Color(0xFF1C1917),
-                  child: ListTile(
-                    dense: true,
-                    title: Text(
-                      'CLI ${cli!['current'] ?? '?'} · ${cli!['latest']} available',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    trailing: TextButton(
-                      onPressed: () => context.push('/instance/$id', extra: inst),
-                      child: const Text('Update'),
-                    ),
-                  ),
+                CliUpdateNote(
+                  info: cliInfo,
+                  busy: sending || working,
+                  onUpdate: () => unawaited(_runCliUpdate()),
+                  onDismiss: () => unawaited(_dismissCliUpdate()),
                 ),
               if (reconnecting) const ReconnectBar(),
               if (error != null)
@@ -978,18 +1298,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             title: 'Start coding',
                             detail: 'Send a message, /command, or attach a file. Same agent as Telegram.',
                           )
-                        : ListView.builder(
-                            controller: _scroll,
-                            padding: const EdgeInsets.only(bottom: 12, top: 8),
-                            itemCount: events.length + (showKickoff ? 1 : 0),
-                            itemBuilder: (ctx, i) {
-                              if (i == events.length) {
-                                return const Padding(
-                                  padding: EdgeInsets.fromLTRB(12, 8, 12, 8),
-                                  child: TypingDots(label: 'on it'),
-                                );
-                              }
-                              return _bubble(events[i]);
+                        : Builder(
+                            builder: (ctx) {
+                              final groups = _grouped();
+                              final extra = showKickoff ? 1 : 0;
+                              final n = groups.length + extra;
+                              return ListView.builder(
+                                controller: _scroll,
+                                reverse: true,
+                                padding: const EdgeInsets.only(bottom: 12, top: 8),
+                                itemCount: n,
+                                itemBuilder: (ctx, i) {
+                                  final logical = n - 1 - i;
+                                  if (showKickoff && logical == groups.length) {
+                                    return const Padding(
+                                      padding: EdgeInsets.fromLTRB(12, 8, 12, 8),
+                                      child: TypingDots(label: 'on it'),
+                                    );
+                                  }
+                                  final batch = groups[logical];
+                                  if (batch.first.type == 'tool') {
+                                    final lastGroup = logical == groups.length - 1;
+                                    final live = working && lastGroup;
+                                    return ToolFold(tools: batch, expanded: live);
+                                  }
+                                  return _bubble(batch.first);
+                                },
+                              );
                             },
                           ),
               ),
@@ -997,6 +1332,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 DraftTray(
                   items: pending,
                   onRemove: (f) => setState(() => pending.remove(f)),
+                  onOpen: _openDraft,
                 ),
               if (palette) _commandOverlay(),
               if (paymentBlocked)
@@ -1047,7 +1383,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     maxLines: 5,
                                     textInputAction: TextInputAction.newline,
                                     decoration: const InputDecoration(
-                                      hintText: 'Message your sandbox…',
+                                      hintText: 'xibecode reading...',
                                       border: InputBorder.none,
                                       enabledBorder: InputBorder.none,
                                       focusedBorder: InputBorder.none,

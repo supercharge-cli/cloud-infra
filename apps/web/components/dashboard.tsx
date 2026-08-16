@@ -115,6 +115,7 @@ export function Dashboard({ email }: { email: string }) {
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [model, setModel] = useState('');
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [telegramToken, setTelegramToken] = useState('');
   const [discordToken, setDiscordToken] = useState('');
   const [slackBotToken, setSlackBotToken] = useState('');
@@ -351,6 +352,21 @@ export function Dashboard({ email }: { email: string }) {
         setSlackBotToken(s?.slackBotToken || '');
         setSlackAppToken(s?.slackAppToken || '');
         setAllowAll(Boolean(s?.allowAllUsers));
+        fetch(`/api/instances/${id}/models`)
+          .then((r) => r.json())
+          .then((d) => {
+            const live = Array.isArray(d.models) ? (d.models as string[]) : [];
+            const free = Array.isArray(d.free) ? (d.free as string[]) : [];
+            const seen = new Set<string>();
+            const ordered: string[] = [];
+            for (const m of [...free, ...live]) {
+              if (!m || seen.has(m)) continue;
+              seen.add(m);
+              ordered.push(m);
+            }
+            setModelOptions(ordered);
+          })
+          .catch(() => setModelOptions([]));
       } else {
         setConfig(null);
         setProvider('openai');
@@ -1097,17 +1113,24 @@ export function Dashboard({ email }: { email: string }) {
                   <option value="openrouter" />
                   <option value="grok" />
                   <option value="google" />
+                  <option value="nous" />
                   <option value="deepseek" />
                   <option value="custom" />
                 </datalist>
               </Field>
               <Field label="Model">
                 <input
+                  list="ai-models"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  placeholder="e.g. gpt-4o"
+                  placeholder="pick from list or type a custom id"
                   className="field"
                 />
+                <datalist id="ai-models">
+                  {modelOptions.map((id) => (
+                    <option key={id} value={id} />
+                  ))}
+                </datalist>
               </Field>
               <Field label="API key">
                 <input
