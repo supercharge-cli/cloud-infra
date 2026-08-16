@@ -91,7 +91,7 @@ export async function GET() {
     return {
       ...publicInstance(inst as Instance),
       liveState: inst.status,
-      resumable: inst.status !== 'destroyed' && inst.status !== 'missing',
+      resumable: inst.status !== 'destroyed' && inst.status !== 'error',
       paid: hasInstanceAccess(inst),
       isFree: Boolean(inst.isFree),
       billingStatus,
