@@ -20,7 +20,7 @@ class TaskNotifications {
 
   static const progressId = 7101;
   static const doneId = 7102;
-  static const progressChannel = 'vectra_task_silent';
+  static const progressChannel = 'vectra_task_progress';
   static const doneChannel = 'vectra_task_done';
 
   static String get _label =>
@@ -50,7 +50,7 @@ class TaskNotifications {
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: progressChannel,
         channelName: 'Task progress',
-        channelDescription: 'Live sandbox turn progress',
+        channelDescription: 'Live sandbox turn progress with percent bar',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
         playSound: false,
@@ -112,10 +112,8 @@ class TaskNotifications {
       await FlutterForegroundTask.saveData(key: 'since', value: since ?? '');
       await FlutterForegroundTask.saveData(key: 'startedMs', value: DateTime.now().millisecondsSinceEpoch);
       await FlutterForegroundTask.saveData(key: 'tools', value: 0);
-      // Start the service immediately so killing the UI still streams progress.
       if (Platform.isAndroid) {
         await initForeground();
-        await _plugin.cancel(progressId);
         final running = await FlutterForegroundTask.isRunningService;
         if (!running) {
           await FlutterForegroundTask.startService(
@@ -125,15 +123,9 @@ class TaskNotifications {
             notificationText: _label,
             callback: vectraFgCallback,
           );
-        } else {
-          await FlutterForegroundTask.updateService(
-            notificationTitle: '$name · 8%',
-            notificationText: _label,
-          );
         }
-      } else {
-        await _showProgressBar();
       }
+      await _showProgressBar();
     } catch (_) {}
   }
 
@@ -151,13 +143,6 @@ class TaskNotifications {
     _pct = pct;
     try {
       await FlutterForegroundTask.saveData(key: 'tools', value: tools);
-      if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
-        await FlutterForegroundTask.updateService(
-          notificationTitle: '$name · $pct%',
-          notificationText: _label,
-        );
-        return;
-      }
       await _showProgressBar();
     } catch (_) {}
   }
@@ -165,7 +150,6 @@ class TaskNotifications {
   static Future<void> enterBackground() async {
     if (_activeId == null || !Platform.isAndroid) return;
     try {
-      await _plugin.cancel(progressId);
       await initForeground();
       if (!await FlutterForegroundTask.isRunningService) {
         await FlutterForegroundTask.startService(
@@ -176,6 +160,7 @@ class TaskNotifications {
           callback: vectraFgCallback,
         );
       }
+      await _showProgressBar();
     } catch (_) {}
   }
 
@@ -185,15 +170,31 @@ class TaskNotifications {
     if (_activeId == null) return;
     await init();
     if (_activeId == null) return;
-    await _plugin.show(
+    await showProgressNotification(
+      plugin: _plugin,
+      instanceId: _activeId!,
+      name: _name,
+      pct: _pct,
+      label: _label,
+    );
+  }
+
+  static Future<void> showProgressNotification({
+    required FlutterLocalNotificationsPlugin plugin,
+    required String instanceId,
+    required String name,
+    required int pct,
+    required String label,
+  }) async {
+    await plugin.show(
       progressId,
-      '$_name · $_pct%',
-      _label,
+      '$name · $pct%',
+      label,
       NotificationDetails(
         android: AndroidNotificationDetails(
           progressChannel,
           'Task progress',
-          channelDescription: 'Live sandbox turn progress',
+          channelDescription: 'Live sandbox turn progress with percent bar',
           importance: Importance.low,
           priority: Priority.low,
           playSound: false,
@@ -202,12 +203,14 @@ class TaskNotifications {
           silent: true,
           showProgress: true,
           maxProgress: 100,
-          progress: _pct,
+          progress: pct.clamp(0, 100),
+          indeterminate: false,
           onlyAlertOnce: true,
           icon: '@drawable/ic_stat_vectra',
+          category: AndroidNotificationCategory.progress,
         ),
       ),
-      payload: _activeId,
+      payload: instanceId,
     );
   }
 
@@ -289,6 +292,9 @@ class _VectraTaskHandler extends TaskHandler {
   String _since = '';
   String _name = 'Chat';
   String? _lastText;
+  String _instanceId = '';
+  final _plugin = FlutterLocalNotificationsPlugin();
+  bool _notifReady = false;
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
@@ -299,6 +305,8 @@ class _VectraTaskHandler extends TaskHandler {
     _since = await FlutterForegroundTask.getData<String>(key: 'since') ?? '';
     _name = await FlutterForegroundTask.getData<String>(key: 'name') ?? 'Chat';
     _tools = await FlutterForegroundTask.getData<int>(key: 'tools') ?? 0;
+    _instanceId = await FlutterForegroundTask.getData<String>(key: 'instanceId') ?? '';
+    await _initNotif();
     unawaited(_loop());
   }
 
@@ -313,6 +321,19 @@ class _VectraTaskHandler extends TaskHandler {
     _stopped = true;
     _http?.close(force: true);
     _http = null;
+  }
+
+  Future<void> _initNotif() async {
+    if (_notifReady) return;
+    try {
+      await _plugin.initialize(
+        const InitializationSettings(
+          android: AndroidInitializationSettings('@drawable/ic_stat_vectra'),
+          iOS: DarwinInitializationSettings(),
+        ),
+      );
+      _notifReady = true;
+    } catch (_) {}
   }
 
   Future<void> _loop() async {
@@ -331,6 +352,7 @@ class _VectraTaskHandler extends TaskHandler {
     final id = await FlutterForegroundTask.getData<String>(key: 'instanceId');
     _name = await FlutterForegroundTask.getData<String>(key: 'name') ?? _name;
     if (base == null || base.isEmpty || id == null || id.isEmpty) return;
+    _instanceId = id;
 
     final uri = Uri.parse('$base/api/instances/$id/chat/events').replace(
       queryParameters: {
@@ -402,10 +424,22 @@ class _VectraTaskHandler extends TaskHandler {
     final m = elapsed.inMinutes;
     final s = elapsed.inSeconds % 60;
     final clock = m <= 0 ? '${s}s' : '${m}m ${s.toString().padLeft(2, '0')}s';
-    await FlutterForegroundTask.updateService(
-      notificationTitle: '$_name · $pct%',
-      notificationText: 'Working · $clock · $_tools tool${_tools == 1 ? '' : 's'}',
-    );
+    final label = 'Working · $clock · $_tools tool${_tools == 1 ? '' : 's'}';
+    await _initNotif();
+    try {
+      await TaskNotifications.showProgressNotification(
+        plugin: _plugin,
+        instanceId: _instanceId,
+        name: _name,
+        pct: pct,
+        label: label,
+      );
+    } catch (_) {
+      await FlutterForegroundTask.updateService(
+        notificationTitle: '$_name · $pct%',
+        notificationText: label,
+      );
+    }
   }
 
   Future<void> _complete(String instanceId, {required bool error}) async {
@@ -413,6 +447,7 @@ class _VectraTaskHandler extends TaskHandler {
     _stopped = true;
     _http?.close(force: true);
     try {
+      await _plugin.cancel(TaskNotifications.progressId);
       await TaskNotifications.showDone(
         instanceId: instanceId,
         name: _name,

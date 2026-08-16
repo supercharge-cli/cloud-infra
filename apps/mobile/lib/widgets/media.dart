@@ -34,11 +34,16 @@ class ChatImageBubble extends StatelessWidget {
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: EdgeInsets.fromLTRB(mine ? 48 : 12, 6, mine ? 12 : 48, 6),
+        margin: EdgeInsets.fromLTRB(mine ? 56 : 12, 5, mine ? 12 : 56, 5),
         decoration: BoxDecoration(
           color: mine ? Vc.greenDim : Vc.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Vc.cardBorder),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(16),
+            topRight: const Radius.circular(16),
+            bottomLeft: Radius.circular(mine ? 16 : 5),
+            bottomRight: Radius.circular(mine ? 5 : 16),
+          ),
+          border: mine ? null : Border.all(color: Vc.cardBorder),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -114,12 +119,17 @@ class ChatFileCard extends StatelessWidget {
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: EdgeInsets.fromLTRB(mine ? 48 : 12, 6, mine ? 12 : 48, 6),
+        margin: EdgeInsets.fromLTRB(mine ? 56 : 12, 5, mine ? 12 : 56, 5),
         padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
         decoration: BoxDecoration(
           color: mine ? Vc.greenDim : Vc.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Vc.cardBorder),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(16),
+            topRight: const Radius.circular(16),
+            bottomLeft: Radius.circular(mine ? 16 : 5),
+            bottomRight: Radius.circular(mine ? 5 : 16),
+          ),
+          border: mine ? null : Border.all(color: Vc.cardBorder),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

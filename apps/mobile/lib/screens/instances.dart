@@ -57,7 +57,6 @@ class _InstancesScreenState extends State<InstancesScreen> {
       builder: (ctx) {
         final c = TextEditingController(text: 'workspace');
         return AlertDialog(
-          backgroundColor: Vc.card,
           title: const Text('New instance'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -138,99 +137,116 @@ class _InstancesScreenState extends State<InstancesScreen> {
   @override
   Widget build(BuildContext context) {
     final email = context.watch<SessionController>().user?.email ?? '';
-    return Scaffold(
-      appBar: AppBar(
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Vectra Cloud', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            Text('Instances', style: TextStyle(fontSize: 12, color: Vc.muted)),
+    return AppPopScope(
+      isRoot: true,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Vectra Cloud', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
+              Text('Your sandboxes', style: TextStyle(fontSize: 12, color: Vc.muted, fontWeight: FontWeight.w400)),
+            ],
+          ),
+          actions: [
+            IconButton(onPressed: () => _afterPush(context.push('/billing')), icon: const Icon(Icons.payments_outlined)),
+            IconButton(onPressed: () => _afterPush(context.push('/account')), icon: const Icon(Icons.person_outline)),
           ],
         ),
-        actions: [
-          IconButton(onPressed: () => _afterPush(context.push('/billing')), icon: const Icon(Icons.payments_outlined)),
-          IconButton(onPressed: () => _afterPush(context.push('/account')), icon: const Icon(Icons.person_outline)),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: overlay == null ? _create : null,
-        backgroundColor: Vc.green,
-        foregroundColor: Colors.black,
-        icon: const Icon(Icons.add),
-        label: Text(quota.canCreateFree ? 'Create' : 'Pay & create'),
-      ),
-      body: Stack(
-        children: [
-          RefreshIndicator(
-            color: Vc.green,
-            onRefresh: _reload,
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-              children: [
-                if (email.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(email, style: const TextStyle(color: Vc.faint, fontSize: 12)),
-                  ),
-                _quotaCard(),
-                const SizedBox(height: 16),
-                if (loading)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 80),
-                    child: Center(child: CircularProgressIndicator(color: Vc.green)),
-                  )
-                else if (error != null)
-                  Column(
-                    children: [
-                      Text(error!, style: const TextStyle(color: Vc.red)),
-                      const SizedBox(height: 12),
-                      OutlinedButton(onPressed: _reload, child: const Text('Retry')),
-                    ],
-                  )
-                else if (items.isEmpty)
-                  const EmptyState(
-                    icon: Icons.cloud_outlined,
-                    title: 'No instances yet',
-                    detail: 'Create a free sandbox, then open Chat. Wake, billing, and AI config live in Control.',
-                  )
-                else
-                  for (final inst in items) _card(inst),
-              ],
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: overlay == null ? _create : null,
+          backgroundColor: Vc.green,
+          foregroundColor: Colors.black,
+          icon: const Icon(Icons.add),
+          label: Text(quota.canCreateFree ? 'Create' : 'Pay & create', style: const TextStyle(fontWeight: FontWeight.w800)),
+        ),
+        body: Stack(
+          children: [
+            RefreshIndicator(
+              color: Vc.green,
+              onRefresh: _reload,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                children: [
+                  if (email.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(email, style: const TextStyle(color: Vc.faint, fontSize: 12)),
+                    ),
+                  _quotaCard(),
+                  const SizedBox(height: 16),
+                  if (loading)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 80),
+                      child: Center(child: CircularProgressIndicator(color: Vc.green)),
+                    )
+                  else if (error != null)
+                    Column(
+                      children: [
+                        Text(error!, style: const TextStyle(color: Vc.red)),
+                        const SizedBox(height: 12),
+                        OutlinedButton(onPressed: _reload, child: const Text('Retry')),
+                      ],
+                    )
+                  else if (items.isEmpty)
+                    const EmptyState(
+                      icon: Icons.cloud_outlined,
+                      title: 'No instances yet',
+                      detail: 'Create a free sandbox, then open Chat. Wake, billing, and AI config live in Control.',
+                    )
+                  else
+                    for (final inst in items) _card(inst),
+                ],
+              ),
             ),
-          ),
-          if (overlay != null) BusyOverlay(message: overlay!, detail: 'This can take up to a minute'),
-        ],
+            if (overlay != null) BusyOverlay(message: overlay!, detail: 'This can take up to a minute'),
+          ],
+        ),
       ),
     );
   }
 
   Widget _quotaCard() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Vc.card,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Vc.cardBorder),
-      ),
+    final used = quota.used;
+    final limit = quota.limit <= 0 ? 1 : quota.limit;
+    return VcPanel(
       child: Row(
         children: [
+          SizedBox(
+            width: 46,
+            height: 46,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircularProgressIndicator(
+                  value: (used / limit).clamp(0, 1),
+                  color: Vc.green,
+                  backgroundColor: Vc.elevated,
+                  strokeWidth: 4,
+                ),
+                Text('$used', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text('Free quota', style: TextStyle(color: Vc.muted, fontSize: 12)),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
-                  '${quota.used} / ${quota.limit} used',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+                  '$used / ${quota.limit} used',
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                 ),
               ],
             ),
           ),
           if (plan != null)
             Text(
-              '${plan!.inrLabel} · ${plan!.usdLabel}',
-              style: const TextStyle(color: Vc.muted, fontSize: 12),
+              '${plan!.inrLabel}\n${plan!.usdLabel}',
+              textAlign: TextAlign.right,
+              style: const TextStyle(color: Vc.muted, fontSize: 11, height: 1.35),
             ),
         ],
       ),
@@ -238,16 +254,17 @@ class _InstancesScreenState extends State<InstancesScreen> {
   }
 
   Widget _card(CloudInstance inst) {
+    final letter = inst.name.isNotEmpty ? inst.name[0].toUpperCase() : 'W';
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
         color: Vc.card,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           side: BorderSide(color: inst.pastDue ? Vc.red.withValues(alpha: 0.5) : Vc.cardBorder),
         ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           onTap: () => _afterPush(context.push('/chat/${inst.id}', extra: inst)),
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -256,8 +273,30 @@ class _InstancesScreenState extends State<InstancesScreen> {
               children: [
                 Row(
                   children: [
+                    Stack(
+                      children: [
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundColor: Vc.green.withValues(alpha: 0.14),
+                          child: Text(letter, style: const TextStyle(color: Vc.green, fontWeight: FontWeight.w800)),
+                        ),
+                        Positioned(
+                          right: 0,
+                          bottom: 0,
+                          child: StatusDot(inst.displayState, size: 10),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 12),
                     Expanded(
-                      child: Text(inst.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(inst.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
+                          if (inst.paidUntil != null && inst.paidUntil!.isNotEmpty)
+                            Text('Paid until ${inst.paidUntil}', style: const TextStyle(color: Vc.faint, fontSize: 11)),
+                        ],
+                      ),
                     ),
                     StateChip(inst.displayState),
                     if (inst.isFree)
@@ -273,11 +312,11 @@ class _InstancesScreenState extends State<InstancesScreen> {
                   ],
                 ),
                 if (inst.liveMessage != null && inst.liveMessage!.isNotEmpty) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Text(inst.liveMessage!, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 12)),
                 ],
                 if (inst.lastError != null && inst.lastError!.isNotEmpty) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Text(inst.lastError!, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.red, fontSize: 12)),
                 ],
                 const SizedBox(height: 12),
@@ -285,7 +324,7 @@ class _InstancesScreenState extends State<InstancesScreen> {
                   children: [
                     _mini('Chat', Icons.chat_bubble_outline, () => _afterPush(context.push('/chat/${inst.id}', extra: inst))),
                     const SizedBox(width: 8),
-                    _mini(inst.isPaused ? 'Wake' : 'Wake', Icons.bolt, () => _wake(inst)),
+                    _mini('Wake', Icons.bolt, () => _wake(inst)),
                     const SizedBox(width: 8),
                     _mini('Control', Icons.tune, () => _afterPush(context.push('/instance/${inst.id}', extra: inst))),
                   ],
@@ -300,14 +339,26 @@ class _InstancesScreenState extends State<InstancesScreen> {
 
   Widget _mini(String label, IconData icon, VoidCallback onTap) {
     return Expanded(
-      child: OutlinedButton.icon(
-        onPressed: overlay == null ? onTap : null,
-        icon: Icon(icon, size: 16),
-        label: Text(label, style: const TextStyle(fontSize: 12)),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.white,
+      child: Material(
+        color: Vc.elevated,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
           side: const BorderSide(color: Vc.cardBorder),
-          padding: const EdgeInsets.symmetric(vertical: 10),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: overlay == null ? onTap : null,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 15, color: Vc.greenSoft),
+                const SizedBox(width: 6),
+                Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
         ),
       ),
     );

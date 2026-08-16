@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 
 import '../theme.dart';
 
@@ -17,7 +19,7 @@ class BusyOverlay extends StatelessWidget {
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: Vc.card,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(color: Vc.cardBorder),
             ),
             child: Padding(
@@ -34,14 +36,14 @@ class BusyOverlay extends StatelessWidget {
                   Text(
                     message,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, letterSpacing: -0.2),
                   ),
                   if (detail != null) ...[
                     const SizedBox(height: 8),
                     Text(
                       detail!,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Vc.muted, fontSize: 13),
+                      style: const TextStyle(color: Vc.muted, fontSize: 13, height: 1.4),
                     ),
                   ],
                 ],
@@ -70,7 +72,29 @@ class StateChip extends StatelessWidget {
       ),
       child: Text(
         state,
-        style: TextStyle(color: c, fontSize: 11, fontWeight: FontWeight.w600),
+        style: TextStyle(color: c, fontSize: 11, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+class StatusDot extends StatelessWidget {
+  const StatusDot(this.state, {super.key, this.size = 9});
+  final String state;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = Vc.stateColor(state);
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: c,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(color: c.withValues(alpha: 0.55), blurRadius: 8, spreadRadius: 0.5),
+        ],
       ),
     );
   }
@@ -114,16 +138,47 @@ class _TypingDotsState extends State<TypingDots> with SingleTickerProviderStateM
 }
 
 class SectionTitle extends StatelessWidget {
-  const SectionTitle(this.text, {super.key});
+  const SectionTitle(this.text, {super.key, this.subtitle});
   final String text;
+  final String? subtitle;
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10, top: 8),
-      child: Text(
-        text,
-        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+      padding: const EdgeInsets.only(bottom: 10, top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            text,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, letterSpacing: -0.2),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 3),
+            Text(subtitle!, style: const TextStyle(color: Vc.faint, fontSize: 12, height: 1.35)),
+          ],
+        ],
       ),
+    );
+  }
+}
+
+class VcPanel extends StatelessWidget {
+  const VcPanel({super.key, required this.child, this.padding});
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: padding ?? const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Vc.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Vc.cardBorder),
+      ),
+      child: child,
     );
   }
 }
@@ -164,12 +219,25 @@ class EmptyState extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(28, 48, 28, 24),
       child: Column(
         children: [
-          Icon(icon, size: 36, color: Vc.faint),
-          const SizedBox(height: 14),
-          Text(title, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w600)),
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: Vc.elevated,
+              shape: BoxShape.circle,
+              border: Border.all(color: Vc.cardBorder),
+            ),
+            child: Icon(icon, size: 28, color: Vc.green),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17, letterSpacing: -0.2),
+          ),
           if (detail != null) ...[
             const SizedBox(height: 8),
-            Text(detail!, textAlign: TextAlign.center, style: const TextStyle(color: Vc.muted, height: 1.4)),
+            Text(detail!, textAlign: TextAlign.center, style: const TextStyle(color: Vc.muted, height: 1.45)),
           ],
         ],
       ),
@@ -223,23 +291,131 @@ class ControlButton extends StatelessWidget {
     return Expanded(
       child: Opacity(
         opacity: enabled ? 1 : 0.4,
-        child: OutlinedButton(
-          onPressed: enabled ? onTap : null,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: c,
-            side: BorderSide(color: Vc.cardBorder),
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Material(
+          color: Vc.elevated,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: c.withValues(alpha: 0.28)),
           ),
-          child: Column(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: enabled ? onTap : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Column(
+                children: [
+                  Icon(icon, size: 20, color: c),
+                  const SizedBox(height: 4),
+                  Text(label, style: TextStyle(fontSize: 12, color: c, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class SecretField extends StatefulWidget {
+  const SecretField({
+    super.key,
+    required this.controller,
+    required this.label,
+    this.hint,
+    this.helper,
+  });
+  final TextEditingController controller;
+  final String label;
+  final String? hint;
+  final String? helper;
+
+  @override
+  State<SecretField> createState() => _SecretFieldState();
+}
+
+class _SecretFieldState extends State<SecretField> {
+  bool hide = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final set = widget.controller.text.trim().isNotEmpty;
+    return TextField(
+      controller: widget.controller,
+      obscureText: hide,
+      enableSuggestions: false,
+      autocorrect: false,
+      onChanged: (_) => setState(() {}),
+      decoration: InputDecoration(
+        labelText: widget.label,
+        hintText: widget.hint,
+        helperText: widget.helper ?? (set ? 'Loaded from sandbox — tap the eye to reveal' : 'Not set'),
+        helperMaxLines: 2,
+        suffixIcon: SizedBox(
+          width: set ? 96 : 48,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Icon(icon, size: 20, color: c),
-              const SizedBox(height: 4),
-              Text(label, style: const TextStyle(fontSize: 12)),
+              if (set)
+                IconButton(
+                  tooltip: 'Copy',
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: widget.controller.text));
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+                  },
+                  icon: const Icon(Icons.copy, size: 18, color: Vc.muted),
+                ),
+              IconButton(
+                tooltip: hide ? 'Show' : 'Hide',
+                onPressed: () => setState(() => hide = !hide),
+                icon: Icon(hide ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 20, color: Vc.muted),
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class AppPopScope extends StatelessWidget {
+  const AppPopScope({super.key, required this.child, this.isRoot = false});
+  final Widget child;
+  final bool isRoot;
+
+  static Future<bool> confirmLeave(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Leave Vectra?'),
+        content: const Text('The app will close. Running sandbox tasks keep going in a live notification.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Stay')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Close app')),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (isRoot) {
+          final leave = await confirmLeave(context);
+          if (leave && context.mounted) SystemNavigator.pop();
+          return;
+        }
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/');
+        }
+      },
+      child: child,
     );
   }
 }

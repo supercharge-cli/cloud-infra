@@ -120,43 +120,60 @@ class _BillingScreenState extends State<BillingScreen> {
   @override
   Widget build(BuildContext context) {
     final title = args.renew ? 'Renew instance' : (args.name == null ? 'Billing' : 'Pay & create');
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Stack(
-        children: [
-          if (loading)
-            const Center(child: CircularProgressIndicator(color: Vc.green))
-          else
-            ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (error != null) ...[
-                  Text(error!, style: const TextStyle(color: Vc.red)),
-                  const SizedBox(height: 16),
+    return AppPopScope(
+      child: Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: Stack(
+          children: [
+            if (loading)
+              const Center(child: CircularProgressIndicator(color: Vc.green))
+            else
+              ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  if (error != null) ...[
+                    Text(error!, style: const TextStyle(color: Vc.red)),
+                    const SizedBox(height: 16),
+                  ],
+                  VcPanel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('VECTRA CLOUD', style: TextStyle(color: Vc.green, fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w800)),
+                        const SizedBox(height: 8),
+                        Text(plan.label ?? 'Workspace plan', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${plan.inrLabel} or ${plan.usdLabel} · ${plan.periodDays ?? 30} days',
+                          style: const TextStyle(color: Vc.muted, height: 1.4),
+                        ),
+                        if (args.name != null) ...[
+                          const SizedBox(height: 10),
+                          Text('Instance: ${args.name}', style: const TextStyle(color: Vc.muted)),
+                        ],
+                        const SizedBox(height: 18),
+                        FilledButton(
+                          onPressed: busy ? null : () => _pay('INR'),
+                          child: SizedBox(width: double.infinity, child: Text(plan.inrButton, textAlign: TextAlign.center)),
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton(
+                          onPressed: busy ? null : () => _pay('USD'),
+                          child: SizedBox(width: double.infinity, child: Text(plan.usdButton, textAlign: TextAlign.center)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Checkout opens Razorpay on this device. After payment the instance is created or renewed automatically.',
+                    style: TextStyle(color: Vc.muted, height: 1.4),
+                  ),
                 ],
-                Text(plan.label ?? 'Vectra Cloud', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
-                Text(
-                  '${plan.inrLabel} or ${plan.usdLabel} · ${plan.periodDays ?? 30} days',
-                  style: const TextStyle(color: Vc.muted),
-                ),
-                if (args.name != null) ...[
-                  const SizedBox(height: 8),
-                  Text('Instance: ${args.name}', style: const TextStyle(color: Vc.muted)),
-                ],
-                const SizedBox(height: 20),
-                FilledButton(onPressed: busy ? null : () => _pay('INR'), child: Text(plan.inrButton)),
-                const SizedBox(height: 8),
-                OutlinedButton(onPressed: busy ? null : () => _pay('USD'), child: Text(plan.usdButton)),
-                const SizedBox(height: 16),
-                const Text(
-                  'Checkout opens Razorpay on this device. After payment the instance is created or renewed automatically.',
-                  style: TextStyle(color: Vc.muted),
-                ),
-              ],
-            ),
-          if (busy) const BusyOverlay(message: 'Processing payment…'),
-        ],
+              ),
+            if (busy) const BusyOverlay(message: 'Processing payment…'),
+          ],
+        ),
       ),
     );
   }

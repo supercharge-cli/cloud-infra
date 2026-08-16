@@ -639,11 +639,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
             },
             child: Container(
-              margin: const EdgeInsets.fromLTRB(48, 6, 12, 6),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
+              margin: const EdgeInsets.fromLTRB(56, 5, 12, 5),
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+              decoration: const BoxDecoration(
                 color: Vc.greenDim,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                  bottomLeft: Radius.circular(16),
+                  bottomRight: Radius.circular(5),
+                ),
               ),
               child: ChatMarkdown(data: ev.text),
             ),
@@ -651,10 +656,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
       case 'tool':
         return Container(
-          margin: const EdgeInsets.fromLTRB(12, 4, 48, 4),
-          padding: const EdgeInsets.all(10),
+          margin: const EdgeInsets.fromLTRB(12, 4, 56, 4),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
           decoration: BoxDecoration(
-            color: const Color(0xFF111113),
+            color: Vc.elevated,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Vc.cardBorder),
           ),
@@ -814,12 +819,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
             },
             child: Container(
-              margin: const EdgeInsets.fromLTRB(12, 6, 48, 6),
+              margin: const EdgeInsets.fromLTRB(12, 5, 56, 5),
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: Vc.card,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Vc.cardBorder),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                  bottomLeft: Radius.circular(5),
+                  bottomRight: Radius.circular(16),
+                ),
               ),
               child: ChatMarkdown(data: ev.text),
             ),
@@ -882,19 +891,40 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final updateReady = cli?['updateAvailable'] == true;
     final palette = showCommandPalette(_input.text);
     return WithForegroundTask(
-      child: Scaffold(
+      child: AppPopScope(
+        child: Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(instanceName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            Text(instanceName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
             if (working)
-              Text(_liveLabel(), style: const TextStyle(fontSize: 11, color: Vc.green))
+              Text(_liveLabel(), style: const TextStyle(fontSize: 11, color: Vc.green, fontWeight: FontWeight.w600))
             else if (inst != null)
-              Text(inst!.displayState, style: const TextStyle(fontSize: 11, color: Vc.muted)),
+              Row(
+                children: [
+                  StatusDot(inst!.displayState, size: 7),
+                  const SizedBox(width: 6),
+                  Text(inst!.displayState, style: const TextStyle(fontSize: 11, color: Vc.muted)),
+                ],
+              ),
           ],
         ),
         actions: [
+          if (working)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Vc.green.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text('$progressPct%', style: const TextStyle(color: Vc.green, fontSize: 11, fontWeight: FontWeight.w800)),
+                ),
+              ),
+            ),
           if (working)
             IconButton(
               tooltip: 'Stop',
@@ -981,45 +1011,77 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               else
                 SafeArea(
                   child: Container(
-                    decoration: const BoxDecoration(
-                      color: Vc.bg,
-                      border: Border(top: BorderSide(color: Vc.cardBorder)),
-                    ),
-                    padding: const EdgeInsets.fromLTRB(4, 6, 4, 8),
+                    color: Vc.bg,
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        IconButton(onPressed: _commands, icon: const Icon(Icons.tag, color: Vc.muted)),
-                        IconButton(
-                          onPressed: sending ? null : _attach,
-                          icon: const Icon(Icons.attach_file, color: Vc.muted),
+                        Material(
+                          color: Vc.elevated,
+                          shape: const CircleBorder(),
+                          child: IconButton(
+                            onPressed: _commands,
+                            icon: const Icon(Icons.tag, color: Vc.muted, size: 20),
+                          ),
                         ),
+                        const SizedBox(width: 6),
                         Expanded(
-                          child: TextField(
-                            controller: _input,
-                            minLines: 1,
-                            maxLines: 5,
-                            textInputAction: TextInputAction.newline,
-                            decoration: const InputDecoration(
-                              hintText: 'Message your sandbox…',
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
-                              filled: false,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Vc.elevated,
+                              borderRadius: BorderRadius.circular(22),
+                              border: Border.all(color: Vc.cardBorder),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                IconButton(
+                                  onPressed: sending ? null : _attach,
+                                  icon: const Icon(Icons.attach_file, color: Vc.muted, size: 20),
+                                ),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _input,
+                                    minLines: 1,
+                                    maxLines: 5,
+                                    textInputAction: TextInputAction.newline,
+                                    decoration: const InputDecoration(
+                                      hintText: 'Message your sandbox…',
+                                      border: InputBorder.none,
+                                      enabledBorder: InputBorder.none,
+                                      focusedBorder: InputBorder.none,
+                                      filled: false,
+                                      contentPadding: EdgeInsets.fromLTRB(0, 12, 8, 12),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                        IconButton(
-                          onPressed: sending || (_input.text.trim().isEmpty && pending.isEmpty)
-                              ? null
-                              : () => _send(),
-                          icon: sending
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Vc.green),
-                                )
-                              : const Icon(Icons.send, color: Vc.green),
+                        const SizedBox(width: 6),
+                        Material(
+                          color: sending || (_input.text.trim().isEmpty && pending.isEmpty)
+                              ? Vc.elevated
+                              : Vc.green,
+                          shape: const CircleBorder(),
+                          child: IconButton(
+                            onPressed: sending || (_input.text.trim().isEmpty && pending.isEmpty)
+                                ? null
+                                : () => _send(),
+                            icon: sending
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Vc.green),
+                                  )
+                                : Icon(
+                                    Icons.arrow_upward_rounded,
+                                    color: sending || (_input.text.trim().isEmpty && pending.isEmpty)
+                                        ? Vc.faint
+                                        : Colors.black,
+                                  ),
+                          ),
                         ),
                       ],
                     ),
@@ -1034,6 +1096,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
         ],
       ),
+    ),
     ),
     );
   }
