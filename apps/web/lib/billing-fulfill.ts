@@ -3,7 +3,7 @@
  * (client checkout signature OR server webhook).
  */
 import { addBillingPeriod, getPlan, type Plan } from './billing';
-import { createGatewaySession } from './gateway-client';
+import { bootstrapAppInbox, createGatewaySession } from './gateway-client';
 import { getDb } from './mongodb';
 import {
   createInstanceRecord,
@@ -142,6 +142,7 @@ export async function fulfillPaidOrder(input: {
     sessionId: session.sessionId,
     sandboxId: session.sandboxId,
   });
+  await bootstrapAppInbox(session.sessionId, session.sandboxId).catch(() => undefined);
   const withBilling = await updateInstance(order.userId, instance.id, {
     paidUntil,
     billingStatus: 'active',

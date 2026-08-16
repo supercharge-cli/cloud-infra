@@ -9,7 +9,7 @@ export async function POST(req: Request) {
     const pub = publicUser(user);
     const token = createSessionToken({ id: user.id, email: user.email, role: pub.role });
     await setSessionCookie(token);
-    return NextResponse.json({ user: pub });
+    return NextResponse.json({ user: pub, token });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }

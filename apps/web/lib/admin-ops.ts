@@ -3,6 +3,7 @@
  */
 import { addBillingPeriod, isSubscriptionActive } from './billing';
 import {
+  bootstrapAppInbox,
   createGatewaySession,
   destroyGatewaySession,
   execInSession,
@@ -71,6 +72,7 @@ export async function adminProvisionInstance(input: {
     sessionId: session.sessionId,
     sandboxId: session.sandboxId,
   });
+  await bootstrapAppInbox(session.sessionId, session.sandboxId).catch(() => undefined);
 
   const withBilling = await adminUpdateInstance(instance.id, {
     paidUntil,

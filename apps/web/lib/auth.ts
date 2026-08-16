@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 
 export const SESSION_COOKIE = 'vectra_session';
 const MAX_AGE_SEC = 14 * 24 * 60 * 60;
@@ -100,7 +100,21 @@ export async function clearSessionCookie(): Promise<void> {
   });
 }
 
+/** Bearer from Authorization, or the raw token string. */
+export function tokenFromAuthorization(header: string | null | undefined): string | null {
+  if (!header) return null;
+  const m = /^\s*Bearer\s+(\S+)\s*$/i.exec(header);
+  return m?.[1] || null;
+}
+
+/**
+ * Session from `Authorization: Bearer` (Flutter / API clients) or the
+ * httpOnly cookie (website). Bearer wins when both are present.
+ */
 export async function getSessionUser(): Promise<AuthUser | null> {
+  const hdrs = await headers();
+  const bearer = tokenFromAuthorization(hdrs.get('authorization'));
+  if (bearer) return verifySessionToken(bearer);
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
   if (!token) return null;

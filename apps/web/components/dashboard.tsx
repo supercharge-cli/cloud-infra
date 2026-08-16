@@ -1078,8 +1078,8 @@ export function Dashboard({ email }: { email: string }) {
             ) : null}
             <p className="mb-3 text-xs text-zinc-500">
               Values below are loaded from the sandbox env. Edit any field, then save — the coding
-              bot restarts automatically. XibeCode supports Telegram, Discord, and Slack (any one
-              or several).
+              bot restarts automatically. The Flutter app chats through the first-party inbox (no
+              bot token). Telegram, Discord, and Slack stay optional extras.
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Provider">

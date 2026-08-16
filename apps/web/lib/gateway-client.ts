@@ -706,18 +706,13 @@ export async function writeSandboxConfig(
       meta: existing,
     };
   }
-  // XibeCode daemon starts any adapter that has tokens — at least one channel required.
-  if (!telegramBotToken && !discordBotToken && !slackBotToken) {
-    return {
-      ok: false,
-      logs: [
-        'At least one chat channel is required: Telegram bot token, Discord bot token, or Slack bot+app tokens.',
-      ],
-      meta: existing,
-    };
-  }
-
   secrets.push(apiKey, telegramBotToken, discordBotToken, slackBotToken, slackAppToken);
+
+  const inboxSecret =
+    process.env.XIBECODE_APP_INBOX_SECRET?.trim() ||
+    process.env.XIBECODE_GATEWAY_TOKEN?.trim() ||
+    '';
+  if (inboxSecret) secrets.push(inboxSecret);
 
   // Prefer pairing (secure) unless tenant opts into open access.
   // If the form omits the flag, keep previous value; brand-new installs default to pairing.
@@ -726,7 +721,7 @@ export async function writeSandboxConfig(
       ? input.allowAllUsers
       : Boolean(existing.allowAllUsers);
 
-  const channels: string[] = [];
+  const channels: string[] = ['app'];
   if (telegramBotToken) channels.push('telegram');
   if (discordBotToken) channels.push('discord');
   if (slackBotToken) channels.push('slack');
@@ -760,6 +755,9 @@ export async function writeSandboxConfig(
       baseUrl ? `XIBECODE_BASE_URL=${baseUrl}` : '',
       baseUrl && provider !== 'anthropic' ? `OPENAI_BASE_URL=${baseUrl}` : '',
       `XIBECODE_DAEMON_WORKDIR=/home/user/workspace`,
+      inboxSecret ? `XIBECODE_APP_INBOX_SECRET=${inboxSecret}` : '',
+      inboxSecret ? `XIBECODE_GATEWAY_TOKEN=${inboxSecret}` : '',
+      `XIBECODE_APP_INBOX_PORT=8790`,
       // Template wake HTTP only (does NOT enable bot webhook mode)
       sandboxWakeHttp ? `VECTRA_WAKE_PORT=${tgWebhookPort}` : '',
       sandboxWakeHttp ? `VECTRA_TG_WEBHOOK_URL=${tgWebhookUrl}` : '',
@@ -1369,4 +1367,72 @@ export async function wakeSession(
     daemonOk,
     logs,
   };
+}
+
+export const APP_INBOX_PORT = 8790;
+
+function appInboxSecret(): string {
+  return (
+    process.env.XIBECODE_APP_INBOX_SECRET?.trim() ||
+    process.env.XIBECODE_GATEWAY_TOKEN?.trim() ||
+    ''
+  );
+}
+
+/** Merge inbox secret into daemon.env without wiping existing tokens. */
+export async function bootstrapAppInbox(
+  sessionId: string,
+  sandboxId?: string,
+): Promise<void> {
+  const secret = appInboxSecret();
+  if (!secret) return;
+  const py = `
+import pathlib
+p = pathlib.Path("/home/user/.xibecode/daemon.env")
+p.parent.mkdir(parents=True, exist_ok=True)
+text = p.read_text() if p.exists() else ""
+keys = {
+  "XIBECODE_APP_INBOX_SECRET": ${JSON.stringify(secret)},
+  "XIBECODE_GATEWAY_TOKEN": ${JSON.stringify(secret)},
+  "XIBECODE_APP_INBOX_PORT": "8790",
+  "XIBECODE_DAEMON_WORKDIR": "/home/user/workspace",
+}
+lines = [ln for ln in text.splitlines() if ln.strip() and ln.split("=",1)[0] not in keys]
+for k,v in keys.items():
+  lines.append(f"{k}={v}")
+p.write_text("\\n".join(lines) + "\\n")
+print("ok")
+`.trim();
+  await execInSession(sessionId, `python3 - <<'PY'\n${py}\nPY`, {
+    timeout: 30,
+    sandboxId,
+  }).catch(() => undefined);
+}
+
+export async function appInboxUrl(
+  sessionId: string,
+  sandboxId?: string,
+): Promise<string> {
+  if (sandboxId) {
+    await ensureGatewaySession(sessionId, sandboxId).catch(() => undefined);
+  }
+  const host = await getSandboxPreviewHost(sessionId, APP_INBOX_PORT);
+  if (!host) {
+    throw new Error('App inbox host unavailable (sandbox not reachable on :8790)');
+  }
+  return host.replace(/\/$/, '');
+}
+
+export async function appInboxFetch(
+  sessionId: string,
+  path: string,
+  init: RequestInit = {},
+  opts?: { sandboxId?: string },
+): Promise<Response> {
+  const base = await appInboxUrl(sessionId, opts?.sandboxId);
+  const headers = new Headers(init.headers);
+  const secret = appInboxSecret();
+  if (secret) headers.set('authorization', `Bearer ${secret}`);
+  if (!headers.has('accept')) headers.set('accept', 'application/json');
+  return fetch(`${base}${path}`, { ...init, headers });
 }

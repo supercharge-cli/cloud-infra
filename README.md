@@ -6,7 +6,8 @@
 cloud-infra/
 ├── apps/
 │   ├── web/       # Next.js site + dashboard → Vercel
-│   └── gateway/   # Sandbox control plane → Railway / Coolify
+│   ├── gateway/   # Sandbox control plane → Railway / Coolify
+│   └── mobile/    # Flutter console + first-party daemon chat
 ├── package.json   # root scripts only (not a workspace hoist)
 └── vercel.json    # fallback if Root Directory is not set
 ```

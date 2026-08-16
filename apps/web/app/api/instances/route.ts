@@ -8,6 +8,7 @@ import {
   priceForCurrency,
 } from '@/lib/billing';
 import {
+  bootstrapAppInbox,
   createGatewaySession,
   destroyGatewaySession,
   getSandboxState,
@@ -196,6 +197,10 @@ export async function POST(req: Request) {
       sandboxId: session.sandboxId,
       isFree: true,
     });
+
+    await bootstrapAppInbox(session.sessionId, session.sandboxId).catch(
+      () => undefined,
+    );
 
     return NextResponse.json(
       {
