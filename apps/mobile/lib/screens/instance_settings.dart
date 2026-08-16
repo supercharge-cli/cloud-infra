@@ -10,6 +10,7 @@ import '../api/client.dart';
 import '../api/models.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import '../widgets/side_panel.dart';
 import '../widgets/ui.dart';
 
 const _providers = [
@@ -308,19 +309,19 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
             msg!.contains('sent') ||
             msg!.contains('restarted') ||
             msg!.contains('updated'));
-    return AppPopScope(
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(inst?.name ?? 'Control'),
-          actions: [
-            IconButton(onPressed: overlay == null ? _load : null, icon: const Icon(Icons.refresh)),
-            IconButton(
-              onPressed: () => context.push('/chat/$id', extra: inst),
-              icon: const Icon(Icons.chat_bubble_outline),
-            ),
-          ],
-        ),
-        body: Stack(
+    return AppScaffold(
+      currentInstanceId: id,
+      appBar: AppBar(
+        title: Text(inst?.name ?? 'Control'),
+        actions: [
+          IconButton(onPressed: overlay == null ? _load : null, icon: const Icon(Icons.refresh)),
+          IconButton(
+            onPressed: () => context.push('/chat/$id', extra: inst),
+            icon: const Icon(Icons.chat_bubble_outline),
+          ),
+        ],
+      ),
+      body: Stack(
           children: [
             if (loading)
               const Center(child: CircularProgressIndicator(color: Vc.green))
@@ -612,7 +613,6 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
             if (overlay != null) BusyOverlay(message: overlay!, detail: 'Please wait — sandbox ops can take a minute'),
           ],
         ),
-      ),
     );
   }
 }

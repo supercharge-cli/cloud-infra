@@ -6,6 +6,7 @@ import '../api/client.dart';
 import '../api/models.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import '../widgets/side_panel.dart';
 import '../widgets/ui.dart';
 
 class InstancesScreen extends StatefulWidget {
@@ -136,31 +137,25 @@ class _InstancesScreenState extends State<InstancesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final email = context.watch<SessionController>().user?.email ?? '';
-    return AppPopScope(
+    return AppScaffold(
       isRoot: true,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Vectra Cloud', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
-              Text('Your sandboxes', style: TextStyle(fontSize: 12, color: Vc.muted, fontWeight: FontWeight.w400)),
-            ],
-          ),
-          actions: [
-            IconButton(onPressed: () => _afterPush(context.push('/billing')), icon: const Icon(Icons.payments_outlined)),
-            IconButton(onPressed: () => _afterPush(context.push('/account')), icon: const Icon(Icons.person_outline)),
+      appBar: AppBar(
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Vectra Cloud', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
+            Text('Your sandboxes', style: TextStyle(fontSize: 12, color: Vc.muted, fontWeight: FontWeight.w400)),
           ],
         ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: overlay == null ? _create : null,
-          backgroundColor: Vc.green,
-          foregroundColor: Colors.black,
-          icon: const Icon(Icons.add),
-          label: Text(quota.canCreateFree ? 'Create' : 'Pay & create', style: const TextStyle(fontWeight: FontWeight.w800)),
-        ),
-        body: Stack(
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: overlay == null ? _create : null,
+        backgroundColor: Vc.green,
+        foregroundColor: Colors.black,
+        icon: const Icon(Icons.add),
+        label: Text(quota.canCreateFree ? 'Create' : 'Pay & create', style: const TextStyle(fontWeight: FontWeight.w800)),
+      ),
+      body: Stack(
           children: [
             RefreshIndicator(
               color: Vc.green,
@@ -168,11 +163,6 @@ class _InstancesScreenState extends State<InstancesScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                 children: [
-                  if (email.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(email, style: const TextStyle(color: Vc.faint, fontSize: 12)),
-                    ),
                   _quotaCard(),
                   const SizedBox(height: 16),
                   if (loading)
@@ -202,7 +192,6 @@ class _InstancesScreenState extends State<InstancesScreen> {
             if (overlay != null) BusyOverlay(message: overlay!, detail: 'This can take up to a minute'),
           ],
         ),
-      ),
     );
   }
 

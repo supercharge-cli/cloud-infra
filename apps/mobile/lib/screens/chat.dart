@@ -22,6 +22,7 @@ import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/markdown.dart';
 import '../widgets/media.dart';
+import '../widgets/side_panel.dart';
 import '../widgets/ui.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -891,8 +892,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final updateReady = cli?['updateAvailable'] == true;
     final palette = showCommandPalette(_input.text);
     return WithForegroundTask(
-      child: AppPopScope(
-        child: Scaffold(
+      child: AppScaffold(
+        currentInstanceId: id,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1096,7 +1097,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
         ],
       ),
-    ),
     ),
     );
   }

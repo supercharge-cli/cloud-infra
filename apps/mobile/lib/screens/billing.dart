@@ -6,6 +6,7 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../api/models.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import '../widgets/side_panel.dart';
 import '../widgets/ui.dart';
 
 class BillingScreen extends StatefulWidget {
@@ -120,10 +121,10 @@ class _BillingScreenState extends State<BillingScreen> {
   @override
   Widget build(BuildContext context) {
     final title = args.renew ? 'Renew instance' : (args.name == null ? 'Billing' : 'Pay & create');
-    return AppPopScope(
-      child: Scaffold(
-        appBar: AppBar(title: Text(title)),
-        body: Stack(
+    return AppScaffold(
+      currentInstanceId: args.instanceId,
+      appBar: AppBar(title: Text(title)),
+      body: Stack(
           children: [
             if (loading)
               const Center(child: CircularProgressIndicator(color: Vc.green))
@@ -174,7 +175,6 @@ class _BillingScreenState extends State<BillingScreen> {
             if (busy) const BusyOverlay(message: 'Processing payment…'),
           ],
         ),
-      ),
     );
   }
 }
