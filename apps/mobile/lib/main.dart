@@ -24,6 +24,22 @@ const apiBase = String.fromEnvironment(
   defaultValue: 'https://infra.xibeai.in',
 );
 
+/// Map `vectra://pollinations/connected?instance=` to a GoRouter path.
+String? pollenAppPath(Uri? uri) {
+  if (uri == null) return null;
+  final raw = uri.toString().replaceAll(RegExp(r'\s+'), '');
+  final parsed = Uri.tryParse(raw);
+  if (parsed == null) return null;
+  final blob = parsed.toString().toLowerCase();
+  final looksPollen =
+      parsed.scheme == 'vectra' &&
+      (parsed.host.toLowerCase() == 'pollinations' || blob.contains('pollinations/connected'));
+  if (!looksPollen) return null;
+  final id = parsed.queryParameters['instance']?.trim() ?? '';
+  if (id.isEmpty) return '/pollinations/connected';
+  return '/pollinations/connected?instance=${Uri.encodeQueryComponent(id)}';
+}
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(Vc.overlay);
@@ -50,14 +66,28 @@ class _VectraAppState extends State<VectraApp> {
     super.initState();
     session = SessionController(apiBase: apiBase);
     router = GoRouter(
+      initialLocation: '/',
+      overridePlatformDefaultLocation: true,
       refreshListenable: session,
+      onException: (ctx, state, r) {
+        final path = pollenAppPath(state.uri) ?? pollenAppPath(Uri.tryParse(state.uri.toString()));
+        r.go(path ?? '/');
+      },
       redirect: (ctx, state) {
+        final pollenPath = pollenAppPath(state.uri);
+        if (pollenPath != null && state.matchedLocation != '/pollinations/connected') {
+          if (!session.ready || session.user == null) {
+            _pendingLink = state.uri;
+            return session.ready ? '/login' : null;
+          }
+          return pollenPath;
+        }
         if (!session.ready) return null;
         final loggingIn = state.matchedLocation == '/login';
         if (session.user == null) return loggingIn ? null : '/login';
         if (loggingIn) {
-          final pollen = _pollenInstance(_pendingLink);
-          if (pollen != null) return '/pollinations/connected?instance=$pollen';
+          final pending = pollenAppPath(_pendingLink);
+          if (pending != null) return pending;
           return '/';
         }
         return null;
@@ -105,14 +135,6 @@ class _VectraAppState extends State<VectraApp> {
     session.load();
   }
 
-  String? _pollenInstance(Uri? uri) {
-    if (uri == null) return null;
-    if (uri.scheme != 'vectra') return null;
-    if (uri.host != 'pollinations') return null;
-    final id = uri.queryParameters['instance']?.trim() ?? '';
-    return id.isEmpty ? null : id;
-  }
-
   void _applyLink(Uri uri) {
     _pendingLink = uri;
     _flushPendingLink();
@@ -120,10 +142,10 @@ class _VectraAppState extends State<VectraApp> {
 
   void _flushPendingLink() {
     if (!session.ready || session.user == null) return;
-    final id = _pollenInstance(_pendingLink);
-    if (id == null) return;
+    final path = pollenAppPath(_pendingLink);
+    if (path == null) return;
     _pendingLink = null;
-    router.go('/pollinations/connected?instance=$id');
+    router.go(path);
   }
 
   Future<void> _listenDeepLinks() async {

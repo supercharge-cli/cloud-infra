@@ -1199,19 +1199,16 @@ export function Dashboard({ email }: { email: string }) {
                 {config.model || 'no model'}
               </p>
             ) : null}
-            <p className="mb-3 text-xs text-zinc-500">
-              Recommended: <strong className="text-zinc-300">Pollinations</strong> — spend
-              your own Pollen (we earn a small share). Huge free/cheap model list.{' '}
-              <a
-                href="https://enter.pollinations.ai/keys"
-                target="_blank"
-                rel="noreferrer"
-                className="text-emerald-400 underline"
-              >
-                Get an API key
-              </a>{' '}
-              or connect below. Telegram / Discord / Slack stay optional.
-            </p>
+            <div className="mb-3 rounded-xl border border-emerald-800/50 bg-emerald-950/30 px-3 py-2.5">
+              <p className="text-[11px] font-semibold tracking-wider text-emerald-400">
+                BEST · CHEAPEST
+              </p>
+              <p className="mt-1 text-sm text-zinc-200">
+                <strong className="text-white">Pollinations</strong> — huge model list (GPT,
+                Claude, Gemini, Qwen…) on one cheap Pollen balance. Use this unless you already
+                pay another API.
+              </p>
+            </div>
             {selected ? (
               <div className="mb-3">
                 {byopReady ? (
@@ -1223,10 +1220,13 @@ export function Dashboard({ email }: { email: string }) {
                   </a>
                 ) : (
                   <p className="text-xs text-amber-400">
-                    BYOP not configured yet (server needs POLLINATIONS_APP_KEY). Paste an{' '}
-                    <code>sk_</code> below.
+                    BYOP not configured yet (server needs POLLINATIONS_APP_KEY).
                   </p>
                 )}
+                <p className="mt-1.5 text-xs text-zinc-500">
+                  Approve on the site — no secret key to paste. Telegram / Discord / Slack stay
+                  optional.
+                </p>
               </div>
             ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
@@ -1265,26 +1265,38 @@ export function Dashboard({ email }: { email: string }) {
                   ))}
                 </datalist>
               </Field>
-              <Field
-                label={
-                  provider.trim().toLowerCase() === 'pollinations'
-                    ? 'API key (enter.pollinations.ai/keys)'
-                    : 'API key'
-                }
-              >
-                <input
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  type="text"
-                  autoComplete="off"
-                  placeholder={
-                    provider.trim().toLowerCase() === 'pollinations'
-                      ? 'or paste sk_… (optional if you used Connect)'
-                      : 'sk-… or provider key'
-                  }
-                  className="field"
-                />
-              </Field>
+              {provider.trim().toLowerCase() === 'pollinations' ? (
+                <div className="sm:col-span-2">
+                  <details className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+                    <summary className="cursor-pointer text-xs text-zinc-400">
+                      Or paste a secret key (sk_)
+                    </summary>
+                    <div className="mt-2">
+                      <Field label="Pollinations secret key">
+                        <input
+                          value={apiKey}
+                          onChange={(e) => setApiKey(e.target.value)}
+                          type="text"
+                          autoComplete="off"
+                          placeholder="sk_… only if you already have one"
+                          className="field"
+                        />
+                      </Field>
+                    </div>
+                  </details>
+                </div>
+              ) : (
+                <Field label="API key">
+                  <input
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    type="text"
+                    autoComplete="off"
+                    placeholder="sk-… or provider key"
+                    className="field"
+                  />
+                </Field>
+              )}
               {providerNeedsBaseUrl(provider, baseUrl) ? (
                 <Field label="Base URL">
                   <input

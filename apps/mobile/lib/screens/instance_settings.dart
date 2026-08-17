@@ -64,6 +64,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   bool loading = true;
   bool allowAll = false;
   bool byopReady = false;
+  bool pastePollinationsKey = false;
   final history = <ExecResult>[];
 
   VectraClient get api => context.read<SessionController>().client;
@@ -530,12 +531,40 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                   const SizedBox(height: 20),
                   const SectionTitle(
                     'AI',
-                    subtitle:
-                        'Recommended: Pollinations — spend your own Pollen (we earn a small share). Connect below or paste an sk_ key.',
+                    subtitle: 'Pollinations is the default — cheapest huge model list. Connect once and chat.',
                   ),
                   VcPanel(
                     child: Column(
                       children: [
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF102216),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Vc.green.withValues(alpha: 0.35)),
+                          ),
+                          child: const Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'BEST · CHEAPEST',
+                                style: TextStyle(
+                                  color: Vc.greenSoft,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Pollinations — GPT / Claude / Gemini / Qwen and more on one cheap Pollen balance. Use this unless you already pay another API.',
+                                style: TextStyle(color: Colors.white, height: 1.4, fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         TextField(
                           controller: provider,
                           decoration: InputDecoration(
@@ -544,7 +573,11 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                               icon: const Icon(Icons.expand_more, color: Vc.muted),
                               onSelected: _onProviderPicked,
                               itemBuilder: (_) => [
-                                for (final p in _providers) PopupMenuItem(value: p, child: Text(p)),
+                                for (final p in _providers)
+                                  PopupMenuItem(
+                                    value: p,
+                                    child: Text(p == 'pollinations' ? 'pollinations  ·  recommended' : p),
+                                  ),
                               ],
                             ),
                           ),
@@ -594,29 +627,43 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                               byopReady ? 'Connect with Pollinations' : 'BYOP not configured on server',
                             ),
                           ),
-                          if (!byopReady)
-                            const Padding(
-                              padding: EdgeInsets.only(top: 6),
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  'Server needs POLLINATIONS_APP_KEY (pk_…). Paste an sk_ below for now.',
-                                  style: TextStyle(color: Vc.amber, fontSize: 12),
-                                ),
-                              ),
+                          const SizedBox(height: 6),
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Opens the site, you approve, then Vectra comes back connected. No key to paste.',
+                              style: TextStyle(color: Vc.muted, fontSize: 12, height: 1.35),
                             ),
+                          ),
+                          Theme(
+                            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                            child: ExpansionTile(
+                              tilePadding: EdgeInsets.zero,
+                              childrenPadding: const EdgeInsets.only(bottom: 4),
+                              initiallyExpanded: pastePollinationsKey || apiKey.text.trim().isNotEmpty,
+                              onExpansionChanged: (open) => setState(() => pastePollinationsKey = open),
+                              title: const Text(
+                                'Or paste a secret key',
+                                style: TextStyle(color: Vc.muted, fontSize: 13),
+                              ),
+                              children: [
+                                SecretField(
+                                  controller: apiKey,
+                                  label: 'Pollinations secret key',
+                                  hint: 'sk_… only if you already have one',
+                                  helper: 'Skip this if you used Connect.',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ] else ...[
+                          const SizedBox(height: 10),
+                          SecretField(
+                            controller: apiKey,
+                            label: 'API key',
+                            hint: 'sk-… or provider key',
+                          ),
                         ],
-                        const SizedBox(height: 10),
-                        SecretField(
-                          controller: apiKey,
-                          label: 'API key',
-                          hint: provider.text.trim().toLowerCase() == 'pollinations'
-                              ? 'or paste sk_… (optional if you used Connect)'
-                              : 'sk-… or provider key',
-                          helper: provider.text.trim().toLowerCase() == 'pollinations'
-                              ? 'Connect spends your Pollen. Paste a secret key only if you already have one.'
-                              : null,
-                        ),
                         const SizedBox(height: 8),
                         Align(
                           alignment: Alignment.centerLeft,
