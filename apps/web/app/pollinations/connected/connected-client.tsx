@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
 export function ConnectedClient({
@@ -17,17 +17,16 @@ export function ConnectedClient({
   dashboardHref: string;
 }) {
   const [tried, setTried] = useState(false);
-  const [openHref, setOpenHref] = useState(deepLink);
-
-  useEffect(() => {
-    if (!deepLink) return;
+  const openHref = useMemo(() => {
+    if (!deepLink) return '';
+    if (typeof navigator === 'undefined') return deepLink;
     const android = /Android/i.test(navigator.userAgent);
     const path = instanceId
       ? `pollinations/connected?instance=${encodeURIComponent(instanceId)}`
       : 'pollinations/connected';
-    setOpenHref(
-      android ? `intent://${path}#Intent;scheme=vectra;package=cloud.vectra.vectra_cloud;end` : deepLink,
-    );
+    return android
+      ? `intent://${path}#Intent;scheme=vectra;package=cloud.vectra.vectra_cloud;end`
+      : deepLink;
   }, [deepLink, instanceId]);
 
   useEffect(() => {

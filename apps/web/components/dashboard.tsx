@@ -558,7 +558,7 @@ export function Dashboard({ email }: { email: string }) {
     setApiKey('');
   }
 
-  function useSavedProvider(slot: SavedSlot) {
+  function applySavedProvider(slot: SavedSlot) {
     setProvider(slot.provider);
     setModel(slot.model || '');
     setBaseUrl(slot.baseUrl || stockBaseUrl(slot.provider));
@@ -571,7 +571,7 @@ export function Dashboard({ email }: { email: string }) {
     setSavedProviders((list) => list.filter((s) => s.id !== id));
     if (slotId(provider, baseUrl) === id) {
       const next = savedProviders.find((s) => s.id !== id);
-      if (next) useSavedProvider(next);
+      if (next) applySavedProvider(next);
     }
   }
 
@@ -1334,7 +1334,7 @@ export function Dashboard({ email }: { email: string }) {
                             : 'border-zinc-800 bg-zinc-900 text-zinc-300'
                         }`}
                       >
-                        <button type="button" onClick={() => useSavedProvider(s)}>
+                        <button type="button" onClick={() => applySavedProvider(s)}>
                           {s.provider}
                           {s.model ? ` · ${s.model}` : ''}
                           {s.apiKeyHint ? ` · ${s.apiKeyHint}` : ''}

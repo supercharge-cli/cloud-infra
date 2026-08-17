@@ -99,7 +99,6 @@ export function PollinationsHub() {
     setBusy('');
   }
 
-  const usageEntries = Object.entries(st?.usage || {}).filter(([, v]) => v != null).slice(0, 12);
   const connected = Boolean(st?.connected);
 
   return (
