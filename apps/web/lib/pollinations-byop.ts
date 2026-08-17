@@ -116,7 +116,7 @@ export function authorizeUrl(input: { challenge: string; nonce: string }): strin
     response_type: 'code',
     client_id: key,
     redirect_uri: pollinationsRedirectUri(),
-    scope: 'profile usage',
+    scope: 'profile usage account:usage',
     state: input.nonce,
     code_challenge: input.challenge,
     code_challenge_method: 'S256',

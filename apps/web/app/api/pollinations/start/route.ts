@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
 import {
   applyPollinationsToAllWorkspaces,
+  fetchPollenCatalog,
   fetchPollenProfile,
   publicPollinations,
 } from '@/lib/pollinations-account';
@@ -58,11 +59,20 @@ export async function GET() {
   const pub = publicPollinations(user);
   const instances = (await listInstancesForUser(session.id)).filter((i) => i.status !== 'destroyed');
   const applied = instances.filter((i) => i.config?.provider === 'pollinations' && i.config?.hasApiKey).length;
+  const models = await fetchPollenCatalog().catch(() => []);
   let usage: Record<string, unknown> = {};
-  if (pub.connected && user?.pollinations?.accessToken) {
+  let balance;
+  let recent;
+  let daily;
+  let scopeHint;
+  if (user?.pollinations?.accessToken) {
     try {
       const profile = await fetchPollenProfile(user.pollinations.accessToken);
       usage = profile.usage;
+      balance = profile.balance;
+      recent = profile.recent;
+      daily = profile.daily;
+      scopeHint = profile.scopeHint;
     } catch {
       /* ignore */
     }
@@ -73,6 +83,11 @@ export async function GET() {
     ...pub,
     workspaces: { total: instances.length, applied },
     usage,
+    balance,
+    recent,
+    daily,
+    models,
+    scopeHint,
   });
 }
 

@@ -13,15 +13,27 @@ type Status = {
   expiresAt?: string;
   workspaces?: { total: number; applied: number };
   usage?: Record<string, unknown>;
+  balance?: { remaining?: number; paid?: number; quest?: number; budget?: number; note?: string };
+  recent?: Array<{ at?: string; model?: string; cost?: number; tokens?: number; kind?: string }>;
+  daily?: Array<{ day?: string; cost?: number; requests?: number }>;
+  models?: Array<{
+    name: string;
+    title?: string;
+    category: string;
+    label: string;
+    inPerMillion?: number;
+    outPerMillion?: number;
+    perImage?: number;
+  }>;
+  scopeHint?: string;
   error?: string;
 };
 
-function pretty(v: unknown): string {
-  if (v == null) return '—';
-  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(2);
-  if (typeof v === 'string') return v;
-  if (typeof v === 'object') return JSON.stringify(v);
-  return String(v);
+function pollen(n?: number): string {
+  if (n == null || Number.isNaN(n)) return '—';
+  if (Math.abs(n) >= 100) return n.toFixed(1);
+  if (Math.abs(n) >= 1) return n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+  return n.toPrecision(3);
 }
 
 export function PollinationsHub() {
@@ -162,26 +174,112 @@ export function PollinationsHub() {
             ) : null}
           </>
         )}
+        {st?.scopeHint ? <p className="mt-3 text-xs text-amber-400">{st.scopeHint}</p> : null}
         {msg ? <p className="mt-3 text-xs text-zinc-400">{msg}</p> : null}
       </div>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
         <Stat
+          label="Pollen left"
+          value={pollen(st?.balance?.remaining)}
+          hint={st?.balance?.budget != null ? `Key budget ${pollen(st.balance.budget)}` : 'Remaining on this key'}
+        />
+        <Stat label="Paid Pollen" value={pollen(st?.balance?.paid)} hint="Cash-in balance" />
+        <Stat label="Quest Pollen" value={pollen(st?.balance?.quest)} hint="Free/quest credits" />
+        <Stat
           label="Workspaces"
-          value={
-            st?.workspaces ? `${st.workspaces.applied} / ${st.workspaces.total}` : '—'
-          }
+          value={st?.workspaces ? `${st.workspaces.applied} / ${st.workspaces.total}` : '—'}
           hint="Using this Pollinations key"
         />
-        <Stat
-          label="Status"
-          value={connected ? 'Live' : st?.expired ? 'Expired' : 'Off'}
-          hint={st?.connectedAt ? `Since ${new Date(st.connectedAt).toLocaleDateString()}` : 'Account default'}
-        />
-        {usageEntries.map(([k, v]) => (
-          <Stat key={k} label={k.replace(/_/g, ' ')} value={pretty(v)} hint="From Pollinations" />
-        ))}
       </div>
+
+      {st?.daily && st.daily.length > 0 ? (
+        <section className="mt-8">
+          <h2 className="mb-3 text-sm font-semibold text-white">Daily spend</h2>
+          <div className="overflow-hidden rounded-xl border border-zinc-800">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-zinc-950 text-xs uppercase tracking-wider text-zinc-500">
+                <tr>
+                  <th className="px-3 py-2">Day</th>
+                  <th className="px-3 py-2">Pollen</th>
+                  <th className="px-3 py-2">Requests</th>
+                </tr>
+              </thead>
+              <tbody>
+                {st.daily.map((d, i) => (
+                  <tr key={`${d.day}-${i}`} className="border-t border-zinc-800">
+                    <td className="px-3 py-2 text-zinc-300">{d.day || '—'}</td>
+                    <td className="px-3 py-2 text-white">{pollen(d.cost)}</td>
+                    <td className="px-3 py-2 text-zinc-400">{d.requests ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {st?.recent && st.recent.length > 0 ? (
+        <section className="mt-8">
+          <h2 className="mb-3 text-sm font-semibold text-white">Recent requests</h2>
+          <div className="overflow-hidden rounded-xl border border-zinc-800">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-zinc-950 text-xs uppercase tracking-wider text-zinc-500">
+                <tr>
+                  <th className="px-3 py-2">When</th>
+                  <th className="px-3 py-2">Model</th>
+                  <th className="px-3 py-2">Cost</th>
+                  <th className="px-3 py-2">Tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                {st.recent.map((r, i) => (
+                  <tr key={`${r.at}-${r.model}-${i}`} className="border-t border-zinc-800">
+                    <td className="px-3 py-2 text-zinc-400">
+                      {r.at ? new Date(r.at).toLocaleString() : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-200">{r.model || r.kind || '—'}</td>
+                    <td className="px-3 py-2 text-white">{pollen(r.cost)}</td>
+                    <td className="px-3 py-2 text-zinc-400">{r.tokens ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {st?.models && st.models.length > 0 ? (
+        <section className="mt-8">
+          <h2 className="mb-1 text-sm font-semibold text-white">Model costing</h2>
+          <p className="mb-3 text-xs text-zinc-500">
+            Live from Pollinations. Text is pollen per 1M tokens. Images are pollen per image.
+          </p>
+          <div className="overflow-hidden rounded-xl border border-zinc-800">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-zinc-950 text-xs uppercase tracking-wider text-zinc-500">
+                <tr>
+                  <th className="px-3 py-2">Model</th>
+                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {st.models.slice(0, 80).map((m) => (
+                  <tr key={m.name} className="border-t border-zinc-800">
+                    <td className="px-3 py-2">
+                      <div className="text-white">{m.name}</div>
+                      {m.title ? <div className="text-xs text-zinc-500">{m.title}</div> : null}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-400">{m.category}</td>
+                    <td className="px-3 py-2 text-emerald-300">{m.label}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }

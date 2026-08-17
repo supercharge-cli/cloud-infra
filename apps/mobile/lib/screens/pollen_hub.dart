@@ -87,7 +87,6 @@ class _PollenHubScreenState extends State<PollenHubScreen> {
   Widget build(BuildContext context) {
     final connected = st?['connected'] == true;
     final expired = st?['expired'] == true;
-    final usage = st?['usage'] is Map ? Map<String, dynamic>.from(st!['usage'] as Map) : <String, dynamic>{};
     final workspaces = st?['workspaces'] is Map ? Map<String, dynamic>.from(st!['workspaces'] as Map) : null;
     final title = '${st?['name'] ?? st?['username'] ?? st?['email'] ?? 'Pollinations'}';
 
@@ -180,17 +179,69 @@ class _PollenHubScreenState extends State<PollenHubScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              const SectionTitle('Usage', subtitle: 'Account default for every workspace'),
+              const SectionTitle('Pollen', subtitle: 'Live from your Pollinations key'),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
+                  _chip('Left', _pollen((st?['balance'] as Map?)?['remaining'])),
+                  _chip('Paid', _pollen((st?['balance'] as Map?)?['paid'])),
+                  _chip('Quest', _pollen((st?['balance'] as Map?)?['quest'])),
                   _chip('Workspaces', workspaces == null ? '—' : '${workspaces['applied'] ?? 0}/${workspaces['total'] ?? 0}'),
-                  _chip('Status', connected ? 'Live' : expired ? 'Expired' : 'Off'),
-                  for (final e in usage.entries.take(8))
-                    _chip(e.key.replaceAll('_', ' '), '${e.value}'),
                 ],
               ),
+              if (st?['scopeHint'] != null) ...[
+                const SizedBox(height: 10),
+                Text('${st!['scopeHint']}', style: const TextStyle(color: Vc.amber, fontSize: 12)),
+              ],
+              if ((st?['daily'] as List?)?.isNotEmpty == true) ...[
+                const SizedBox(height: 18),
+                const SectionTitle('Daily spend'),
+                for (final row in (st!['daily'] as List).take(10))
+                  if (row is Map)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('${row['day'] ?? '—'}'),
+                      trailing: Text(
+                        '${_pollen(row['cost'])} · ${row['requests'] ?? 0} req',
+                        style: const TextStyle(color: Vc.muted),
+                      ),
+                    ),
+              ],
+              if ((st?['recent'] as List?)?.isNotEmpty == true) ...[
+                const SizedBox(height: 10),
+                const SectionTitle('Recent requests'),
+                for (final row in (st!['recent'] as List).take(15))
+                  if (row is Map)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('${row['model'] ?? row['kind'] ?? 'request'}'),
+                      subtitle: Text('${row['at'] ?? ''}', style: const TextStyle(color: Vc.faint, fontSize: 11)),
+                      trailing: Text(_pollen(row['cost']), style: const TextStyle(color: Vc.greenSoft)),
+                    ),
+              ],
+              if ((st?['models'] as List?)?.isNotEmpty == true) ...[
+                const SizedBox(height: 10),
+                const SectionTitle('Model costing', subtitle: 'Text = pollen / 1M tokens · image = pollen / image'),
+                for (final row in (st!['models'] as List).take(40))
+                  if (row is Map)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('${row['name']}'),
+                      subtitle: Text('${row['category'] ?? ''}', style: const TextStyle(color: Vc.faint, fontSize: 11)),
+                      trailing: SizedBox(
+                        width: 150,
+                        child: Text(
+                          '${row['label'] ?? ''}',
+                          textAlign: TextAlign.right,
+                          style: const TextStyle(color: Vc.greenSoft, fontSize: 12),
+                        ),
+                      ),
+                    ),
+              ],
             ],
           ),
           if (overlay != null) BusyOverlay(message: overlay!),
@@ -218,6 +269,14 @@ class _PollenHubScreenState extends State<PollenHubScreen> {
       ),
     );
   }
+}
+
+String _pollen(Object? v) {
+  if (v is! num) return '—';
+  final n = v.toDouble();
+  if (n.abs() >= 100) return n.toStringAsFixed(1);
+  if (n.abs() >= 1) return n.toStringAsFixed(3).replaceAll(RegExp(r'0+$'), '').replaceAll(RegExp(r'\.$'), '');
+  return n.toStringAsPrecision(3);
 }
 
 String _shortDate(String raw) {
