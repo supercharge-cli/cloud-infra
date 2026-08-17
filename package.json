@@ -16,6 +16,6 @@
     "start:gateway": "npm run start --prefix apps/gateway"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   }
 }
