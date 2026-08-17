@@ -6,6 +6,7 @@ import { getInstance } from '@/lib/store';
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, ctx: Ctx) {
+  const started = performance.now();
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json({ error: 'Login required' }, { status: 401 });
@@ -17,6 +18,10 @@ export async function GET(_req: Request, ctx: Ctx) {
   }
   try {
     const pairing = await listPairings(inst.sessionId, inst.sandboxId);
+    console.info('[timing] instance pairing', {
+      instanceId: id,
+      ms: Math.round(performance.now() - started),
+    });
     return NextResponse.json({ pairing });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });

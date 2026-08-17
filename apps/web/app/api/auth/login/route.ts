@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createSessionToken, setSessionCookie } from '@/lib/auth';
+import { ensureBootstrapAdminsOnLogin } from '@/lib/mongodb';
 import { authenticateUser, publicUser } from '@/lib/store';
 
 export async function POST(req: Request) {
@@ -12,6 +13,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Email and password required' }, { status: 400 });
     }
 
+    await ensureBootstrapAdminsOnLogin();
     const user = await authenticateUser(email, password);
     if (!user) {
       return NextResponse.json(

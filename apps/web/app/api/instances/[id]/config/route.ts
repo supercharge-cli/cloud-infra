@@ -21,6 +21,7 @@ import {
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, ctx: Ctx) {
+  const started = performance.now();
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json({ error: 'Login required' }, { status: 401 });
@@ -32,6 +33,10 @@ export async function GET(_req: Request, ctx: Ctx) {
   }
   try {
     const sandbox = await readSandboxConfig(inst.sessionId, inst.sandboxId);
+    console.info('[timing] instance config', {
+      instanceId: id,
+      ms: Math.round(performance.now() - started),
+    });
     const wakeSecret = inst.wakeSecret || (await ensureWakeSecret(user.id, id));
     return NextResponse.json({
       instanceId: inst.id,

@@ -69,6 +69,7 @@ async function refreshLiveStates(userId: string, rows: Instance[]): Promise<void
 
 /** List always returns Mongo-owned instances (including paused) so the user can resume. */
 export async function GET() {
+  const started = performance.now();
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json({ error: 'Login required' }, { status: 401 });
@@ -79,6 +80,11 @@ export async function GET() {
   const freeAvailable = Math.max(0, freeLimit - freeUsed);
 
   const rows = await listInstances(user.id);
+  console.info('[timing] instances', {
+    userId: user.id,
+    mongoMs: Math.round(performance.now() - started),
+    count: rows.length,
+  });
 
   // Do not wait on E2B here — one live probe per sandbox is 1–3s and
   // makes the dashboard/app feel like "the DB is slow". Return Mongo

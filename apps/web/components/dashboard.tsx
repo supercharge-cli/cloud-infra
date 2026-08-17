@@ -366,13 +366,8 @@ export function Dashboard({ email }: { email: string }) {
     setBusy(true);
     setLogs('');
     try {
-      const [cRes, pRes, vRes] = await Promise.all([
-        fetch(`/api/instances/${id}/config`),
-        fetch(`/api/instances/${id}/pairing`),
-        fetch(`/api/instances/${id}/cli-version`),
-      ]);
+      const cRes = await fetch(`/api/instances/${id}/config`);
       const cData = await cRes.json();
-      const pData = await pRes.json();
       if (cRes.ok) {
         const s = cData.sandbox as ConfigView | undefined;
         setConfig(s || null);
@@ -403,19 +398,24 @@ export function Dashboard({ email }: { email: string }) {
         setSavedProviders([]);
         setError(cData.error || 'Config load failed');
       }
-      if (pRes.ok) setPairing(pData.pairing);
-      else setPairing({ pending: [], approved: [] });
-
-      if (vRes.ok) {
-        const vData = await vRes.json();
-        setCliUpdate({
-          current: vData.current || null,
-          latest: vData.latest || null,
-          updateAvailable: Boolean(vData.updateAvailable),
-        });
-      } else {
-        setCliUpdate(null);
-      }
+      void fetch(`/api/instances/${id}/pairing`)
+        .then(async (res) => (res.ok ? (await res.json()).pairing : null))
+        .then((value) => value && setPairing(value))
+        .catch(() => setPairing({ pending: [], approved: [] }));
+      void fetch(`/api/instances/${id}/cli-version`)
+        .then(async (res) => (res.ok ? await res.json() : null))
+        .then((value) =>
+          setCliUpdate(
+            value
+              ? {
+                  current: value.current || null,
+                  latest: value.latest || null,
+                  updateAvailable: Boolean(value.updateAvailable),
+                }
+              : null,
+          ),
+        )
+        .catch(() => setCliUpdate(null));
     } finally {
       setBusy(false);
     }

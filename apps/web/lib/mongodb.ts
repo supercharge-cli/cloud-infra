@@ -42,6 +42,7 @@ export function resolveMongoDbName(): string {
 
 export async function getDb(): Promise<Db> {
   if (db) return db;
+  const started = performance.now();
 
   const uri = resolveMongoUri();
   if (!uri) {
@@ -58,16 +59,22 @@ export async function getDb(): Promise<Db> {
 
   client = new MongoClient(uri);
   await client.connect();
+  console.info('[timing] mongodb connect', { ms: Math.round(performance.now() - started) });
   db = client.db(resolveMongoDbName());
+  const indexStarted = performance.now();
   await ensureIndexes(db);
-  // Seed / sync bootstrap admin(s) from ADMIN_EMAILS + ADMIN_BOOTSTRAP_PASSWORD
+  console.info('[timing] mongodb indexes', { ms: Math.round(performance.now() - indexStarted) });
+  return db;
+}
+
+/** Keep bootstrap admin writes off normal authenticated request paths. */
+export async function ensureBootstrapAdminsOnLogin(): Promise<void> {
   try {
     const { ensureBootstrapAdmins } = await import('./store');
-    await ensureBootstrapAdmins(db);
+    await ensureBootstrapAdmins(await getDb());
   } catch (e) {
     console.warn('[mongodb] bootstrap admin skipped:', (e as Error).message);
   }
-  return db;
 }
 
 async function ensureIndexes(database: Db): Promise<void> {

@@ -326,20 +326,26 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       await _fillFromCacheIfMissing();
       await _cacheSecrets();
       _swapModelList(provider.text, resetModel: false);
-      await _refreshLiveModels(provider.text);
-      pairing = await api.pairing(id).catchError((_) => <String, dynamic>{});
-      cli = await api.cliVersion(id).catchError((_) => <String, dynamic>{});
-      try {
-        final st = await api.pollinationsStatus();
-        byopReady = st['configured'] == true;
-        byopConnected = st['connected'] == true;
-      } catch (_) {
-        byopReady = false;
-      }
-      final info = CliVersion.fromJson(cli);
-      if (info.updateAvailable) {
-        await CliUpdateOffer.notifyOnce(instanceId: id, name: inst?.name ?? 'workspace', info: info);
-      }
+      unawaited(_refreshLiveModels(provider.text));
+      unawaited(api.pairing(id).then((value) {
+        if (mounted) setState(() => pairing = value);
+      }).catchError((_) {}));
+      unawaited(api.cliVersion(id).then((value) async {
+        if (!mounted) return;
+        setState(() => cli = value);
+        final info = CliVersion.fromJson(value);
+        if (info.updateAvailable) {
+          await CliUpdateOffer.notifyOnce(instanceId: id, name: inst?.name ?? 'workspace', info: info);
+        }
+      }).catchError((_) {}));
+      unawaited(api.pollinationsStatus().then((st) {
+        if (mounted) {
+          setState(() {
+            byopReady = st['configured'] == true;
+            byopConnected = st['connected'] == true;
+          });
+        }
+      }).catchError((_) {}));
     } catch (e) {
       msg = e.toString();
       await _fillFromCacheIfMissing();
