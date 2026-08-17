@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -165,16 +166,53 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     }
   }
 
+  void _swapModelList(String raw, {bool resetModel = true}) {
+    final choices = modelsForProvider(raw);
+    modelChoices = choices;
+    if (!resetModel) return;
+    final current = model.text.trim();
+    if (choices.isEmpty) return;
+    if (current.isEmpty || !choices.contains(current)) {
+      final def = lookupProviderDefault(raw)?.defaultModel ?? '';
+      model.text = choices.contains(def) ? def : choices.first;
+    }
+  }
+
   void _onProviderPicked(String v) {
     setState(() {
       provider.text = v;
       if (v.trim().toLowerCase() == 'custom') {
         final known = providerDefaults.values.any((d) => urlsMatch(baseUrl.text, d.baseUrl));
         if (known) baseUrl.clear();
+        modelChoices = const [];
         return;
       }
-      _applyProviderDefaults(v);
+      _applyProviderDefaults(v, fillModel: false);
+      _swapModelList(v);
     });
+    unawaited(_refreshLiveModels(v));
+  }
+
+  Future<void> _refreshLiveModels(String raw) async {
+    final id = raw.trim();
+    if (id.isEmpty || id.toLowerCase() == 'custom') return;
+    try {
+      final live = await api.modelsForProvider(id);
+      if (!mounted || provider.text.trim().toLowerCase() != id.toLowerCase()) return;
+      if (live.isEmpty) return;
+      setState(() {
+        final seen = <String>{};
+        modelChoices = [...live, ...modelsForProvider(id)].where((m) {
+          if (m.isEmpty || seen.contains(m)) return false;
+          seen.add(m);
+          return true;
+        }).toList();
+        if (model.text.trim().isEmpty || !modelChoices.contains(model.text.trim())) {
+          final def = lookupProviderDefault(id)?.defaultModel ?? '';
+          model.text = modelChoices.contains(def) ? def : modelChoices.first;
+        }
+      });
+    } catch (_) {}
   }
 
   bool get _showBaseUrl => providerNeedsBaseUrl(provider.text, baseUrl.text);
@@ -186,7 +224,9 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       baseUrl.text = slot['baseUrl'] ?? '';
       if ((slot['apiKey'] ?? '').isNotEmpty) apiKey.text = slot['apiKey']!;
       if (baseUrl.text.trim().isEmpty) _applyProviderDefaults(provider.text, fillModel: false);
+      _swapModelList(provider.text, resetModel: model.text.trim().isEmpty);
     });
+    unawaited(_refreshLiveModels(provider.text));
   }
 
   void _removeSavedProvider(String id) {
@@ -285,7 +325,8 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       allowAll = sandbox['allowAllUsers'] == true || stored['allowAllUsers'] == true;
       await _fillFromCacheIfMissing();
       await _cacheSecrets();
-      modelChoices = await api.models(id).catchError((_) => <String>[]);
+      _swapModelList(provider.text, resetModel: false);
+      await _refreshLiveModels(provider.text);
       pairing = await api.pairing(id).catchError((_) => <String, dynamic>{});
       cli = await api.cliVersion(id).catchError((_) => <String, dynamic>{});
       try {

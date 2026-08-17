@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { BRAND } from '@/lib/brand';
 import {
   lookupProviderDefault,
+  modelsForProvider,
   providerNeedsBaseUrl,
   stockBaseUrl,
 } from '@/lib/provider-defaults';
@@ -386,21 +387,8 @@ export function Dashboard({ email }: { email: string }) {
         setSlackAppToken(s?.slackAppToken || '');
         setAllowAll(Boolean(s?.allowAllUsers));
         setSavedProviders(Array.isArray(s?.savedProviders) ? s.savedProviders : []);
-        fetch(`/api/instances/${id}/models`)
-          .then((r) => r.json())
-          .then((d) => {
-            const live = Array.isArray(d.models) ? (d.models as string[]) : [];
-            const free = Array.isArray(d.free) ? (d.free as string[]) : [];
-            const seen = new Set<string>();
-            const ordered: string[] = [];
-            for (const m of [...free, ...live]) {
-              if (!m || seen.has(m)) continue;
-              seen.add(m);
-              ordered.push(m);
-            }
-            setModelOptions(ordered);
-          })
-          .catch(() => setModelOptions([]));
+        setModelOptions(modelsForProvider(s?.provider || 'pollinations'));
+        void refreshModelsForProvider(s?.provider || 'pollinations');
       } else {
         setConfig(null);
         setProvider('pollinations');
@@ -514,9 +502,37 @@ export function Dashboard({ email }: { email: string }) {
   function applyProviderPick(next: string) {
     setProvider(next);
     const def = lookupProviderDefault(next);
-    if (!def) return;
-    if (def.baseUrl) setBaseUrl(def.baseUrl);
-    if (!model.trim() && def.defaultModel) setModel(def.defaultModel);
+    const choices = modelsForProvider(next);
+    setModelOptions(choices);
+    if (def?.baseUrl) setBaseUrl(def.baseUrl);
+    const current = model.trim();
+    if (!current || (choices.length > 0 && !choices.includes(current))) {
+      setModel(def?.defaultModel && choices.includes(def.defaultModel) ? def.defaultModel : choices[0] || '');
+    }
+    void refreshModelsForProvider(next);
+  }
+
+  async function refreshModelsForProvider(next: string) {
+    const id = next.trim();
+    if (!id || id === 'custom') return;
+    try {
+      const res = await fetch(`/api/models?provider=${encodeURIComponent(id)}`);
+      const data = await res.json();
+      const live = Array.isArray(data.models) ? (data.models as string[]) : [];
+      if (!live.length) return;
+      setModelOptions((prev) => {
+        const seen = new Set<string>();
+        const out: string[] = [];
+        for (const m of [...live, ...prev, ...modelsForProvider(id)]) {
+          if (!m || seen.has(m)) continue;
+          seen.add(m);
+          out.push(m);
+        }
+        return out;
+      });
+    } catch {
+      /* curated already set */
+    }
   }
 
   function upsertLocal(list: SavedSlot[], slot: SavedSlot): SavedSlot[] {
@@ -547,6 +563,8 @@ export function Dashboard({ email }: { email: string }) {
     setModel(slot.model || '');
     setBaseUrl(slot.baseUrl || stockBaseUrl(slot.provider));
     if (slot.apiKey) setApiKey(slot.apiKey);
+    setModelOptions(modelsForProvider(slot.provider));
+    void refreshModelsForProvider(slot.provider);
   }
 
   function removeSavedProvider(id: string) {

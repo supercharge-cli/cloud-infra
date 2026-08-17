@@ -319,6 +319,12 @@ class VectraClient {
     return out;
   }
 
+  Future<List<String>> modelsForProvider(String provider) async {
+    final data = await _json('GET', '/api/models', query: {'provider': provider.trim()}, timeout: _fast);
+    final live = ((data['models'] as List?) ?? const []).map((e) => '$e').toList();
+    return live.where((id) => id.isNotEmpty).toList();
+  }
+
   Future<List<BotCommand>> commands(String id) async {
     final data = await _json('GET', '/api/instances/$id/chat/commands', timeout: _slow);
     final list = (data['commands'] as List?) ?? const [];
