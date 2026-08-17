@@ -243,36 +243,25 @@ class _ToolFoldState extends State<ToolFold> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.expanded) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [for (final ev in widget.tools) ToolLine(event: ev)],
-      );
-    }
     final n = widget.tools.length;
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 4, 56, 4),
-      decoration: BoxDecoration(
-        color: Vc.elevated,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Vc.cardBorder),
-      ),
+      margin: const EdgeInsets.fromLTRB(16, 2, 16, 2),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          initiallyExpanded: open,
+          initiallyExpanded: false,
           onExpansionChanged: (v) => setState(() => open = v),
           dense: true,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-          childrenPadding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
-          leading: const Icon(Icons.check_circle_outline, size: 18, color: Vc.green),
-          title: Text(
-            n == 1 ? '1 tool used' : '$n tools used',
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+          childrenPadding: const EdgeInsets.fromLTRB(0, 0, 0, 6),
+          leading: Icon(
+            widget.expanded ? Icons.more_horiz : Icons.check_circle_outline,
+            size: 16,
+            color: widget.expanded ? Vc.muted : Vc.faint,
           ),
-          subtitle: Text(
-            'Tap to review',
-            style: const TextStyle(color: Vc.muted, fontSize: 11),
+          title: Text(
+            n == 1 ? 'Used 1 tool' : 'Used $n tools',
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Vc.muted),
           ),
           children: [for (final ev in widget.tools) ToolLine(event: ev, inset: true)],
         ),

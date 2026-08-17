@@ -5,9 +5,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api/client.dart';
 import '../api/models.dart';
+import '../api/providers.dart';
 import '../chat/cli_update.dart';
 import '../state/session.dart';
 import '../theme.dart';
@@ -15,6 +17,7 @@ import '../widgets/side_panel.dart';
 import '../widgets/ui.dart';
 
 const _providers = [
+  'pollinations',
   'openai',
   'anthropic',
   'routingrun',
@@ -36,7 +39,7 @@ class InstanceSettingsScreen extends StatefulWidget {
 }
 
 class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
-  final provider = TextEditingController(text: 'openai');
+  final provider = TextEditingController(text: 'pollinations');
   final model = TextEditingController();
   final baseUrl = TextEditingController();
   final apiKey = TextEditingController();
@@ -60,6 +63,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   String? msg;
   bool loading = true;
   bool allowAll = false;
+  bool byopReady = false;
   final history = <ExecResult>[];
 
   VectraClient get api => context.read<SessionController>().client;
@@ -121,7 +125,9 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       'id': _slotId(provider.text, baseUrl.text),
       'provider': provider.text.trim().isEmpty ? 'custom' : provider.text.trim(),
       'model': model.text.trim(),
-      'baseUrl': baseUrl.text.trim(),
+      'baseUrl': (baseUrl.text.trim().isEmpty
+          ? stockBaseUrl(provider.text)
+          : baseUrl.text.trim()),
       'apiKey': apiKey.text.trim(),
     };
   }
@@ -149,12 +155,36 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     });
   }
 
+  void _applyProviderDefaults(String raw, {bool fillModel = true}) {
+    final def = lookupProviderDefault(raw);
+    if (def == null) return;
+    if (def.baseUrl.isNotEmpty) baseUrl.text = def.baseUrl;
+    if (fillModel && model.text.trim().isEmpty && def.defaultModel.isNotEmpty) {
+      model.text = def.defaultModel;
+    }
+  }
+
+  void _onProviderPicked(String v) {
+    setState(() {
+      provider.text = v;
+      if (v.trim().toLowerCase() == 'custom') {
+        final known = providerDefaults.values.any((d) => urlsMatch(baseUrl.text, d.baseUrl));
+        if (known) baseUrl.clear();
+        return;
+      }
+      _applyProviderDefaults(v);
+    });
+  }
+
+  bool get _showBaseUrl => providerNeedsBaseUrl(provider.text, baseUrl.text);
+
   void _useSavedProvider(Map<String, String> slot) {
     setState(() {
       provider.text = slot['provider'] ?? '';
       model.text = slot['model'] ?? '';
       baseUrl.text = slot['baseUrl'] ?? '';
       if ((slot['apiKey'] ?? '').isNotEmpty) apiKey.text = slot['apiKey']!;
+      if (baseUrl.text.trim().isEmpty) _applyProviderDefaults(provider.text, fillModel: false);
     });
   }
 
@@ -224,10 +254,13 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       final stored = cfg['stored'] as Map<String, dynamic>? ?? {};
       final sandbox = cfg['sandbox'] as Map<String, dynamic>? ?? {};
       provider.text = _str(sandbox, stored, 'provider').isEmpty
-          ? 'openai'
+          ? 'pollinations'
           : _str(sandbox, stored, 'provider');
       model.text = _str(sandbox, stored, 'model');
       baseUrl.text = _str(sandbox, stored, 'baseUrl');
+      if (baseUrl.text.trim().isEmpty || model.text.trim().isEmpty) {
+        _applyProviderDefaults(provider.text, fillModel: model.text.trim().isEmpty);
+      }
       apiKey.text = _str(sandbox, stored, 'apiKey');
       final rawSaved = sandbox['savedProviders'] ?? stored['savedProviders'];
       savedProviders = [];
@@ -254,6 +287,12 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       modelChoices = await api.models(id).catchError((_) => <String>[]);
       pairing = await api.pairing(id).catchError((_) => <String, dynamic>{});
       cli = await api.cliVersion(id).catchError((_) => <String, dynamic>{});
+      try {
+        final st = await api.pollinationsStatus();
+        byopReady = st['configured'] == true;
+      } catch (_) {
+        byopReady = false;
+      }
       final info = CliVersion.fromJson(cli);
       if (info.updateAvailable) {
         await CliUpdateOffer.notifyOnce(instanceId: id, name: inst?.name ?? 'workspace', info: info);
@@ -278,12 +317,23 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     if (mounted) setState(() => overlay = null);
   }
 
+  Future<void> _connectPollinations() async {
+    await _run('Opening Pollinations…', () async {
+      final url = await api.pollinationsConnectUrl(id);
+      final ok = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      if (!ok) throw ApiException(0, 'Could not open the browser');
+      msg = 'Finish in the browser. Vectra will open when Pollen is connected.';
+    });
+  }
+
   Future<void> _save() async {
     await _run('Saving config & restarting daemon…', () async {
       await api.saveConfig(id, {
         'provider': provider.text.trim(),
         'model': model.text.trim(),
-        'baseUrl': baseUrl.text.trim(),
+        'baseUrl': (baseUrl.text.trim().isEmpty
+                ? stockBaseUrl(provider.text)
+                : baseUrl.text.trim()),
         'savedProviders': _upsertLocal(savedProviders, _snapshotCurrent()),
         if (apiKey.text.trim().isNotEmpty) 'apiKey': apiKey.text.trim(),
         if (telegram.text.trim().isNotEmpty) 'telegramBotToken': telegram.text.trim(),
@@ -478,7 +528,11 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                     ),
                   ],
                   const SizedBox(height: 20),
-                  const SectionTitle('AI', subtitle: 'Loaded from the sandbox. Edit, then save to restart the daemon.'),
+                  const SectionTitle(
+                    'AI',
+                    subtitle:
+                        'Recommended: Pollinations — spend your own Pollen (we earn a small share). Connect below or paste an sk_ key.',
+                  ),
                   VcPanel(
                     child: Column(
                       children: [
@@ -488,12 +542,19 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                             labelText: 'Provider',
                             suffixIcon: PopupMenuButton<String>(
                               icon: const Icon(Icons.expand_more, color: Vc.muted),
-                              onSelected: (v) => setState(() => provider.text = v),
+                              onSelected: _onProviderPicked,
                               itemBuilder: (_) => [
                                 for (final p in _providers) PopupMenuItem(value: p, child: Text(p)),
                               ],
                             ),
                           ),
+                          onChanged: (v) {
+                            if (lookupProviderDefault(v) != null) {
+                              _onProviderPicked(v);
+                            } else {
+                              setState(() {});
+                            }
+                          },
                         ),
                         const SizedBox(height: 10),
                         TextField(
@@ -513,13 +574,48 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                                   ),
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        TextField(controller: baseUrl, decoration: const InputDecoration(labelText: 'Base URL')),
+                        if (_showBaseUrl) ...[
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: baseUrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Base URL',
+                              hintText: 'https://…/v1',
+                            ),
+                            onChanged: (_) => setState(() {}),
+                          ),
+                        ],
+                        if (provider.text.trim().toLowerCase() == 'pollinations') ...[
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            onPressed: overlay != null || !byopReady ? null : _connectPollinations,
+                            icon: const Icon(Icons.eco_outlined, size: 18),
+                            label: Text(
+                              byopReady ? 'Connect with Pollinations' : 'BYOP not configured on server',
+                            ),
+                          ),
+                          if (!byopReady)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 6),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  'Server needs POLLINATIONS_APP_KEY (pk_…). Paste an sk_ below for now.',
+                                  style: TextStyle(color: Vc.amber, fontSize: 12),
+                                ),
+                              ),
+                            ),
+                        ],
                         const SizedBox(height: 10),
                         SecretField(
                           controller: apiKey,
                           label: 'API key',
-                          hint: 'sk-… or provider key',
+                          hint: provider.text.trim().toLowerCase() == 'pollinations'
+                              ? 'or paste sk_… (optional if you used Connect)'
+                              : 'sk-… or provider key',
+                          helper: provider.text.trim().toLowerCase() == 'pollinations'
+                              ? 'Connect spends your Pollen. Paste a secret key only if you already have one.'
+                              : null,
                         ),
                         const SizedBox(height: 8),
                         Align(

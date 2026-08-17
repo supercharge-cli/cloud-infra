@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -13,6 +14,7 @@ import 'screens/chat.dart';
 import 'screens/instance_settings.dart';
 import 'screens/instances.dart';
 import 'screens/login.dart';
+import 'screens/pollen_connected.dart';
 import 'state/session.dart';
 import 'theme.dart';
 import 'widgets/ui.dart';
@@ -39,6 +41,9 @@ class VectraApp extends StatefulWidget {
 class _VectraAppState extends State<VectraApp> {
   late final SessionController session;
   late final GoRouter router;
+  late final AppLinks _appLinks;
+  StreamSubscription<Uri>? _linkSub;
+  Uri? _pendingLink;
 
   @override
   void initState() {
@@ -50,7 +55,11 @@ class _VectraAppState extends State<VectraApp> {
         if (!session.ready) return null;
         final loggingIn = state.matchedLocation == '/login';
         if (session.user == null) return loggingIn ? null : '/login';
-        if (loggingIn) return '/';
+        if (loggingIn) {
+          final pollen = _pollenInstance(_pendingLink);
+          if (pollen != null) return '/pollinations/connected?instance=$pollen';
+          return '/';
+        }
         return null;
       },
       routes: [
@@ -71,6 +80,12 @@ class _VectraAppState extends State<VectraApp> {
           ),
         ),
         GoRoute(
+          path: '/pollinations/connected',
+          builder: (c, st) => PollenConnectedScreen(
+            instanceId: st.uri.queryParameters['instance'] ?? '',
+          ),
+        ),
+        GoRoute(
           path: '/billing',
           builder: (c, st) {
             final extra = st.extra;
@@ -85,11 +100,45 @@ class _VectraAppState extends State<VectraApp> {
     TaskNotifications.onOpenChat = (id) {
       router.go('/chat/$id');
     };
+    session.addListener(_flushPendingLink);
+    _listenDeepLinks();
     session.load();
+  }
+
+  String? _pollenInstance(Uri? uri) {
+    if (uri == null) return null;
+    if (uri.scheme != 'vectra') return null;
+    if (uri.host != 'pollinations') return null;
+    final id = uri.queryParameters['instance']?.trim() ?? '';
+    return id.isEmpty ? null : id;
+  }
+
+  void _applyLink(Uri uri) {
+    _pendingLink = uri;
+    _flushPendingLink();
+  }
+
+  void _flushPendingLink() {
+    if (!session.ready || session.user == null) return;
+    final id = _pollenInstance(_pendingLink);
+    if (id == null) return;
+    _pendingLink = null;
+    router.go('/pollinations/connected?instance=$id');
+  }
+
+  Future<void> _listenDeepLinks() async {
+    _appLinks = AppLinks();
+    try {
+      final initial = await _appLinks.getInitialLink();
+      if (initial != null) _applyLink(initial);
+    } catch (_) {}
+    _linkSub = _appLinks.uriLinkStream.listen(_applyLink, onError: (_) {});
   }
 
   @override
   void dispose() {
+    _linkSub?.cancel();
+    session.removeListener(_flushPendingLink);
     session.dispose();
     router.dispose();
     super.dispose();

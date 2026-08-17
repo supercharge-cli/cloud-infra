@@ -3,6 +3,11 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { BRAND } from '@/lib/brand';
+import {
+  lookupProviderDefault,
+  providerNeedsBaseUrl,
+  stockBaseUrl,
+} from '@/lib/provider-defaults';
 import type { Instance } from '@/lib/store';
 
 type SavedSlot = {
@@ -121,10 +126,10 @@ export function Dashboard({ email }: { email: string }) {
   const [cliDismissed, setCliDismissed] = useState<Record<string, string>>({});
 
   // form fields
-  const [provider, setProvider] = useState('openai');
+  const [provider, setProvider] = useState('pollinations');
   const [apiKey, setApiKey] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [model, setModel] = useState('');
+  const [baseUrl, setBaseUrl] = useState('https://gen.pollinations.ai/v1');
+  const [model, setModel] = useState('openai');
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [telegramToken, setTelegramToken] = useState('');
   const [discordToken, setDiscordToken] = useState('');
@@ -133,6 +138,7 @@ export function Dashboard({ email }: { email: string }) {
   const [allowAll, setAllowAll] = useState(false);
   const [pairCode, setPairCode] = useState('');
   const [savedProviders, setSavedProviders] = useState<SavedSlot[]>([]);
+  const [byopReady, setByopReady] = useState(false);
 
   // Command pane (shell in sandbox)
   const [cmdInput, setCmdInput] = useState('');
@@ -197,7 +203,23 @@ export function Dashboard({ email }: { email: string }) {
     } catch {
       setCurrency('INR');
     }
-    refresh().finally(() => setLoading(false));
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const pre = sp.get('selected');
+      if (pre) setSelected(pre);
+    } catch {
+      /* ignore */
+    }
+    fetch('/api/pollinations/start')
+      .then((r) => r.json())
+      .then((d) => setByopReady(Boolean(d.configured)))
+      .catch(() => setByopReady(false));
+    refresh()
+      .then(() => {
+        const pre = new URLSearchParams(window.location.search).get('selected');
+        if (pre) return loadDetail(pre);
+      })
+      .finally(() => setLoading(false));
   }, [refresh]);
 
   const priceLabel =
@@ -356,7 +378,7 @@ export function Dashboard({ email }: { email: string }) {
         // Prefill form with whatever is already on the sandbox (env + profile).
         setProvider(s?.provider || 'openai');
         setModel(s?.model || '');
-        setBaseUrl(s?.baseUrl || '');
+        setBaseUrl(s?.baseUrl || stockBaseUrl(s?.provider || 'openai'));
         setApiKey(s?.apiKey || '');
         setTelegramToken(s?.telegramBotToken || '');
         setDiscordToken(s?.discordBotToken || '');
@@ -381,9 +403,9 @@ export function Dashboard({ email }: { email: string }) {
           .catch(() => setModelOptions([]));
       } else {
         setConfig(null);
-        setProvider('openai');
-        setModel('');
-        setBaseUrl('');
+        setProvider('pollinations');
+        setModel('openai');
+        setBaseUrl(stockBaseUrl('pollinations'));
         setApiKey('');
         setTelegramToken('');
         setDiscordToken('');
@@ -479,13 +501,22 @@ export function Dashboard({ email }: { email: string }) {
   }
 
   function snapshotCurrent(): SavedSlot {
+    const url = baseUrl.trim() || stockBaseUrl(provider);
     return {
-      id: slotId(provider, baseUrl),
+      id: slotId(provider, url),
       provider: provider.trim() || 'custom',
       model: model || undefined,
-      baseUrl: baseUrl || undefined,
+      baseUrl: url || undefined,
       apiKey: apiKey || undefined,
     };
+  }
+
+  function applyProviderPick(next: string) {
+    setProvider(next);
+    const def = lookupProviderDefault(next);
+    if (!def) return;
+    if (def.baseUrl) setBaseUrl(def.baseUrl);
+    if (!model.trim() && def.defaultModel) setModel(def.defaultModel);
   }
 
   function upsertLocal(list: SavedSlot[], slot: SavedSlot): SavedSlot[] {
@@ -514,7 +545,7 @@ export function Dashboard({ email }: { email: string }) {
   function useSavedProvider(slot: SavedSlot) {
     setProvider(slot.provider);
     setModel(slot.model || '');
-    setBaseUrl(slot.baseUrl || '');
+    setBaseUrl(slot.baseUrl || stockBaseUrl(slot.provider));
     if (slot.apiKey) setApiKey(slot.apiKey);
   }
 
@@ -539,7 +570,7 @@ export function Dashboard({ email }: { email: string }) {
         body: JSON.stringify({
           provider,
           apiKey: apiKey || undefined,
-          baseUrl,
+          baseUrl: baseUrl.trim() || stockBaseUrl(provider),
           model,
           savedProviders: slots,
           telegramBotToken: telegramToken || undefined,
@@ -1169,20 +1200,46 @@ export function Dashboard({ email }: { email: string }) {
               </p>
             ) : null}
             <p className="mb-3 text-xs text-zinc-500">
-              Values below are loaded from the sandbox env. Edit any field, then save — the coding
-              bot restarts automatically. The Flutter app chats through the first-party inbox (no
-              bot token). Telegram, Discord, and Slack stay optional extras.
+              Recommended: <strong className="text-zinc-300">Pollinations</strong> — spend
+              your own Pollen (we earn a small share). Huge free/cheap model list.{' '}
+              <a
+                href="https://enter.pollinations.ai/keys"
+                target="_blank"
+                rel="noreferrer"
+                className="text-emerald-400 underline"
+              >
+                Get an API key
+              </a>{' '}
+              or connect below. Telegram / Discord / Slack stay optional.
             </p>
+            {selected ? (
+              <div className="mb-3">
+                {byopReady ? (
+                  <a
+                    href={`/pollinations/connect?instance=${encodeURIComponent(selected)}`}
+                    className="inline-flex w-full items-center justify-center rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 sm:w-auto"
+                  >
+                    Connect with Pollinations
+                  </a>
+                ) : (
+                  <p className="text-xs text-amber-400">
+                    BYOP not configured yet (server needs POLLINATIONS_APP_KEY). Paste an{' '}
+                    <code>sk_</code> below.
+                  </p>
+                )}
+              </div>
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Provider">
                 <input
                   list="ai-providers"
                   value={provider}
-                  onChange={(e) => setProvider(e.target.value)}
-                  placeholder="openai, anthropic, routingrun, openrouter…"
+                  onChange={(e) => applyProviderPick(e.target.value)}
+                  placeholder="pollinations (recommended), openai, openrouter…"
                   className="field"
                 />
                 <datalist id="ai-providers">
+                  <option value="pollinations" />
                   <option value="openai" />
                   <option value="anthropic" />
                   <option value="routingrun" />
@@ -1208,24 +1265,36 @@ export function Dashboard({ email }: { email: string }) {
                   ))}
                 </datalist>
               </Field>
-              <Field label="API key">
+              <Field
+                label={
+                  provider.trim().toLowerCase() === 'pollinations'
+                    ? 'API key (enter.pollinations.ai/keys)'
+                    : 'API key'
+                }
+              >
                 <input
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   type="text"
                   autoComplete="off"
-                  placeholder="sk-… or provider key"
+                  placeholder={
+                    provider.trim().toLowerCase() === 'pollinations'
+                      ? 'or paste sk_… (optional if you used Connect)'
+                      : 'sk-… or provider key'
+                  }
                   className="field"
                 />
               </Field>
-              <Field label="Base URL (optional)">
-                <input
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="https://api.openai.com/v1"
-                  className="field"
-                />
-              </Field>
+              {providerNeedsBaseUrl(provider, baseUrl) ? (
+                <Field label="Base URL">
+                  <input
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    placeholder="https://…/v1"
+                    className="field"
+                  />
+                </Field>
+              ) : null}
               <div className="sm:col-span-2">
                 <p className="mb-2 text-xs text-zinc-500">
                   Saved providers keep their own key and URL (like Hermes). Add another without

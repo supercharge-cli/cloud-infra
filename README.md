@@ -30,6 +30,7 @@ cloud-infra/
 | `XIBECODE_SANDBOX_GATEWAY_URL` | public HTTPS gateway URL |
 | `XIBECODE_GATEWAY_TOKEN` | same secret as gateway |
 | `PUBLIC_BASE_URL` | public site origin (Telegram wake) |
+| `POLLINATIONS_APP_KEY` | Pollinations BYOP App Key (`pk_…`) — server only |
 | `CRON_SECRET` | auth for `/api/cron/arm-telegram-wake` (required on Vercel) |
 | `E2B_LIFECYCLE_WEBHOOK_SECRET` | optional but recommended; E2B lifecycle → arm TG wake on pause |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | server keys |

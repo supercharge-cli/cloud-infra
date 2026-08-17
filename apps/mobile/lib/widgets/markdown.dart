@@ -6,7 +6,7 @@ import '../theme.dart';
 
 MarkdownStyleSheet chatMarkdownSheet(BuildContext context) {
   return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-    p: const TextStyle(color: Colors.white, height: 1.45, fontSize: 15),
+    p: const TextStyle(color: Colors.white, height: 1.55, fontSize: 16),
     h1: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 22, height: 1.3),
     h2: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 19, height: 1.3),
     h3: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16, height: 1.3),
@@ -55,8 +55,8 @@ class ChatMarkdown extends StatelessWidget {
       styleSheet: chatMarkdownSheet(context).copyWith(
         p: TextStyle(
           color: Colors.white,
-          height: 1.45,
-          fontSize: soft ? 13 : 15,
+          height: 1.55,
+          fontSize: soft ? 13 : 16,
         ),
       ),
       onTapLink: (text, href, title) {

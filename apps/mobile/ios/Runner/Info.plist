@@ -49,5 +49,18 @@
 	<string>Vectra saves images from your sandbox chat to the photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Vectra saves images from your sandbox chat to the photo library.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>cloud.vectra.vectra_cloud</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>vectra</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

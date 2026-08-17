@@ -726,8 +726,8 @@ export async function writeSandboxConfig(
   }
 
   const provider =
-    (input.provider || existing.provider || 'openai').replace(/[^a-z0-9_-]/gi, '') ||
-    'openai';
+    (input.provider || existing.provider || 'pollinations').replace(/[^a-z0-9_-]/gi, '') ||
+    'pollinations';
   const model = (input.model ?? existing.model ?? '').trim();
   const baseUrl = (input.baseUrl ?? existing.baseUrl ?? '').trim();
 

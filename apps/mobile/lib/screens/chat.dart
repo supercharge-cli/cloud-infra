@@ -336,6 +336,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       sending = false;
       showKickoff = false;
     }
+    if ((ev.type == 'ask' || ev.type == 'approve') && !answered.contains(ev.ref ?? ev.id)) {
+      unawaited(TaskNotifications.showPermissionNeed(
+        instanceId: id,
+        name: instanceName,
+        body: ev.text,
+        kind: ev.type,
+      ));
+    }
     if (ev.type == 'text' && ev.text.isNotEmpty) lastAssistantText = ev.text;
     if (ev.type == 'text' && _isModelSwitchNote(ev.text) && _justPickedModel) {
       _persist();
@@ -443,6 +451,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<List<AppChatEvent>> _grouped() {
     final groups = <List<AppChatEvent>>[];
     for (final ev in events) {
+      if ((ev.type == 'ask' || ev.type == 'approve') && answered.contains(ev.ref ?? ev.id)) {
+        continue;
+      }
       if (ev.type == 'tool' && groups.isNotEmpty && groups.last.first.type == 'tool') {
         groups.last.add(ev);
       } else {
@@ -450,6 +461,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     }
     return groups;
+  }
+
+  void _resolve(AppChatEvent ev) {
+    setState(() => answered.add(ev.ref ?? ev.id));
+    _persist();
   }
 
   @override
@@ -730,8 +746,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
     );
     if (text == null || text.isEmpty) return;
-    setState(() => answered.add(ev.ref ?? ev.id));
-    _persist();
+    _resolve(ev);
     await api.answer(id, ref: ev.ref, answer: text);
   }
 
@@ -883,16 +898,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
             },
             child: Container(
-              margin: const EdgeInsets.fromLTRB(56, 5, 12, 5),
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-              decoration: const BoxDecoration(
-                color: Vc.greenDim,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  topRight: Radius.circular(16),
-                  bottomLeft: Radius.circular(16),
-                  bottomRight: Radius.circular(5),
-                ),
+              margin: const EdgeInsets.fromLTRB(64, 8, 16, 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2A2D33),
+                borderRadius: BorderRadius.circular(18),
               ),
               child: ChatMarkdown(data: ev.text),
             ),
@@ -918,8 +928,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       onPressed: locked
                           ? null
                           : () {
-                              setState(() => answered.add(ev.ref ?? ev.id));
-                              _persist();
+                              _resolve(ev);
                               api.approve(id, c);
                             },
                       child: Text(c),
@@ -973,27 +982,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return const SizedBox.shrink();
       default:
         if (ev.text.isEmpty) return const SizedBox.shrink();
-        return Align(
-          alignment: Alignment.centerLeft,
-          child: GestureDetector(
-            onLongPress: () {
-              Clipboard.setData(ClipboardData(text: ev.text));
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
-            },
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(12, 5, 56, 5),
-              padding: const EdgeInsets.all(12),
-              decoration: const BoxDecoration(
-                color: Vc.card,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  topRight: Radius.circular(16),
-                  bottomLeft: Radius.circular(5),
-                  bottomRight: Radius.circular(16),
-                ),
-              ),
-              child: ChatMarkdown(data: ev.text),
-            ),
+        return GestureDetector(
+          onLongPress: () {
+            Clipboard.setData(ClipboardData(text: ev.text));
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+          },
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+            child: ChatMarkdown(data: ev.text),
           ),
         );
     }
@@ -1045,8 +1041,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             ? null
                             : () {
                                 final abs = start + i + j;
-                                setState(() => answered.add(ev.ref ?? ev.id));
-                                _persist();
+                                _resolve(ev);
                                 api.answer(id, ref: ev.ref, index: abs, answer: choices[abs]);
                               },
                         child: Text(
@@ -1191,13 +1186,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  String _liveLabel() {
-    final m = elapsed.inMinutes;
-    final s = elapsed.inSeconds % 60;
-    final clock = m <= 0 ? '${s}s' : '${m}m ${s.toString().padLeft(2, '0')}s';
-    return 'Working · $clock · $toolCount tool${toolCount == 1 ? '' : 's'}';
-  }
-
   String _fmtTokens(int n) {
     if (n < 1000) return '$n';
     if (n < 10000) return '${(n / 1000).toStringAsFixed(1)}k';
@@ -1258,62 +1246,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       child: AppScaffold(
         currentInstanceId: id,
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(instanceName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-            if (working)
-              Text(_liveLabel(), style: const TextStyle(fontSize: 11, color: Vc.green, fontWeight: FontWeight.w600))
-            else if (inst != null)
-              Row(
-                children: [
-                  StatusDot(inst!.displayState, size: 7),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      _usageText == null
-                          ? inst!.displayState
-                          : '${inst!.displayState} · $_usageText',
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, color: _usageText == null ? Vc.muted : _usageColor),
-                    ),
-                  ),
-                ],
-              ),
-          ],
-        ),
+        title: Text(instanceName, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
         actions: [
           if (_usageText != null)
             Padding(
               padding: const EdgeInsets.only(right: 4),
               child: Center(
                 child: Tooltip(
-                  message: usagePct != null ? 'Context ${usagePct}% of model window' : 'Context usage',
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _usageColor.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      usagePct != null ? '$_usageText · $usagePct%' : _usageText!,
-                      style: TextStyle(color: _usageColor, fontSize: 11, fontWeight: FontWeight.w800),
-                    ),
+                  message: usagePct != null ? 'Context $usagePct% of model window' : 'Context usage',
+                  child: Text(
+                    usagePct != null ? '$_usageText · $usagePct%' : _usageText!,
+                    style: TextStyle(color: _usageColor, fontSize: 12, fontWeight: FontWeight.w600),
                   ),
-                ),
-              ),
-            ),
-          if (working)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Vc.green.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text('$progressPct%', style: const TextStyle(color: Vc.green, fontSize: 11, fontWeight: FontWeight.w800)),
                 ),
               ),
             ),
@@ -1358,32 +1302,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     : events.isEmpty && !connecting && !showKickoff
                         ? const EmptyState(
                             icon: Icons.chat_bubble_outline,
-                            title: 'Start coding',
-                            detail: 'Send a message, /command, or attach a file. Same agent as Telegram.',
+                            title: 'What should we work on?',
+                            detail: 'Ask anything. Attach a file or type / for commands.',
                           )
                         : Builder(
                             builder: (ctx) {
                               final groups = _grouped();
-                              final extra = showKickoff ? 1 : 0;
-                              final n = groups.length + extra;
                               return ListView.builder(
                                 controller: _scroll,
                                 reverse: true,
-                                padding: const EdgeInsets.only(bottom: 12, top: 8),
-                                itemCount: n,
+                                padding: const EdgeInsets.only(bottom: 8, top: 8),
+                                itemCount: groups.length,
                                 itemBuilder: (ctx, i) {
-                                  final logical = n - 1 - i;
-                                  if (showKickoff && logical == groups.length) {
-                                    return const Padding(
-                                      padding: EdgeInsets.fromLTRB(12, 8, 12, 8),
-                                      child: TypingDots(label: 'on it'),
-                                    );
-                                  }
+                                  final logical = groups.length - 1 - i;
                                   final batch = groups[logical];
                                   if (batch.first.type == 'tool') {
                                     final lastGroup = logical == groups.length - 1;
-                                    final live = working && lastGroup;
-                                    return ToolFold(tools: batch, expanded: live);
+                                    return ToolFold(tools: batch, expanded: working && lastGroup);
                                   }
                                   return _bubble(batch.first);
                                 },
@@ -1410,77 +1345,80 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 )
               else
                 SafeArea(
-                  child: Container(
-                    color: Vc.bg,
-                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Material(
-                          color: Vc.elevated,
-                          shape: const CircleBorder(),
-                          child: IconButton(
-                            onPressed: _commands,
-                            icon: const Icon(Icons.tag, color: Vc.muted, size: 20),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Vc.elevated,
-                              borderRadius: BorderRadius.circular(22),
-                              border: Border.all(color: Vc.cardBorder),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                IconButton(
-                                  onPressed: sending ? null : _attach,
-                                  icon: const Icon(Icons.attach_file, color: Vc.muted, size: 20),
-                                ),
-                                Expanded(
-                                  child: TextField(
-                                    controller: _input,
-                                    minLines: 1,
-                                    maxLines: 5,
-                                    textInputAction: TextInputAction.newline,
-                                    decoration: const InputDecoration(
-                                      hintText: 'xibecode reading...',
-                                      border: InputBorder.none,
-                                      enabledBorder: InputBorder.none,
-                                      focusedBorder: InputBorder.none,
-                                      filled: false,
-                                      contentPadding: EdgeInsets.fromLTRB(0, 12, 8, 12),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                        if (working || showKickoff)
+                          const Padding(
+                            padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
+                            child: Text(
+                              'Thinking…',
+                              style: TextStyle(color: Vc.muted, fontSize: 13, fontWeight: FontWeight.w500),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        Material(
-                          color: sending || (_input.text.trim().isEmpty && pending.isEmpty)
-                              ? Vc.elevated
-                              : Vc.green,
-                          shape: const CircleBorder(),
-                          child: IconButton(
-                            onPressed: sending || (_input.text.trim().isEmpty && pending.isEmpty)
-                                ? null
-                                : () => _send(),
-                            icon: sending
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Vc.green),
-                                  )
-                                : Icon(
-                                    Icons.arrow_upward_rounded,
-                                    color: sending || (_input.text.trim().isEmpty && pending.isEmpty)
-                                        ? Vc.faint
-                                        : Colors.black,
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Vc.elevated,
+                            borderRadius: BorderRadius.circular(26),
+                            border: Border.all(color: Vc.cardBorder),
+                          ),
+                          padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              IconButton(
+                                tooltip: 'Attach',
+                                onPressed: sending ? null : _attach,
+                                icon: const Icon(Icons.add, color: Vc.muted, size: 22),
+                              ),
+                              Expanded(
+                                child: TextField(
+                                  controller: _input,
+                                  minLines: 1,
+                                  maxLines: 6,
+                                  textInputAction: TextInputAction.newline,
+                                  decoration: const InputDecoration(
+                                    hintText: 'Message',
+                                    border: InputBorder.none,
+                                    enabledBorder: InputBorder.none,
+                                    focusedBorder: InputBorder.none,
+                                    filled: false,
+                                    contentPadding: EdgeInsets.fromLTRB(0, 10, 8, 10),
                                   ),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Commands',
+                                onPressed: _commands,
+                                icon: const Icon(Icons.alternate_email, color: Vc.muted, size: 20),
+                              ),
+                              Material(
+                                color: sending || (_input.text.trim().isEmpty && pending.isEmpty)
+                                    ? Vc.card
+                                    : Colors.white,
+                                shape: const CircleBorder(),
+                                child: IconButton(
+                                  onPressed: sending || (_input.text.trim().isEmpty && pending.isEmpty)
+                                      ? null
+                                      : () => _send(),
+                                  icon: sending
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(strokeWidth: 2, color: Vc.muted),
+                                        )
+                                      : Icon(
+                                          Icons.arrow_upward_rounded,
+                                          size: 20,
+                                          color: sending || (_input.text.trim().isEmpty && pending.isEmpty)
+                                              ? Vc.faint
+                                              : Colors.black,
+                                        ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],

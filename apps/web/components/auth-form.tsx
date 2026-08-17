@@ -37,7 +37,13 @@ function passwordStrength(pw: string): { score: number; label: string; color: st
   return { score, label: 'Strong', color: 'bg-emerald-500' };
 }
 
-export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
+export function AuthForm({
+  mode,
+  returnTo,
+}: {
+  mode: 'login' | 'signup';
+  returnTo?: string | null;
+}) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -73,7 +79,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
         setError(data.error || 'Request failed');
         return;
       }
-      router.push(BRAND.dashboard);
+      router.push(returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : BRAND.dashboard);
       router.refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -297,7 +303,11 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
                 <>
                   Already have an account?{' '}
                   <Link
-                    href={BRAND.login}
+                    href={
+                      returnTo
+                        ? `${BRAND.login}?returnTo=${encodeURIComponent(returnTo)}`
+                        : BRAND.login
+                    }
                     className="font-medium text-orange-400 hover:text-orange-300"
                   >
                     Sign in
@@ -307,7 +317,11 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
                 <>
                   New here?{' '}
                   <Link
-                    href={BRAND.signup}
+                    href={
+                      returnTo
+                        ? `${BRAND.signup}?returnTo=${encodeURIComponent(returnTo)}`
+                        : BRAND.signup
+                    }
                     className="font-medium text-orange-400 hover:text-orange-300"
                   >
                     Create an account

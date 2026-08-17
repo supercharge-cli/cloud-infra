@@ -21,9 +21,11 @@ class TaskNotifications {
   static const progressId = 7101;
   static const doneId = 7102;
   static const cliUpdateId = 7103;
+  static const permissionId = 7104;
   static const progressChannel = 'vectra_task_progress';
   static const doneChannel = 'vectra_task_done';
   static const cliUpdateChannel = 'vectra_cli_update';
+  static const permissionChannel = 'vectra_permission';
 
   static String get _label =>
       'Working · ${_fmt(_elapsed)} · $_tools tool${_tools == 1 ? '' : 's'}';
@@ -256,6 +258,43 @@ class TaskNotifications {
           icon: '@drawable/ic_stat_vectra',
         ),
         iOS: const DarwinNotificationDetails(),
+      ),
+      payload: instanceId,
+    );
+  }
+
+  static Future<void> showPermissionNeed({
+    required String instanceId,
+    required String name,
+    required String body,
+    String kind = 'approve',
+  }) async {
+    await init();
+    final snippet = body.trim().isEmpty
+        ? (kind == 'ask' ? 'The agent needs an answer.' : 'The agent needs approval.')
+        : body.trim();
+    await _plugin.show(
+      id: permissionId,
+      title: kind == 'ask' ? '$name needs an answer' : '$name needs approval',
+      body: snippet.length > 180 ? '${snippet.substring(0, 177)}…' : snippet,
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          permissionChannel,
+          'Approvals',
+          channelDescription: 'Heads-up when the agent asks for permission or a choice',
+          importance: Importance.high,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+          silent: false,
+          icon: '@drawable/ic_stat_vectra',
+          category: AndroidNotificationCategory.alarm,
+        ),
+        iOS: const DarwinNotificationDetails(
+          presentAlert: true,
+          presentSound: true,
+          presentBadge: true,
+        ),
       ),
       payload: instanceId,
     );
