@@ -20,8 +20,8 @@ export default async function PollinationsConnectedPage({
       instanceId={instanceId}
       fromApp={fromApp}
       error={error}
-      deepLink={instanceId ? appDeepLink(instanceId) : ''}
-      dashboardHref={instanceId ? `${BRAND.dashboard}?selected=${encodeURIComponent(instanceId)}` : BRAND.dashboard}
+      deepLink={appDeepLink(instanceId || undefined)}
+      dashboardHref="/pollinations"
     />
   );
 }

@@ -366,15 +366,21 @@ class VectraClient {
   Future<Map<String, dynamic>> pollinationsStatus() =>
       _json('GET', '/api/pollinations/start', timeout: _fast);
 
-  Future<String> pollinationsConnectUrl(String instanceId) async {
+  Future<String> pollinationsConnectUrl([String? instanceId]) async {
     final data = await _json('POST', '/api/pollinations/start', body: {
-      'instanceId': instanceId,
+      if (instanceId != null && instanceId.isNotEmpty) 'instanceId': instanceId,
       'fromApp': true,
     });
     final url = '${data['url'] ?? ''}';
     if (url.isEmpty) throw ApiException(500, 'Connect URL missing');
     return url;
   }
+
+  Future<void> pollinationsDisconnect() =>
+      _json('DELETE', '/api/pollinations/start', timeout: _fast);
+
+  Future<Map<String, dynamic>> pollinationsApplyAll() =>
+      _json('PUT', '/api/pollinations/start', timeout: _slow);
 
   Stream<AppChatEvent> events(String id, {String? since}) async* {
     final uri = _u('/api/instances/$id/chat/events', {

@@ -1,12 +1,17 @@
 import { NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
 import {
+  applyPollinationsToAllWorkspaces,
+  fetchPollenProfile,
+  publicPollinations,
+} from '@/lib/pollinations-account';
+import {
   byopConfigured,
   connectPageUrl,
   pollinationsRedirectUri,
   signTicket,
 } from '@/lib/pollinations-byop';
-import { getInstance } from '@/lib/store';
+import { findUserById, listInstancesForUser, setUserPollinations } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,16 +35,8 @@ export async function POST(req: Request) {
     instanceId?: string;
     fromApp?: boolean;
   };
-  const instanceId = String(body.instanceId || '').trim();
-  if (!instanceId) {
-    return NextResponse.json({ error: 'instanceId required' }, { status: 400 });
-  }
-  const inst = await getInstance(user.id, instanceId);
-  if (!inst || inst.status === 'destroyed') {
-    return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
-  }
-
   const fromApp = body.fromApp !== false;
+  const instanceId = String(body.instanceId || '').trim() || undefined;
   const ticket = signTicket({ userId: user.id, instanceId, fromApp });
   return NextResponse.json({
     ok: true,
@@ -49,8 +46,55 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
+  const session = await getSessionUser();
+  if (!session) {
+    return NextResponse.json({
+      configured: byopConfigured(),
+      connected: false,
+      redirectUri: pollinationsRedirectUri(),
+    });
+  }
+  const user = await findUserById(session.id);
+  const pub = publicPollinations(user);
+  const instances = (await listInstancesForUser(session.id)).filter((i) => i.status !== 'destroyed');
+  const applied = instances.filter((i) => i.config?.provider === 'pollinations' && i.config?.hasApiKey).length;
+  let usage: Record<string, unknown> = {};
+  if (pub.connected && user?.pollinations?.accessToken) {
+    try {
+      const profile = await fetchPollenProfile(user.pollinations.accessToken);
+      usage = profile.usage;
+    } catch {
+      /* ignore */
+    }
+  }
   return NextResponse.json({
     configured: byopConfigured(),
     redirectUri: pollinationsRedirectUri(),
+    ...pub,
+    workspaces: { total: instances.length, applied },
+    usage,
   });
+}
+
+export async function DELETE() {
+  const session = await getSessionUser();
+  if (!session) {
+    return NextResponse.json({ error: 'Login required' }, { status: 401 });
+  }
+  await setUserPollinations(session.id, null);
+  return NextResponse.json({ ok: true, connected: false });
+}
+
+export async function PUT() {
+  const session = await getSessionUser();
+  if (!session) {
+    return NextResponse.json({ error: 'Login required' }, { status: 401 });
+  }
+  const user = await findUserById(session.id);
+  const token = user?.pollinations?.accessToken;
+  if (!token) {
+    return NextResponse.json({ error: 'Not connected' }, { status: 400 });
+  }
+  const result = await applyPollinationsToAllWorkspaces(session.id, token);
+  return NextResponse.json({ ok: true, ...result });
 }

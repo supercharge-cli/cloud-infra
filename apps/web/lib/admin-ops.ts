@@ -73,6 +73,8 @@ export async function adminProvisionInstance(input: {
     sandboxId: session.sandboxId,
   });
   await bootstrapAppInbox(session.sessionId, session.sandboxId).catch(() => undefined);
+  const { applySavedPollinationsToNewInstance } = await import('@/lib/pollinations-account');
+  await applySavedPollinationsToNewInstance({ userId, instance }).catch(() => undefined);
 
   const withBilling = await adminUpdateInstance(instance.id, {
     paidUntil,

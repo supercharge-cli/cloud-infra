@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../api/client.dart';
 import '../api/models.dart';
@@ -64,6 +63,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   bool loading = true;
   bool allowAll = false;
   bool byopReady = false;
+  bool byopConnected = false;
   bool pastePollinationsKey = false;
   final history = <ExecResult>[];
 
@@ -291,6 +291,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       try {
         final st = await api.pollinationsStatus();
         byopReady = st['configured'] == true;
+        byopConnected = st['connected'] == true;
       } catch (_) {
         byopReady = false;
       }
@@ -319,12 +320,8 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   }
 
   Future<void> _connectPollinations() async {
-    await _run('Opening Pollinations…', () async {
-      final url = await api.pollinationsConnectUrl(id);
-      final ok = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-      if (!ok) throw ApiException(0, 'Could not open the browser');
-      msg = 'Finish in the browser. Vectra will open when Pollen is connected.';
-    });
+    if (!mounted) return;
+    context.push('/pollinations');
   }
 
   Future<void> _save() async {
@@ -621,18 +618,18 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                         if (provider.text.trim().toLowerCase() == 'pollinations') ...[
                           const SizedBox(height: 12),
                           FilledButton.icon(
-                            onPressed: overlay != null || !byopReady ? null : _connectPollinations,
-                            icon: const Icon(Icons.eco_outlined, size: 18),
-                            label: Text(
-                              byopReady ? 'Connect with Pollinations' : 'BYOP not configured on server',
-                            ),
+                            onPressed: overlay != null ? null : _connectPollinations,
+                            icon: Icon(byopConnected ? Icons.check_circle_outline : Icons.eco_outlined, size: 18),
+                            label: Text(byopConnected ? 'Connected · manage' : 'Connect with Pollinations'),
                           ),
                           const SizedBox(height: 6),
-                          const Align(
+                          Align(
                             alignment: Alignment.centerLeft,
                             child: Text(
-                              'Opens the site, you approve, then Vectra comes back connected. No key to paste.',
-                              style: TextStyle(color: Vc.muted, fontSize: 12, height: 1.35),
+                              byopConnected
+                                  ? 'This account key applies to every workspace. Disconnect anytime on the Pollinations page.'
+                                  : 'Connect once for every VM. Approve on the site — no key to paste.',
+                              style: const TextStyle(color: Vc.muted, fontSize: 12, height: 1.35),
                             ),
                           ),
                           Theme(

@@ -153,6 +153,10 @@ export async function fulfillPaidOrder(input: {
     sandboxId: session.sandboxId,
   });
   await bootstrapAppInbox(session.sessionId, session.sandboxId).catch(() => undefined);
+  const { applySavedPollinationsToNewInstance } = await import('@/lib/pollinations-account');
+  await applySavedPollinationsToNewInstance({ userId: order.userId, instance }).catch(
+    () => undefined,
+  );
   const withBilling = await updateInstance(order.userId, instance.id, {
     paidUntil,
     billingStatus: 'active',

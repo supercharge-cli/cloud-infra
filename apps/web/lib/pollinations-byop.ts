@@ -9,7 +9,7 @@ const TOKEN_URL = 'https://enter.pollinations.ai/api/oauth/token';
 
 export type ByopTicket = {
   userId: string;
-  instanceId: string;
+  instanceId?: string;
   fromApp: boolean;
   exp: number;
 };
@@ -92,7 +92,7 @@ export function signTicket(input: Omit<ByopTicket, 'exp'>): string {
 export function verifyTicket(raw: string | null | undefined): ByopTicket | null {
   if (!raw) return null;
   const p = decodeSigned<ByopTicket>(raw);
-  if (!p?.userId || !p.instanceId) return null;
+  if (!p?.userId) return null;
   return p;
 }
 
@@ -106,7 +106,7 @@ export function signOauthState(input: Omit<ByopOauthState, 'exp'>): string {
 export function verifyOauthState(raw: string | null | undefined): ByopOauthState | null {
   if (!raw) return null;
   const p = decodeSigned<ByopOauthState>(raw);
-  if (!p?.userId || !p.instanceId || !p.verifier || !p.nonce) return null;
+  if (!p?.userId || !p.verifier || !p.nonce) return null;
   return p;
 }
 
@@ -166,18 +166,21 @@ export function connectPageUrl(opts: { ticket?: string; instanceId?: string; fro
 }
 
 export function connectedPageUrl(opts: {
-  instanceId: string;
+  instanceId?: string;
   fromApp?: boolean;
   error?: string;
 }): string {
-  const q = new URLSearchParams({ instance: opts.instanceId });
+  const q = new URLSearchParams();
+  if (opts.instanceId) q.set('instance', opts.instanceId);
   if (opts.fromApp) q.set('from', 'app');
   if (opts.error) q.set('error', opts.error);
-  return `${siteBaseUrl()}/pollinations/connected?${q.toString()}`;
+  const qs = q.toString();
+  return `${siteBaseUrl()}/pollinations/connected${qs ? `?${qs}` : ''}`;
 }
 
-export function appDeepLink(instanceId: string): string {
-  return `${APP_SCHEME}?instance=${encodeURIComponent(instanceId)}`;
+export function appDeepLink(instanceId?: string): string {
+  if (instanceId) return `${APP_SCHEME}?instance=${encodeURIComponent(instanceId)}`;
+  return APP_SCHEME;
 }
 
 /** Only same-site relative paths. Blocks open redirects. */

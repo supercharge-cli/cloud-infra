@@ -193,6 +193,8 @@ export async function POST(req: Request) {
     await bootstrapAppInbox(session.sessionId, session.sandboxId, instance.id).catch(
       () => undefined,
     );
+    const { applySavedPollinationsToNewInstance } = await import('@/lib/pollinations-account');
+    await applySavedPollinationsToNewInstance({ userId: user.id, instance }).catch(() => undefined);
 
     return NextResponse.json(
       {

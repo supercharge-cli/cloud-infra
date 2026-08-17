@@ -170,6 +170,12 @@ class _VectraSidePanelState extends State<VectraSidePanel> {
               onTap: () => _go('/billing'),
             ),
             _item(
+              icon: Icons.eco_outlined,
+              label: 'Pollinations',
+              selected: GoRouterState.of(context).uri.path.startsWith('/pollinations'),
+              onTap: () => _go('/pollinations'),
+            ),
+            _item(
               icon: Icons.language,
               label: 'Website',
               onTap: () {

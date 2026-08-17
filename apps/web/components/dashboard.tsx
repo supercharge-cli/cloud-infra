@@ -1209,26 +1209,18 @@ export function Dashboard({ email }: { email: string }) {
                 pay another API.
               </p>
             </div>
-            {selected ? (
-              <div className="mb-3">
-                {byopReady ? (
-                  <a
-                    href={`/pollinations/connect?instance=${encodeURIComponent(selected)}`}
-                    className="inline-flex w-full items-center justify-center rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 sm:w-auto"
-                  >
-                    Connect with Pollinations
-                  </a>
-                ) : (
-                  <p className="text-xs text-amber-400">
-                    BYOP not configured yet (server needs POLLINATIONS_APP_KEY).
-                  </p>
-                )}
-                <p className="mt-1.5 text-xs text-zinc-500">
-                  Approve on the site — no secret key to paste. Telegram / Discord / Slack stay
-                  optional.
-                </p>
-              </div>
-            ) : null}
+            <div className="mb-3">
+              <a
+                href="/pollinations"
+                className="inline-flex w-full items-center justify-center rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 sm:w-auto"
+              >
+                {byopReady ? 'Pollinations · connect once for every VM' : 'Open Pollinations'}
+              </a>
+              <p className="mt-1.5 text-xs text-zinc-500">
+                One account connect applies to this workspace and every new one. Manage usage and
+                disconnect there.
+              </p>
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Provider">
                 <input

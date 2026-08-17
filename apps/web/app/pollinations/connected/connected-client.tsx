@@ -20,12 +20,13 @@ export function ConnectedClient({
   const [openHref, setOpenHref] = useState(deepLink);
 
   useEffect(() => {
-    if (!deepLink || !instanceId) return;
+    if (!deepLink) return;
     const android = /Android/i.test(navigator.userAgent);
+    const path = instanceId
+      ? `pollinations/connected?instance=${encodeURIComponent(instanceId)}`
+      : 'pollinations/connected';
     setOpenHref(
-      android
-        ? `intent://pollinations/connected?instance=${encodeURIComponent(instanceId)}#Intent;scheme=vectra;package=cloud.vectra.vectra_cloud;end`
-        : deepLink,
+      android ? `intent://${path}#Intent;scheme=vectra;package=cloud.vectra.vectra_cloud;end` : deepLink,
     );
   }, [deepLink, instanceId]);
 
@@ -67,8 +68,8 @@ export function ConnectedClient({
         </p>
         <h1 className="mt-2 text-2xl font-semibold">Pollen connected</h1>
         <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-          This workspace now spends your Pollinations balance. Keys last about 7 days — reconnect
-          anytime. {fromApp ? 'Opening Vectra…' : 'You can close this tab or open the instance.'}
+          Pollinations is now the default for every workspace you create. Keys last about 7
+          days — reconnect anytime. {fromApp ? 'Opening Vectra…' : 'Open the Pollinations page for usage.'}
         </p>
         {fromApp && openHref ? (
           <a
@@ -82,7 +83,7 @@ export function ConnectedClient({
           href={dashboardHref}
           className="mt-3 inline-flex w-full items-center justify-center rounded-lg border border-zinc-800 px-4 py-2.5 text-sm text-zinc-300"
         >
-          {instanceId ? 'Open on the website' : 'Go to dashboard'}
+          Usage & disconnect
         </Link>
       </div>
     </main>

@@ -34,12 +34,7 @@ class _PollenConnectedScreenState extends State<PollenConnectedScreen>
 
   void _go() {
     if (!mounted) return;
-    final id = widget.instanceId;
-    if (id.isEmpty) {
-      context.go('/');
-      return;
-    }
-    context.go('/instance/$id');
+    context.go('/pollinations');
   }
 
   @override

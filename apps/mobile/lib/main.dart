@@ -15,6 +15,7 @@ import 'screens/instance_settings.dart';
 import 'screens/instances.dart';
 import 'screens/login.dart';
 import 'screens/pollen_connected.dart';
+import 'screens/pollen_hub.dart';
 import 'state/session.dart';
 import 'theme.dart';
 import 'widgets/ui.dart';
@@ -35,6 +36,7 @@ String? pollenAppPath(Uri? uri) {
       parsed.scheme == 'vectra' &&
       (parsed.host.toLowerCase() == 'pollinations' || blob.contains('pollinations/connected'));
   if (!looksPollen) return null;
+  if (!blob.contains('connected')) return '/pollinations';
   final id = parsed.queryParameters['instance']?.trim() ?? '';
   if (id.isEmpty) return '/pollinations/connected';
   return '/pollinations/connected?instance=${Uri.encodeQueryComponent(id)}';
@@ -109,6 +111,7 @@ class _VectraAppState extends State<VectraApp> {
             instance: st.extra is CloudInstance ? st.extra as CloudInstance : null,
           ),
         ),
+        GoRoute(path: '/pollinations', builder: (c, st) => const PollenHubScreen()),
         GoRoute(
           path: '/pollinations/connected',
           builder: (c, st) => PollenConnectedScreen(

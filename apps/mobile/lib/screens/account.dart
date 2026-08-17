@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -43,6 +44,16 @@ class AccountScreen extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          VcPanel(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: ListTile(
+              title: const Text('Pollinations'),
+              subtitle: const Text('Connect once for every workspace · usage', style: TextStyle(color: Vc.muted, fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right, color: Vc.muted),
+              onTap: () => context.push('/pollinations'),
             ),
           ),
           const SizedBox(height: 12),

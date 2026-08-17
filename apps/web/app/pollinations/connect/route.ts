@@ -38,7 +38,7 @@ export async function GET(req: Request) {
   const claimed = verifyTicket(ticket);
   if (claimed) {
     userId = claimed.userId;
-    instanceId = claimed.instanceId;
+    instanceId = claimed.instanceId || '';
     app = claimed.fromApp;
   } else {
     const user = await getSessionUser();
@@ -54,20 +54,18 @@ export async function GET(req: Request) {
     userId = user.id;
   }
 
-  if (!instanceId) {
-    return NextResponse.redirect(new URL(`${BRAND.dashboard}?error=missing_instance`, url.origin));
-  }
-
-  const inst = await getInstance(userId, instanceId);
-  if (!inst || inst.status === 'destroyed') {
-    return NextResponse.redirect(new URL(`${BRAND.dashboard}?error=instance_not_found`, url.origin));
+  if (instanceId) {
+    const inst = await getInstance(userId, instanceId);
+    if (!inst || inst.status === 'destroyed') {
+      instanceId = '';
+    }
   }
 
   const verifier = pkceVerifier();
   const nonce = pkceVerifier();
   const signed = signOauthState({
     userId,
-    instanceId,
+    instanceId: instanceId || undefined,
     fromApp: app,
     verifier,
     nonce,

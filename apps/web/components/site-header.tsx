@@ -45,6 +45,12 @@ export function SiteHeader() {
               >
                 Dashboard
               </Link>
+              <Link
+                href="/pollinations"
+                className="rounded-md px-3 py-2 text-zinc-400 transition hover:bg-zinc-900 hover:text-white"
+              >
+                Pollinations
+              </Link>
               {user.role === 'admin' ? (
                 <Link
                   href={BRAND.admin}

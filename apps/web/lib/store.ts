@@ -4,12 +4,23 @@ import { hashPassword, verifyPassword } from './auth';
 
 export type UserRole = 'admin' | 'user';
 
+export type UserPollinations = {
+  accessToken: string;
+  connectedAt: string;
+  expiresAt?: string;
+  username?: string;
+  name?: string;
+  email?: string;
+  picture?: string;
+};
+
 export type User = {
   id: string;
   email: string;
   passwordHash: string;
   role?: UserRole;
   createdAt: string;
+  pollinations?: UserPollinations;
 };
 
 /** Public user shape (no password hash). */
@@ -203,6 +214,19 @@ export async function findUserByEmail(email: string): Promise<User | null> {
 export async function findUserById(id: string): Promise<User | null> {
   const db = await getDb();
   return db.collection<User>('users').findOne({ id });
+}
+
+export async function setUserPollinations(
+  userId: string,
+  pollinations: UserPollinations | null,
+): Promise<User | null> {
+  const db = await getDb();
+  if (pollinations) {
+    await db.collection<User>('users').updateOne({ id: userId }, { $set: { pollinations } });
+  } else {
+    await db.collection<User>('users').updateOne({ id: userId }, { $unset: { pollinations: '' } });
+  }
+  return findUserById(userId);
 }
 
 export async function authenticateUser(
