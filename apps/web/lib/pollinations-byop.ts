@@ -120,6 +120,8 @@ export function authorizeUrl(input: { challenge: string; nonce: string }): strin
     state: input.nonce,
     code_challenge: input.challenge,
     code_challenge_method: 'S256',
+    expiry: '150',
+    budget: '10',
   });
   return `${AUTHORIZE}?${params.toString()}`;
 }

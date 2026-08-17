@@ -371,7 +371,7 @@ export async function saveAccountPollinations(input: {
   const expiresAt =
     typeof input.expiresIn === 'number' && input.expiresIn > 0
       ? new Date(now.getTime() + input.expiresIn * 1000).toISOString()
-      : new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      : new Date(now.getTime() + 150 * 24 * 60 * 60 * 1000).toISOString();
   const rec: UserPollinations = {
     accessToken: input.accessToken,
     connectedAt: now.toISOString(),
