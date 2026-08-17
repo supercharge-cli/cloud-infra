@@ -11,6 +11,7 @@ import {
   newTelegramWebhookSecret,
   SANDBOX_TG_WEBHOOK_PORT,
 } from '@/lib/sandbox-telegram';
+import { parseSavedProviders } from '@/lib/saved-providers';
 import { ensureWakeSecret, getInstance, updateInstance } from '@/lib/store';
 import {
   publicBaseUrl,
@@ -111,7 +112,9 @@ export async function PUT(req: Request, ctx: Ctx) {
       apiKey: body.apiKey,
       baseUrl: body.baseUrl,
       model: body.model,
-      savedProviders: body.savedProviders,
+      savedProviders: Array.isArray(body.savedProviders)
+        ? parseSavedProviders(body.savedProviders)
+        : undefined,
       telegramBotToken: body.telegramBotToken,
       discordBotToken: body.discordBotToken,
       slackBotToken: body.slackBotToken,
