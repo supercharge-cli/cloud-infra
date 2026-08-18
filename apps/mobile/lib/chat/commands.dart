@@ -7,6 +7,7 @@ const defaultBotCommands = <BotCommand>[
   BotCommand(command: 'reset', description: 'Clear conversation (same as /new)'),
   BotCommand(command: 'clear', description: 'Clear conversation (same as /new)'),
   BotCommand(command: 'stop', description: 'Interrupt run + kill active commands'),
+  BotCommand(command: 'compact', description: 'Compact context and write a run handoff'),
   BotCommand(command: 'status', description: 'Workdir, busy state, progress'),
   BotCommand(command: 'queue', description: 'List or clear queued messages'),
   BotCommand(command: 'workdir', description: 'Show or set project directory'),
@@ -27,7 +28,7 @@ const defaultBotCommands = <BotCommand>[
   BotCommand(command: 'deny', description: 'Deny a pending dangerous command'),
 ];
 
-final _slashOnly = {'start', 'help', 'new', 'reset', 'clear', 'stop', 'status', 'queue', 'models', 'skills', 'update', 'mode'};
+final _slashOnly = {'start', 'help', 'new', 'reset', 'clear', 'stop', 'compact', 'status', 'queue', 'models', 'skills', 'update', 'mode'};
 
 bool commandSendsImmediately(String command) => _slashOnly.contains(command);
 
