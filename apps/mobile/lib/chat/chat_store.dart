@@ -105,14 +105,16 @@ class ChatStore {
     return path;
   }
 
-  Future<String?> existingMedia(String fileId, String? name) async {
+  Future<String?> existingMedia(String fileId) async {
     final dir = await mediaDir();
     if (!await dir.exists()) return null;
+    final prefix = '${fileId}_';
     await for (final entity in dir.list()) {
       if (entity is! File) continue;
       final base = entity.uri.pathSegments.last;
-      if (base.startsWith('${fileId}_')) return entity.path;
-      if (name != null && base.endsWith(name) && await entity.exists()) return entity.path;
+      // Match only this fileId prefix — never fall back to basename
+      // (two uploads named photo.jpg must not swap).
+      if (base.startsWith(prefix)) return entity.path;
     }
     return null;
   }

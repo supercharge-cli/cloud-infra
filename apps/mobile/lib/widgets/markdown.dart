@@ -42,9 +42,15 @@ MarkdownStyleSheet chatMarkdownSheet(BuildContext context) {
 }
 
 class ChatMarkdown extends StatelessWidget {
-  const ChatMarkdown({super.key, required this.data, this.soft = false});
+  const ChatMarkdown({
+    super.key,
+    required this.data,
+    this.soft = false,
+    this.onTapHref,
+  });
   final String data;
   final bool soft;
+  final bool Function(String href)? onTapHref;
 
   @override
   Widget build(BuildContext context) {
@@ -61,6 +67,7 @@ class ChatMarkdown extends StatelessWidget {
       ),
       onTapLink: (text, href, title) {
         if (href == null) return;
+        if (onTapHref != null && onTapHref!(href)) return;
         launchUrl(Uri.parse(href), mode: LaunchMode.externalApplication);
       },
     );

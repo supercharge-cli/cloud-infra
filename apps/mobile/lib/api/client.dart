@@ -207,6 +207,46 @@ class VectraClient {
   Future<void> sendChat(String id, String text) =>
       _json('POST', '/api/instances/$id/chat', body: {'text': text}, timeout: _slow);
 
+  Future<String?> publishMedia(
+    String id, {
+    required String name,
+    required Uint8List bytes,
+    String? mime,
+  }) async {
+    final uri = _u('/api/instances/$id/media');
+    final req = http.MultipartRequest('POST', uri);
+    req.headers.addAll({
+      if (token != null && token!.isNotEmpty) 'authorization': 'Bearer $token',
+    });
+    req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: name));
+    try {
+      final streamed = await req.send().timeout(const Duration(seconds: 90));
+      final res = await http.Response.fromStream(streamed);
+      if (res.statusCode >= 400) return null;
+      final decoded = jsonDecode(res.body);
+      if (decoded is Map && decoded['url'] is String) {
+        final url = (decoded['url'] as String).trim();
+        return url.isEmpty ? null : url;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<String?> previewHost(String id, {int port = 3000}) async {
+    try {
+      final data = await _json(
+        'GET',
+        '/api/instances/$id/preview',
+        query: {'port': '$port'},
+        timeout: _fast,
+      );
+      final host = '${data['host'] ?? ''}'.trim();
+      return host.isEmpty ? null : host;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> stopChat(String id) =>
       _json('POST', '/api/instances/$id/chat/stop', timeout: _fast);
 
@@ -247,36 +287,31 @@ class VectraClient {
       }
       return;
     }
-    final uri = _u('/api/instances/$id/chat/upload');
-    final req = http.MultipartRequest('POST', uri);
-    req.headers.addAll({
-      if (token != null && token!.isNotEmpty) 'authorization': 'Bearer $token',
-    });
-    if (caption != null && caption.isNotEmpty) req.fields['text'] = caption;
+    final payload = <Map<String, String>>[];
     for (final f in files.take(12)) {
-      req.files.add(http.MultipartFile.fromBytes('file', f.bytes, filename: f.name));
+      final image = (f.mime ?? '').toLowerCase().startsWith('image/') ||
+          RegExp(r'\.(png|jpe?g|gif|webp|bmp)$', caseSensitive: false).hasMatch(f.name);
+      if (image) {
+        final url = await publishMedia(id, name: f.name, bytes: f.bytes, mime: f.mime);
+        if (url != null) {
+          payload.add({
+            'name': f.name,
+            if (f.mime != null) 'mime': f.mime!,
+            'url': url,
+          });
+          continue;
+        }
+      }
+      payload.add({
+        'name': f.name,
+        if (f.mime != null) 'mime': f.mime!,
+        'contentBase64': base64Encode(f.bytes),
+      });
     }
-    late http.StreamedResponse streamed;
-    try {
-      streamed = await req.send().timeout(const Duration(seconds: 90));
-    } on TimeoutException {
-      throw ApiException(0, 'Upload timed out');
-    } on http.ClientException catch (e) {
-      throw ApiException(0, 'Network error: ${e.message}');
-    }
-    final res = await http.Response.fromStream(streamed);
-    if (res.statusCode >= 400) {
-      Map<String, dynamic> data = {};
-      try {
-        final decoded = jsonDecode(res.body);
-        if (decoded is Map<String, dynamic>) data = decoded;
-      } catch (_) {}
-      throw ApiException(
-        res.statusCode,
-        _friendlyError(res.statusCode, data, res.reasonPhrase),
-        code: data['code'] as String?,
-      );
-    }
+    await _json('POST', '/api/instances/$id/chat', body: {
+      if (caption != null && caption.isNotEmpty) 'text': caption,
+      'files': payload,
+    }, timeout: _slow);
   }
 
   Future<DownloadedFile> downloadFile(String id, String fileId) async {

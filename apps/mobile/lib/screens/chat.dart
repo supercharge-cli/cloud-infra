@@ -19,6 +19,8 @@ import '../chat/cli_update.dart';
 import '../chat/commands.dart';
 import '../chat/draft.dart';
 import '../chat/notifications.dart';
+import '../chat/preview_urls.dart';
+import '../screens/preview.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/file_viewer.dart';
@@ -60,6 +62,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String? lastServerId;
   String? lastAssistantText;
   DateTime? turnStartedAt;
+  Duration? lastTurnElapsed;
+  bool pinnedToLatest = true;
   int toolCount = 0;
   int? usageUsed;
   int? usageMax;
@@ -84,6 +88,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     super.initState();
     store = ChatStore(id);
     WidgetsBinding.instance.addObserver(this);
+    _scroll.addListener(_onUserScroll);
     _input.addListener(() {
       if (mounted) setState(() {});
     });
@@ -216,7 +221,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         reconnecting = false;
         _ingest(ev);
       });
-      _scrollToEnd();
+      if (pinnedToLatest) _scrollToEnd();
     }, onError: (e) {
       if (!mounted) return;
       if (backgrounded) {
@@ -361,12 +366,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     }
     if (ev.type == 'file' && ev.role == 'user') {
-      final i = events.lastIndexWhere(
-        (e) => e.isUser && (e.type == 'file' || e.type == 'user') && e.name == ev.name && e.fileId == null,
-      );
-      if (i >= 0) {
-        events[i].raw['fileId'] = ev.fileId;
-        events[i].raw['kind'] = ev.kind ?? events[i].kind;
+      final unmatched = <int>[];
+      for (var i = 0; i < events.length; i++) {
+        final e = events[i];
+        if (e.isUser && e.type == 'file' && e.fileId == null && e.local) {
+          unmatched.add(i);
+        }
+      }
+      int? match;
+      for (final i in unmatched.reversed) {
+        if (events[i].name == ev.name) {
+          match = i;
+          break;
+        }
+      }
+      if (match == null && unmatched.length == 1) match = unmatched.first;
+      if (match != null) {
+        events[match].raw['fileId'] = ev.fileId;
+        events[match].raw['kind'] = ev.kind ?? events[match].kind;
         _persist();
         return;
       }
@@ -408,6 +425,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _endTurn({bool error = false, String? body}) {
     sending = false;
     showKickoff = false;
+    if (turnStartedAt != null) {
+      lastTurnElapsed = DateTime.now().difference(turnStartedAt!);
+    }
     turnStartedAt = null;
     _tick?.cancel();
     _tick = null;
@@ -433,7 +453,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _scrollToEnd({bool instant = false}) {
+  void _onUserScroll() {
+    if (!_scroll.hasClients) return;
+    final atLatest = _scroll.offset <= 80;
+    if (atLatest != pinnedToLatest && mounted) {
+      setState(() => pinnedToLatest = atLatest);
+    }
+  }
+
+  void _scrollToEnd({bool instant = false, bool force = false}) {
+    if (!force && !pinnedToLatest) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
       if (instant) {
@@ -446,6 +475,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         curve: Curves.easeOut,
       );
     });
+  }
+
+  void _jumpToLatest() {
+    setState(() => pinnedToLatest = true);
+    _scrollToEnd(force: true);
   }
 
   List<List<AppChatEvent>> _grouped() {
@@ -475,6 +509,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _sub?.cancel();
     _tick?.cancel();
     _input.dispose();
+    _scroll.removeListener(_onUserScroll);
     _scroll.dispose();
     unawaited(store.save(events: events, answered: answered, lastServerId: lastServerId));
     if (turnStartedAt == null) {
@@ -548,7 +583,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     });
     _persist();
-    _scrollToEnd();
+    setState(() => pinnedToLatest = true);
+    _scrollToEnd(force: true);
     try {
       if (drafts.isEmpty) {
         await api.sendChat(id, t);
@@ -597,7 +633,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final fileId = ev.fileId;
     if (fileId == null) return;
     if (ev.localPath != null && File(ev.localPath!).existsSync()) return;
-    final cached = await store.existingMedia(fileId, ev.name);
+    final cached = await store.existingMedia(fileId);
     if (cached != null) {
       if (!mounted) return;
       setState(() => ev.setLocalPath(cached));
@@ -904,7 +940,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 color: const Color(0xFF2A2D33),
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: ChatMarkdown(data: ev.text),
+              child: ChatMarkdown(data: ev.text, onTapHref: _handleHref),
             ),
           ),
         );
@@ -982,14 +1018,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return const SizedBox.shrink();
       default:
         if (ev.text.isEmpty) return const SizedBox.shrink();
+        final shown = rewriteLocalhostUrls(ev.text, _sandboxId);
+        final previews = extractPreviewUrls(shown);
         return GestureDetector(
           onLongPress: () {
-            Clipboard.setData(ClipboardData(text: ev.text));
+            Clipboard.setData(ClipboardData(text: shown));
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
           },
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-            child: ChatMarkdown(data: ev.text),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ChatMarkdown(data: shown, onTapHref: _handleHref),
+                if (previews.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final u in previews.take(3))
+                          OutlinedButton.icon(
+                            onPressed: () => _openPreview(u),
+                            icon: const Icon(Icons.language, size: 16),
+                            label: const Text('Open preview'),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
           ),
         );
     }
@@ -1201,6 +1259,64 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return null;
   }
 
+  String _fmtClock(Duration d) {
+    final m = d.inMinutes;
+    final s = d.inSeconds % 60;
+    if (d.inHours > 0) return '${d.inHours}h ${m % 60}m';
+    if (m > 0) return '${m}m ${s.toString().padLeft(2, '0')}s';
+    return '${s}s';
+  }
+
+  String? get _headerClock {
+    if (working) {
+      final t = _fmtClock(elapsed);
+      if (toolCount <= 0) return t;
+      return '$t · $toolCount tool${toolCount == 1 ? '' : 's'}';
+    }
+    if (lastTurnElapsed != null) return _fmtClock(lastTurnElapsed!);
+    return null;
+  }
+
+  String? get _sandboxId => inst?.sandboxId ?? widget.instance?.sandboxId;
+
+  String? _latestPreviewUrl() {
+    for (final ev in events.reversed) {
+      if (ev.text.isEmpty) continue;
+      final found = extractPreviewUrls(ev.text);
+      if (found.isNotEmpty) return found.last;
+    }
+    final sid = _sandboxId;
+    if (sid != null && sid.isNotEmpty) {
+      return buildPreviewUrl(sandboxId: sid, port: 3000);
+    }
+    return null;
+  }
+
+  bool _handleHref(String href) {
+    if (!isPreviewUrl(href) && !href.contains('localhost') && !href.contains('127.0.0.1')) {
+      return false;
+    }
+    final sid = _sandboxId;
+    final url = isPreviewUrl(href)
+        ? href
+        : rewriteLocalhostUrls(href, sid);
+    _openPreview(url);
+    return true;
+  }
+
+  void _openPreview([String? url]) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PreviewBrowserScreen(
+          instanceName: instanceName,
+          initialUrl: url ?? _latestPreviewUrl(),
+          sandboxId: _sandboxId,
+          resolvePort: (port) => api.previewHost(id, port: port),
+        ),
+      ),
+    );
+  }
+
   Color get _usageColor {
     final p = usagePct ?? 0;
     if (p >= 90) return Vc.red;
@@ -1246,7 +1362,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       child: AppScaffold(
         currentInstanceId: id,
       appBar: AppBar(
-        title: Text(instanceName, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              instanceName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: -0.3),
+            ),
+            if (_headerClock != null)
+              Text(
+                _headerClock!,
+                style: TextStyle(
+                  color: working ? Vc.greenSoft : Vc.muted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+          ],
+        ),
         actions: [
           if (_usageText != null)
             Padding(
@@ -1261,6 +1396,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+          IconButton(
+            tooltip: 'Preview',
+            onPressed: () => _openPreview(),
+            icon: const Icon(Icons.language),
+          ),
           if (working)
             IconButton(
               tooltip: 'Stop',
@@ -1427,6 +1567,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
             ],
           ),
+          if (!pinnedToLatest && events.isNotEmpty)
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 112),
+                child: Material(
+                  color: Vc.elevated,
+                  borderRadius: BorderRadius.circular(999),
+                  elevation: 4,
+                  child: InkWell(
+                    onTap: _jumpToLatest,
+                    borderRadius: BorderRadius.circular(999),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.arrow_downward, size: 16, color: Vc.green),
+                          SizedBox(width: 6),
+                          Text('Jump to latest', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           if (connecting && events.isEmpty)
             BusyOverlay(
               message: connectLabel,
