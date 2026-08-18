@@ -3,9 +3,10 @@ import '../api/models.dart';
 const defaultBotCommands = <BotCommand>[
   BotCommand(command: 'start', description: 'Welcome + list commands'),
   BotCommand(command: 'help', description: 'Show available commands'),
-  BotCommand(command: 'new', description: 'Clear conversation (keep workdir)'),
-  BotCommand(command: 'reset', description: 'Clear conversation (same as /new)'),
-  BotCommand(command: 'clear', description: 'Clear conversation (same as /new)'),
+  BotCommand(command: 'new', description: 'Start a new conversation (keeps previous in history)'),
+  BotCommand(command: 'reset', description: 'Start a new conversation (same as /new)'),
+  BotCommand(command: 'clear', description: 'Start a new conversation (same as /new)'),
+  BotCommand(command: 'history', description: 'List or reopen past conversations'),
   BotCommand(command: 'stop', description: 'Interrupt run + kill active commands'),
   BotCommand(command: 'compact', description: 'Compact context and write a run handoff'),
   BotCommand(command: 'status', description: 'Workdir, busy state, progress'),
@@ -28,7 +29,7 @@ const defaultBotCommands = <BotCommand>[
   BotCommand(command: 'deny', description: 'Deny a pending dangerous command'),
 ];
 
-final _slashOnly = {'start', 'help', 'new', 'reset', 'clear', 'stop', 'compact', 'status', 'queue', 'models', 'skills', 'update', 'mode'};
+final _slashOnly = {'start', 'help', 'new', 'reset', 'clear', 'stop', 'compact', 'status', 'queue', 'history', 'models', 'skills', 'update', 'mode'};
 
 bool commandSendsImmediately(String command) => _slashOnly.contains(command);
 

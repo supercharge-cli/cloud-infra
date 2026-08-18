@@ -437,6 +437,31 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
         msg = 'CLI update finished.';
       });
 
+  Future<void> _recreateSandbox() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Move to a new sandbox?'),
+        content: const Text(
+          'Creates a new machine from the latest template. Chat, files, API keys, and settings come with you. node_modules is skipped. Preview links change. About 1–3 minutes.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Move')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _run('Moving workspace to a new sandbox…', () async {
+      final result = await api.recreateSandbox(id);
+      inst = await api.getInstance(id);
+      final newId = '${result['sandboxId'] ?? inst?.sandboxId ?? ''}';
+      msg = newId.isEmpty
+          ? 'Moved to a new sandbox.'
+          : 'Moved to a new sandbox ($newId). Preview links changed.';
+    });
+  }
+
   Future<void> _destroy() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -836,6 +861,21 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                           child: const SizedBox(
                             width: double.infinity,
                             child: Text('Update CLI & restart', textAlign: TextAlign.center),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton(
+                          onPressed: overlay == null ? _recreateSandbox : null,
+                          child: const SizedBox(
+                            width: double.infinity,
+                            child: Text('Move to new sandbox', textAlign: TextAlign.center),
+                          ),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.only(top: 8),
+                          child: Text(
+                            'Use this after a template update. Keeps chat, files, and API keys. Skips node_modules.',
+                            style: TextStyle(color: Vc.muted, fontSize: 12),
                           ),
                         ),
                       ],

@@ -173,6 +173,51 @@ export async function ensureGatewaySession(
   });
 }
 
+export async function recreateSandboxSession(
+  sessionId: string,
+  opts?: { sandboxId?: string },
+): Promise<{
+  ok: boolean;
+  sessionId: string;
+  oldSandboxId?: string;
+  sandboxId: string;
+  template?: string;
+  bytes?: number;
+  logs: string[];
+  message?: string;
+}> {
+  const res = await gwFetch(`/sessions/${encodeURIComponent(sessionId)}/recreate`, {
+    method: 'POST',
+    body: JSON.stringify({ sandboxId: opts?.sandboxId }),
+  });
+  const text = await res.text();
+  let data: Record<string, unknown> = {};
+  try {
+    data = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    data = { message: text };
+  }
+  const logs = Array.isArray(data.logs) ? data.logs.map((l) => String(l)) : [];
+  if (!res.ok) {
+    return {
+      ok: false,
+      sessionId,
+      sandboxId: String(data.sandboxId || opts?.sandboxId || ''),
+      logs,
+      message: String(data.message || explainGatewayFailure(res.status, text, 'recreate')),
+    };
+  }
+  return {
+    ok: true,
+    sessionId: String(data.sessionId || sessionId),
+    oldSandboxId: data.oldSandboxId ? String(data.oldSandboxId) : undefined,
+    sandboxId: String(data.sandboxId || ''),
+    template: data.template ? String(data.template) : undefined,
+    bytes: typeof data.bytes === 'number' ? data.bytes : undefined,
+    logs,
+  };
+}
+
 export async function destroyGatewaySession(sessionId: string): Promise<void> {
   const res = await gwFetch(`/sessions/${encodeURIComponent(sessionId)}`, {
     method: 'DELETE',

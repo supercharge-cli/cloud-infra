@@ -11,6 +11,10 @@ type SandboxLike = {
   commands?: {
     run: (command: string, opts?: Record<string, unknown>) => Promise<Record<string, unknown>>;
   };
+  files?: {
+    read?: (path: string, opts?: Record<string, unknown>) => Promise<unknown>;
+    write?: (path: string, data: unknown, opts?: Record<string, unknown>) => Promise<unknown>;
+  };
   kill?: (opts?: { requestTimeoutMs?: number }) => Promise<void>;
   close?: () => Promise<void>;
   pause?: (opts?: Record<string, unknown>) => Promise<boolean>;
@@ -946,6 +950,198 @@ async function listDirectoryInSession(session: SessionRecord, dirPath: string): 
   };
 }
 
+const MIGRATE_ARCHIVE = '/tmp/vectra-migrate.tgz';
+const MIGRATE_MAX_BYTES = 200 * 1024 * 1024;
+
+function migratePackCommand(): string {
+  return [
+    'set -e',
+    `rm -f ${shQuote(MIGRATE_ARCHIVE)}`,
+    'mkdir -p /home/user/workspace /home/user/.xibecode',
+    `tar -C /home/user -czf ${shQuote(MIGRATE_ARCHIVE)}`,
+    "  --exclude='workspace/node_modules'",
+    "  --exclude='workspace/**/node_modules'",
+    "  --exclude='workspace/.next'",
+    "  --exclude='workspace/dist'",
+    "  --exclude='workspace/build'",
+    "  --exclude='workspace/.turbo'",
+    "  --exclude='workspace/.cache'",
+    "  --exclude='workspace/**/.venv'",
+    "  --exclude='workspace/**/__pycache__'",
+    "  --exclude='.xibecode/file-history'",
+    '  workspace .xibecode',
+    `wc -c < ${shQuote(MIGRATE_ARCHIVE)} | tr -d ' '`,
+  ].join(' ');
+}
+
+async function readSandboxBytes(sandbox: SandboxLike, absPath: string): Promise<Buffer> {
+  if (sandbox.files?.read) {
+    const raw = await sandbox.files.read(absPath, { format: 'bytes' });
+    if (Buffer.isBuffer(raw)) return raw;
+    if (raw instanceof Uint8Array) return Buffer.from(raw);
+    if (typeof raw === 'string') return Buffer.from(raw, 'base64');
+  }
+  throw new Error('sandbox files.read is unavailable');
+}
+
+async function writeSandboxBytes(sandbox: SandboxLike, absPath: string, data: Buffer): Promise<void> {
+  if (sandbox.files?.write) {
+    await sandbox.files.write(absPath, data);
+    return;
+  }
+  throw new Error('sandbox files.write is unavailable');
+}
+
+async function copyArchiveChunked(oldSession: SessionRecord, newSandbox: SandboxLike): Promise<number> {
+  const listed = await runInSession(oldSession, {
+    command: `split -b 1200000 ${shQuote(MIGRATE_ARCHIVE)} /tmp/vectra-mig-part- && ls /tmp/vectra-mig-part-* | wc -l`,
+    cwd: '/tmp',
+    timeout: 180,
+  });
+  if (!listed.success) {
+    throw new Error(`Could not split migrate archive: ${String(listed.stderr || listed.message || '')}`);
+  }
+  const parts = Number(String(listed.stdout || '').trim()) || 0;
+  if (parts < 1) throw new Error('Migrate archive split produced no parts');
+  let bytes = 0;
+  await newSandbox.commands?.run(`rm -f ${shQuote(MIGRATE_ARCHIVE)} /tmp/vectra-mig-part-*`, {
+    cwd: '/tmp',
+    timeoutMs: 30_000,
+  });
+  for (let i = 0; i < parts; i++) {
+    const suffix = String.fromCharCode(97 + Math.floor(i / 26)) + String.fromCharCode(97 + (i % 26));
+    // split default suffix: aa, ab, ...
+    const partName = `/tmp/vectra-mig-part-${suffix}`;
+    const encoded = await runInSession(oldSession, {
+      command: `base64 -w0 ${shQuote(partName)}`,
+      cwd: '/tmp',
+      timeout: 120,
+    });
+    if (!encoded.success) {
+      throw new Error(`Failed to read migrate part ${partName}`);
+    }
+    const b64 = String(encoded.stdout || '').trim();
+    bytes += Buffer.from(b64, 'base64').length;
+    const wr = await newSandbox.commands?.run(
+      `printf '%s' ${shQuote(b64)} | base64 -d >> ${shQuote(MIGRATE_ARCHIVE)}`,
+      { cwd: '/tmp', timeoutMs: 120_000 },
+    );
+    const exitCode = typeof (wr as any)?.exitCode === 'number' ? (wr as any).exitCode : 0;
+    if (exitCode !== 0) {
+      throw new Error(`Failed to write migrate part ${partName} on new sandbox`);
+    }
+  }
+  return bytes;
+}
+
+/**
+ * Spin a new template sandbox and move workspace + ~/.xibecode (API keys,
+ * chat transcripts, pairing) onto it. Skips node_modules / build caches.
+ * Same gateway session id — only the VM changes.
+ */
+async function recreateSandboxInSession(session: SessionRecord): Promise<{
+  ok: true;
+  sessionId: string;
+  oldSandboxId: string;
+  sandboxId: string;
+  template: string;
+  bytes: number;
+  logs: string[];
+}> {
+  const logs: string[] = [];
+  const oldSandboxId = session.sandboxId;
+  await touchSession(session);
+
+  logs.push('packing workspace + ~/.xibecode (skip node_modules)');
+  const packed = await runInSession(session, {
+    command: migratePackCommand(),
+    cwd: '/tmp',
+    timeout: 300,
+  });
+  if (!packed.success) {
+    throw new Error(`Failed to pack sandbox: ${String(packed.stderr || packed.message || '')}`);
+  }
+  const bytes = Number(String(packed.stdout || '').trim()) || 0;
+  if (bytes <= 0) throw new Error('Migrate archive is empty');
+  if (bytes > MIGRATE_MAX_BYTES) {
+    throw new Error(
+      `Migrate archive is ${Math.ceil(bytes / (1024 * 1024))}MB (max ${Math.ceil(MIGRATE_MAX_BYTES / (1024 * 1024))}MB). Remove large artifacts and retry.`,
+    );
+  }
+  logs.push(`packed ${Math.ceil(bytes / 1024)}KB`);
+
+  logs.push(`creating sandbox from template ${sandboxTemplate}`);
+  const created = (await Sandbox.create({
+    template: sandboxTemplate,
+    timeoutMs: sandboxTimeoutMs,
+    lifecycle: sandboxLifecycle,
+  })) as unknown as SandboxLike;
+  const newSandboxId = created.sandboxId || randomUUID();
+  logs.push(`new sandbox ${newSandboxId}`);
+
+  try {
+    try {
+      const buf = await readSandboxBytes(session.sandbox, MIGRATE_ARCHIVE);
+      await writeSandboxBytes(created, MIGRATE_ARCHIVE, buf);
+      logs.push('copied archive via files API');
+    } catch (err) {
+      logs.push(`files API copy failed (${(err as Error).message}) — chunked fallback`);
+      await copyArchiveChunked(session, created);
+      logs.push('copied archive in chunks');
+    }
+
+    const extracted = await created.commands?.run(
+      [
+        'set -e',
+        'mkdir -p /home/user/workspace /home/user/.xibecode',
+        `tar -C /home/user -xzf ${shQuote(MIGRATE_ARCHIVE)}`,
+        'chown -R user:user /home/user/workspace /home/user/.xibecode 2>/dev/null || true',
+        `rm -f ${shQuote(MIGRATE_ARCHIVE)}`,
+        'test -d /home/user/workspace',
+        'test -d /home/user/.xibecode',
+        'echo EXTRACT_OK',
+      ].join('; '),
+      { cwd: '/tmp', timeoutMs: 300_000 },
+    );
+    const extractOut = `${String((extracted as any)?.stdout || '')}\n${String((extracted as any)?.stderr || '')}`;
+    if (!extractOut.includes('EXTRACT_OK')) {
+      throw new Error(`Failed to extract on new sandbox: ${extractOut.slice(0, 400)}`);
+    }
+    logs.push('extracted workspace + keys/chat');
+  } catch (err) {
+    try {
+      await created.kill?.();
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+
+  const oldSandbox = session.sandbox;
+  session.sandbox = created;
+  session.sandboxId = newSandboxId;
+  session.updatedAt = Date.now();
+  session.continuousRunStartedAt = Date.now();
+  logs.push('session now points at new sandbox');
+
+  try {
+    await oldSandbox.kill?.();
+    logs.push(`killed old sandbox ${oldSandboxId}`);
+  } catch (err) {
+    logs.push(`old sandbox kill failed: ${(err as Error).message}`);
+  }
+
+  return {
+    ok: true,
+    sessionId: session.sessionId,
+    oldSandboxId,
+    sandboxId: newSandboxId,
+    template: sandboxTemplate,
+    bytes,
+    logs,
+  };
+}
+
 async function closeSession(session: SessionRecord): Promise<void> {
   try {
     await session.sandbox.kill?.();
@@ -1448,6 +1644,33 @@ const server = createServer(async (req, res) => {
       res.setHeader('X-XibeCode-Sandbox-Id', session.sandboxId);
       res.setHeader('X-XibeCode-Workspace-Root', session.workspaceRoot);
       res.end(exported.archive);
+      return;
+    }
+
+    const recreateMatch = url.pathname.match(/^\/sessions\/([^/]+)\/recreate$/);
+    if (method === 'POST' && recreateMatch) {
+      const sessionId = decodeURIComponent(recreateMatch[1] || '');
+      const body = await readJson<{ sandboxId?: string }>(req).catch(() => ({}) as { sandboxId?: string });
+      let session = sessions.get(sessionId);
+      if (!session && body.sandboxId) {
+        session = await createSession({ sessionId, sandboxId: body.sandboxId, strategy: 'sandbox_full' });
+      }
+      if (!session) {
+        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        return;
+      }
+      try {
+        const result = await recreateSandboxInSession(session);
+        sendJson(res, 200, { success: true, ...result });
+      } catch (err) {
+        sendJson(res, 500, {
+          success: false,
+          error: true,
+          message: (err as Error).message || 'Recreate failed',
+          sessionId,
+          sandboxId: session.sandboxId,
+        });
+      }
       return;
     }
 

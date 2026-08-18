@@ -210,6 +210,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       unawaited(_maybeOfferCliUpdate(c));
     }).catchError((_) {});
     unawaited(TaskNotifications.requestPermissions());
+    unawaited(_refreshConversations());
   }
 
   void _listen() {
@@ -287,6 +288,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _ingest(AppChatEvent ev) {
     if (ev.type == 'ready' || ev.type == 'hello' || ev.type == 'ping') {
+      return;
+    }
+    if (ev.type == 'conversation') {
+      unawaited(_applyConversationEvent(ev));
       return;
     }
     if (ev.type == 'status') {
@@ -394,6 +399,158 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     _persist();
     unawaited(_notifyProgress());
+  }
+
+  Future<void> _applyConversationEvent(AppChatEvent ev) async {
+    final nextId = ev.sessionId;
+    if (nextId == null || nextId.isEmpty) return;
+    final previousId = ev.previousSessionId ?? store.activeSessionId;
+    final remote = ev.conversations
+        .where((m) => '${m['sessionId'] ?? ''}'.isNotEmpty)
+        .map((m) => ConversationMeta.fromJson(m))
+        .toList();
+    await store.archiveAndStart(
+      previousSessionId: previousId,
+      newSessionId: nextId,
+      previousTitle: ev.title,
+      currentEvents: List<AppChatEvent>.from(events),
+      answered: Set<String>.from(answered),
+      lastServerId: lastServerId,
+    );
+    if (remote.isNotEmpty) {
+      await store.mergeRemote(remote, active: nextId);
+    }
+    if (!mounted) return;
+    setState(() {
+      events.clear();
+      answered.clear();
+      lastServerId = null;
+      lastAssistantText = null;
+      turnStartedAt = null;
+      toolCount = 0;
+      showKickoff = false;
+    });
+  }
+
+  Future<void> _refreshConversations() async {
+    try {
+      final raw = await api.listConversations(id);
+      final active = raw['active'] as String?;
+      final list = (raw['conversations'] as List?) ?? const [];
+      final remote = list
+          .whereType<Map>()
+          .map((e) => ConversationMeta.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      await store.mergeRemote(remote, active: active);
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
+  Future<void> _openConversation(ConversationMeta item) async {
+    if (working) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Stop the current task before switching conversations.')),
+      );
+      return;
+    }
+    Navigator.of(context).maybePop();
+    await store.save(events: events, answered: answered, lastServerId: lastServerId);
+    try {
+      await api.switchConversation(id, item.sessionId);
+    } catch (_) {}
+    final snap = await store.load(sessionId: item.sessionId);
+    if (!mounted) return;
+    setState(() {
+      store.activeSessionId = item.sessionId;
+      events
+        ..clear()
+        ..addAll(snap.events);
+      answered
+        ..clear()
+        ..addAll(snap.answered);
+      lastServerId = snap.lastServerId;
+    });
+    if (snap.events.isEmpty) {
+      try {
+        final remote = await api.getConversation(id, item.sessionId);
+        final msgs = (remote['messages'] as List?) ?? const [];
+        if (!mounted) return;
+        setState(() {
+          for (final m in msgs.whereType<Map>()) {
+            final role = '${m['role'] ?? ''}';
+            final content = m['content'];
+            final text = content is String
+                ? content
+                : content == null
+                    ? ''
+                    : content.toString();
+            if (text.isEmpty) continue;
+            events.add(AppChatEvent({
+              'type': role == 'user' ? 'user' : 'text',
+              'role': role,
+              'text': text,
+              'format': 'markdown',
+              'id': 'resume-${item.sessionId}-${events.length}',
+              'ts': DateTime.now().millisecondsSinceEpoch,
+            }));
+          }
+        });
+      } catch (_) {}
+    }
+  }
+
+  void _showHistory() {
+    unawaited(_refreshConversations());
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Vc.card,
+      showDragHandle: true,
+      builder: (ctx) {
+        final items = store.conversations;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(
+                title: Text('Conversation history', style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text('Previous chats stay here after /new'),
+              ),
+              if (items.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  child: Text('No other conversations yet. /new will keep this one here.', style: TextStyle(color: Vc.muted)),
+                )
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 420),
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final c in items)
+                        ListTile(
+                          selected: c.sessionId == store.activeSessionId,
+                          leading: Icon(
+                            c.status == 'closed' ? Icons.history : Icons.chat_bubble_outline,
+                            color: c.sessionId == store.activeSessionId ? Vc.green : Vc.muted,
+                          ),
+                          title: Text(c.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          subtitle: Text(
+                            '${c.status} · ${c.sessionId}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 11, color: Vc.muted),
+                          ),
+                          onTap: () => _openConversation(c),
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _persist() {
@@ -1396,6 +1553,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+          IconButton(
+            tooltip: 'History',
+            onPressed: _showHistory,
+            icon: const Icon(Icons.history),
+          ),
           IconButton(
             tooltip: 'Preview',
             onPressed: () => _openPreview(),

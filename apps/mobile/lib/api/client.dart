@@ -204,8 +204,23 @@ class VectraClient {
   Future<Map<String, dynamic>> cliUpdate(String id) =>
       _json('POST', '/api/instances/$id/cli-update', timeout: const Duration(seconds: 180));
 
+  Future<Map<String, dynamic>> recreateSandbox(String id) =>
+      _json('POST', '/api/instances/$id/recreate', timeout: const Duration(seconds: 280));
+
   Future<void> sendChat(String id, String text) =>
       _json('POST', '/api/instances/$id/chat', body: {'text': text}, timeout: _slow);
+
+  Future<Map<String, dynamic>> listConversations(String id) =>
+      _json('GET', '/api/instances/$id/chat/conversations', timeout: _fast);
+
+  Future<Map<String, dynamic>> getConversation(String id, String sessionId) =>
+      _json('GET', '/api/instances/$id/chat/conversations/${Uri.encodeComponent(sessionId)}', timeout: _slow);
+
+  Future<void> startNewConversation(String id) =>
+      _json('POST', '/api/instances/$id/chat/conversations', timeout: _slow);
+
+  Future<void> switchConversation(String id, String sessionId) =>
+      _json('POST', '/api/instances/$id/chat/conversations/switch', body: {'sessionId': sessionId}, timeout: _slow);
 
   Future<String?> publishMedia(
     String id, {

@@ -30,6 +30,9 @@ apps/gateway/dist/
 apps/web/app/node_modules/
 *.pptx
 
+# Local Grok / agent checkout — never commit
+grok-build/
+
 # Flutter
 apps/mobile/.dart_tool/
 apps/mobile/.flutter-plugins

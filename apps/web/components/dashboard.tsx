@@ -468,6 +468,43 @@ export function Dashboard({ email }: { email: string }) {
     }
   }
 
+  async function applyRecreateSandbox() {
+    if (!selected) return;
+    if (
+      !window.confirm(
+        'Move this workspace to a new sandbox from the latest template?\n\nChat, files, API keys, and settings come with you. node_modules is skipped. Preview links change. This takes 1–3 minutes.',
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setLogs('');
+    try {
+      const res = await fetch(`/api/instances/${selected}/recreate`, { method: 'POST' });
+      const data = await res.json();
+      setLogs(
+        [
+          data.ok
+            ? `Moved to new sandbox ${data.sandboxId || ''} (was ${data.oldSandboxId || '?'})`
+            : data.error || 'Move to new sandbox failed',
+          ...(data.logs || []),
+        ].join('\n'),
+      );
+      if (res.status === 402) {
+        setError(data.message || data.error || 'Subscription expired');
+        return;
+      }
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Move to new sandbox failed');
+      }
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function dismissCliUpdate() {
     if (!selected || !cliUpdate?.latest) {
       setCliUpdate(null);
@@ -1159,6 +1196,14 @@ export function Dashboard({ email }: { email: string }) {
               </span>
             </h2>
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void applyRecreateSandbox()}
+                className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-100 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                Move to new sandbox
+              </button>
               {!selectedInst.isFree &&
                 (selectedInst.paid === false || selectedInst.billingStatus === 'past_due') && (
                 <button
