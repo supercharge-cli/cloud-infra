@@ -107,13 +107,16 @@ class ComputerState {
   void apply(AppChatEvent ev) {
     hasActivity = true;
     final nextTab = ev.tab;
-    if (nextTab == 'browser' || nextTab == 'terminal') tab = nextTab!;
-    if (tab == 'browser' || ev.kind == 'browser') {
-      tab = 'browser';
+    final shouldFocus = ev.focus || ev.kind == 'focus' || ev.action == 'show';
+    if (shouldFocus && (nextTab == 'browser' || nextTab == 'terminal')) {
+      tab = nextTab!;
+    }
+    if (ev.kind == 'browser' || nextTab == 'browser') {
       browserLabel = (ev.label != null && ev.label!.isNotEmpty) ? ev.label : ev.text;
       if (ev.url != null && ev.url!.isNotEmpty) browserUrl = ev.url;
     }
-    if (ev.kind == 'shell' || (nextTab == 'terminal' && ev.command != null && ev.kind != 'file')) {
+    if (ev.kind == 'shell' ||
+        (nextTab == 'terminal' && ev.command != null && ev.kind != 'file' && ev.kind != 'focus')) {
       _applyTerminal(ev);
     }
   }
@@ -151,7 +154,6 @@ class ComputerState {
     livePaused = false;
     lastFrameAt = DateTime.now();
     hasActivity = true;
-    tab = 'browser';
   }
 
   void markLivePaused() {
@@ -170,7 +172,6 @@ class ComputerState {
     if (url != null && url.isNotEmpty) stillUrl = url;
     if (stillPath != null || stillUrl != null) {
       hasActivity = true;
-      tab = 'browser';
     }
   }
 
@@ -181,12 +182,25 @@ class ComputerState {
   }
 }
 
-/// Which Computer tab an event should focus. Tests + UI share this.
-String? computerTabForEvent(AppChatEvent ev) {
-  if (ev.type == 'computer') {
-    if (ev.tab == 'browser' || ev.kind == 'browser') return 'browser';
-    if (ev.tab == 'terminal' || ev.kind == 'shell') return 'terminal';
+/// Agent-chosen Computer pane. Matches the CLI `parseComputerShow`.
+String? parseComputerShow(String text) {
+  final re = RegExp(
+    r'(?:^|\n)\s*(?:computer|show|watch)\s*[:\-]\s*(browser|terminal)\b|\[\s*computer\s*:\s*(browser|terminal)\s*\]',
+    caseSensitive: false,
+  );
+  String? last;
+  for (final m in re.allMatches(text)) {
+    final raw = (m.group(1) ?? m.group(2) ?? '').toLowerCase();
+    if (raw == 'browser' || raw == 'terminal') last = raw;
   }
-  if (ev.type == 'file' && ev.isImage) return 'browser';
+  return last;
+}
+
+/// Which Computer tab an event should focus. Ordinary shell/browser
+/// activity does not steal the pane — only an explicit focus.
+String? computerTabForEvent(AppChatEvent ev) {
+  if (ev.type == 'computer' && (ev.focus || ev.kind == 'focus' || ev.action == 'show')) {
+    if (ev.tab == 'browser' || ev.tab == 'terminal') return ev.tab;
+  }
   return null;
 }

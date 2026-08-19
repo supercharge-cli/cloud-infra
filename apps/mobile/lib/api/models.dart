@@ -172,6 +172,7 @@ class AppChatEvent {
   String? get target => raw['target'] as String?;
   String? get stdout => raw['stdout'] as String?;
   String? get label => raw['label'] as String?;
+  bool get focus => raw['focus'] == true;
   int? get exitCode => (raw['exitCode'] as num?)?.toInt();
   bool? get success {
     final v = raw['success'];

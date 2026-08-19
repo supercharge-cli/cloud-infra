@@ -429,7 +429,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         kind: ev.type,
       ));
     }
-    if (ev.type == 'text' && ev.text.isNotEmpty) lastAssistantText = ev.text;
+    if (ev.type == 'text' && ev.text.isNotEmpty) {
+      lastAssistantText = ev.text;
+      final show = parseComputerShow(ev.text);
+      if (show != null) computer.tab = show;
+    }
     if (ev.type == 'text' && _isModelSwitchNote(ev.text) && _justPickedModel) {
       _persist();
       return;
@@ -437,7 +441,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (ev.type == 'computer') {
       showKickoff = false;
       computer.apply(ev);
-      if (computerTabForEvent(ev) == 'browser') {
+      if (ev.kind == 'browser' || ev.tab == 'browser' || computer.isBrowser) {
         _syncBrowserStream();
       }
     }

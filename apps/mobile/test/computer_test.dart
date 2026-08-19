@@ -18,9 +18,11 @@ void main() {
       'label': 'ls',
     }));
     expect(s.tab, 'terminal');
-    expect(computerTabForEvent(s.lines.isEmpty
-        ? ev({'type': 'computer', 'tab': 'terminal', 'kind': 'shell'})
-        : ev({'type': 'computer', 'tab': 'terminal', 'kind': 'shell'})), 'terminal');
+    expect(computerTabForEvent(ev({
+      'type': 'computer',
+      'tab': 'terminal',
+      'kind': 'shell',
+    })), isNull);
     expect(s.lines.single.command, 'ls');
     expect(s.lines.single.running, isTrue);
 
@@ -40,7 +42,7 @@ void main() {
     expect(s.peekLabel, 'ls');
   });
 
-  test('browser click switches tab', () {
+  test('browser click does not steal the tab', () {
     final s = ComputerState();
     s.apply(ev({
       'type': 'computer',
@@ -52,19 +54,74 @@ void main() {
       'target': '@e2',
       'label': 'Click @e2',
     }));
-    expect(s.tab, 'browser');
+    expect(s.tab, 'terminal');
     expect(s.browserLabel, 'Click @e2');
     expect(computerTabForEvent(ev({
       'type': 'computer',
       'tab': 'browser',
       'kind': 'browser',
+    })), isNull);
+  });
+
+  test('explicit Computer: browser focuses the pane', () {
+    final s = ComputerState();
+    s.apply(ev({
+      'type': 'computer',
+      'tab': 'terminal',
+      'kind': 'shell',
+      'state': 'start',
+      'command': 'ls',
+      'label': 'ls',
+    }));
+    expect(s.tab, 'terminal');
+    s.apply(ev({
+      'type': 'computer',
+      'tab': 'browser',
+      'kind': 'focus',
+      'focus': true,
+      'action': 'show',
+      'label': 'Show browser',
+    }));
+    expect(s.tab, 'browser');
+    expect(parseComputerShow('Computer: terminal\nnext'), 'terminal');
+    expect(parseComputerShow('Watch: browser'), 'browser');
+    expect(parseComputerShow('I will use the browser'), isNull);
+    expect(computerTabForEvent(ev({
+      'type': 'computer',
+      'tab': 'browser',
+      'kind': 'focus',
+      'focus': true,
     })), 'browser');
   });
 
-  test('live jpeg becomes the browser view', () {
+  test('open focuses browser; later shell stays there', () {
+    final s = ComputerState();
+    s.apply(ev({
+      'type': 'computer',
+      'tab': 'browser',
+      'kind': 'browser',
+      'action': 'open',
+      'focus': true,
+      'state': 'start',
+      'label': 'Open example.com',
+    }));
+    expect(s.tab, 'browser');
+    s.apply(ev({
+      'type': 'computer',
+      'tab': 'terminal',
+      'kind': 'shell',
+      'state': 'start',
+      'command': 'ls',
+      'label': 'ls',
+    }));
+    expect(s.tab, 'browser');
+    expect(s.lines.single.command, 'ls');
+  });
+
+  test('live jpeg does not steal the tab', () {
     final s = ComputerState();
     s.setLiveFrame(Uint8List.fromList([1, 2, 3]));
-    expect(s.tab, 'browser');
+    expect(s.tab, 'terminal');
     expect(s.live, isTrue);
     expect(s.livePaused, isFalse);
     expect(s.liveJpeg, isNotNull);
@@ -72,15 +129,15 @@ void main() {
     expect(s.livePaused, isTrue);
   });
 
-  test('image file becomes browser still', () {
+  test('image file becomes browser still without switching', () {
     final s = ComputerState();
     s.setStill(path: '/tmp/shot.png', url: 'https://example/shot.png');
-    expect(s.tab, 'browser');
+    expect(s.tab, 'terminal');
     expect(s.stillPath, '/tmp/shot.png');
     expect(computerTabForEvent(ev({
       'type': 'file',
       'name': 'shot.png',
       'kind': 'photo',
-    })), 'browser');
+    })), isNull);
   });
 }
