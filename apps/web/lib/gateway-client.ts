@@ -1603,9 +1603,6 @@ export async function bootstrapAppInbox(
     instanceId ? `${site}/api/public/media/${encodeURIComponent(instanceId)}` : '';
   const py = `
 import pathlib
-p = pathlib.Path("/home/user/.xibecode/daemon.env")
-p.parent.mkdir(parents=True, exist_ok=True)
-text = p.read_text() if p.exists() else ""
 keys = {
   "XIBECODE_APP_INBOX_SECRET": ${JSON.stringify(secret)},
   "XIBECODE_GATEWAY_TOKEN": ${JSON.stringify(secret)},
@@ -1615,13 +1612,23 @@ keys = {
   "AGENT_BROWSER_STREAM_QUALITY": "40",
   "AGENT_BROWSER_STREAM_MAX_WIDTH": "960",
   "AGENT_BROWSER_STREAM_MAX_HEIGHT": "540",
+  "SUPERAGENT_API_TOKEN": ${JSON.stringify(secret)},
+  "SUPERAGENT_APP_INBOX_SECRET": ${JSON.stringify(secret)},
+  "SUPERAGENT_GATEWAY_TOKEN": ${JSON.stringify(secret)},
+  "SUPERAGENT_APP_INBOX_PORT": "8790",
+  "SUPERAGENT_DAEMON_WORKDIR": "/home/user/workspace",
   ${mediaBase ? `"XIBECODE_PUBLIC_MEDIA_BASE": ${JSON.stringify(mediaBase)},` : ''}
+  ${mediaBase ? `"SUPERAGENT_PUBLIC_MEDIA_BASE": ${JSON.stringify(mediaBase)},` : ''}
   ${instanceId ? `"XIBECODE_INSTANCE_ID": ${JSON.stringify(instanceId)},` : ''}
+  ${instanceId ? `"SUPERAGENT_INSTANCE_ID": ${JSON.stringify(instanceId)},` : ''}
 }
-lines = [ln for ln in text.splitlines() if ln.strip() and ln.split("=",1)[0] not in keys]
-for k,v in keys.items():
-  lines.append(f"{k}={v}")
-p.write_text("\\n".join(lines) + "\\n")
+for path in (pathlib.Path("/home/user/.xibecode/daemon.env"), pathlib.Path("/home/user/.superagent/daemon.env")):
+  path.parent.mkdir(parents=True, exist_ok=True)
+  text = path.read_text() if path.exists() else ""
+  lines = [ln for ln in text.splitlines() if ln.strip() and ln.split("=",1)[0] not in keys]
+  for k,v in keys.items():
+    lines.append(f"{k}={v}")
+  path.write_text("\\n".join(lines) + "\\n")
 print("ok")
 `.trim();
   await execInSession(sessionId, `python3 - <<'PY'\n${py}\nPY`, {
