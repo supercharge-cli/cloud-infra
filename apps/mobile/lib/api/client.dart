@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import '../chat/computer.dart';
 import 'models.dart';
 
 class ApiException implements Exception {
@@ -485,6 +486,66 @@ class VectraClient {
       }
     } on TimeoutException {
       throw ApiException(0, 'Chat inbox timed out while connecting.');
+    } finally {
+      client.close();
+    }
+  }
+
+  Stream<ComputerFrame> browserFrames(String id) async* {
+    final uri = _u('/api/instances/$id/computer/browser');
+    final req = http.Request('GET', uri);
+    req.headers.addAll({
+      'accept': 'text/event-stream',
+      if (token != null && token!.isNotEmpty) 'authorization': 'Bearer $token',
+    });
+    final client = http.Client();
+    try {
+      final res = await client.send(req).timeout(_sseConnect);
+      if (res.statusCode >= 400) {
+        final body = await res.stream.bytesToString();
+        throw ApiException(res.statusCode, body.isEmpty ? 'Browser stream failed' : body);
+      }
+      var buf = '';
+      await for (final chunk in res.stream.transform(utf8.decoder)) {
+        buf += chunk;
+        while (true) {
+          final i = buf.indexOf('\n\n');
+          if (i < 0) break;
+          final block = buf.substring(0, i);
+          buf = buf.substring(i + 2);
+          for (final line in block.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              final map = jsonDecode(line.substring(6));
+              if (map is! Map) continue;
+              final type = '${map['type'] ?? ''}';
+              if (type == 'frame') {
+                final raw = '${map['data'] ?? ''}';
+                Uint8List? bytes;
+                if (raw.isNotEmpty) {
+                  try {
+                    bytes = base64Decode(raw);
+                  } catch (_) {}
+                }
+                yield ComputerFrame(
+                  type: type,
+                  seq: (map['seq'] as num?)?.toInt() ?? 0,
+                  bytes: bytes,
+                );
+              } else if (type == 'status') {
+                yield ComputerFrame(
+                  type: type,
+                  connected: map['connected'] == true,
+                  screencasting: map['screencasting'] == true,
+                  error: map['error'] as String?,
+                );
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    } on TimeoutException {
+      throw ApiException(0, 'Browser stream timed out while connecting.');
     } finally {
       client.close();
     }

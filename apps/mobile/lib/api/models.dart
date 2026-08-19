@@ -166,6 +166,18 @@ class AppChatEvent {
   String? get kind => raw['kind'] as String?;
   String? get title => raw['title'] as String?;
   String? get state => raw['state'] as String?;
+  String? get tab => raw['tab'] as String?;
+  String? get command => raw['command'] as String?;
+  String? get action => raw['action'] as String?;
+  String? get target => raw['target'] as String?;
+  String? get stdout => raw['stdout'] as String?;
+  String? get label => raw['label'] as String?;
+  int? get exitCode => (raw['exitCode'] as num?)?.toInt();
+  bool? get success {
+    final v = raw['success'];
+    if (v is bool) return v;
+    return null;
+  }
   String? get mime => raw['mime'] as String?;
   String? get localPath => raw['localPath'] as String?;
   String? get url => raw['url'] as String?;
@@ -178,7 +190,6 @@ class AppChatEvent {
   int? get used => (raw['used'] as num?)?.toInt();
   int? get max => (raw['max'] as num?)?.toInt();
   String? get modelId => raw['model'] as String?;
-  String? get label => raw['label'] as String?;
   bool? get busy {
     final v = raw['busy'];
     if (v is bool) return v;

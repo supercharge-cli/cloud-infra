@@ -19,12 +19,14 @@ import '../chat/cli_update.dart';
 import '../chat/commands.dart';
 import '../chat/draft.dart';
 import '../chat/notifications.dart';
+import '../chat/computer.dart';
 import '../chat/preview_urls.dart';
 import '../screens/preview.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/file_viewer.dart';
 import '../widgets/markdown.dart';
+import '../widgets/computer_pane.dart';
 import '../widgets/media.dart';
 import '../widgets/side_panel.dart';
 import '../widgets/ui.dart';
@@ -46,6 +48,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final fetching = <String>{};
   late final ChatStore store;
   StreamSubscription<AppChatEvent>? _sub;
+  StreamSubscription<ComputerFrame>? _browserSub;
   List<BotCommand> commands = defaultBotCommands;
   CloudInstance? inst;
   Map<String, dynamic>? cli;
@@ -72,6 +75,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final pickerPage = <String, int>{};
   Timer? _tick;
   final pending = <DraftAttach>[];
+  final computer = ComputerState();
+  bool computerExpanded = false;
+  bool _browserListening = false;
+  Timer? _liveTick;
 
   VectraClient get api => context.read<SessionController>().client;
   String get id => widget.instanceId;
@@ -101,10 +108,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       backgrounded = false;
       unawaited(TaskNotifications.leaveBackground());
       _listen();
+      _syncBrowserStream();
       return;
     }
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       backgrounded = true;
+      _browserSub?.cancel();
+      _browserSub = null;
+      _browserListening = false;
       if (working) {
         unawaited(TaskNotifications.enterBackground());
       } else {
@@ -129,6 +140,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ..clear()
           ..addAll(snap.answered);
         connecting = false;
+        computer.replay(events);
       });
       _scrollToEnd(instant: true);
       Future<void>.delayed(const Duration(milliseconds: 80), () {
@@ -237,6 +249,70 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         error = e.toString();
       });
     });
+  }
+
+  void _checkLivePause() {
+    final at = computer.lastFrameAt;
+    if (computer.live && at != null && DateTime.now().difference(at).inSeconds >= 3) {
+      computer.markLivePaused();
+    }
+  }
+
+  void _syncBrowserStream() {
+    final want = !disposed &&
+        !backgrounded &&
+        !paymentBlocked &&
+        (computerExpanded || computer.isBrowser || computer.live || working);
+    if (want) {
+      _listenBrowser();
+    } else {
+      _browserSub?.cancel();
+      _browserSub = null;
+      _browserListening = false;
+      _liveTick?.cancel();
+      _liveTick = null;
+    }
+  }
+
+  void _listenBrowser() {
+    if (_browserListening) return;
+    _browserListening = true;
+    _liveTick?.cancel();
+    _liveTick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(_checkLivePause);
+    });
+    _browserSub?.cancel();
+    _browserSub = _browserLoop().listen((frame) {
+      if (!mounted) return;
+      setState(() {
+        if (frame.type == 'frame' && frame.bytes != null && frame.bytes!.isNotEmpty) {
+          computer.setLiveFrame(frame.bytes!);
+        } else if (frame.type == 'status') {
+          computer.setLiveStatus(connected: frame.connected, screencasting: frame.screencasting);
+        }
+      });
+    }, onError: (_) {
+      _browserListening = false;
+      if (mounted) setState(computer.markLivePaused);
+    }, onDone: () {
+      _browserListening = false;
+    });
+  }
+
+  Stream<ComputerFrame> _browserLoop() async* {
+    var delay = 1;
+    while (!disposed) {
+      try {
+        await for (final frame in api.browserFrames(id)) {
+          delay = 1;
+          yield frame;
+        }
+      } catch (_) {}
+      if (disposed) return;
+      await Future<void>.delayed(Duration(seconds: delay));
+      if (delay < 8) delay *= 2;
+    }
   }
 
   Stream<AppChatEvent> _eventLoop() async* {
@@ -359,6 +435,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _persist();
       return;
     }
+    if (ev.type == 'computer') {
+      showKickoff = false;
+      computer.apply(ev);
+      if (computerTabForEvent(ev) == 'browser') {
+        computerExpanded = true;
+        _syncBrowserStream();
+      }
+    }
+    if (ev.type == 'file' && ev.isImage) {
+      computer.setStill(path: ev.localPath, url: ev.url);
+    }
     if (ev.type == 'tool') {
       showKickoff = false;
       if (ev.state != 'done') toolCount += 1;
@@ -395,7 +482,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     events.add(ev);
     if (ev.type == 'file' && ev.fileId != null && ev.localPath == null) {
-      unawaited(_ensureLocalFile(ev, auto: ev.isImage));
+      unawaited(_ensureLocalFile(ev, auto: ev.isImage).then((_) {
+        if (!mounted) return;
+        if (ev.isImage && ev.localPath != null) {
+          setState(() => computer.setStill(path: ev.localPath, url: ev.url));
+        }
+      }));
     }
     _persist();
     unawaited(_notifyProgress());
@@ -429,6 +521,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       turnStartedAt = null;
       toolCount = 0;
       showKickoff = false;
+      computer.clear();
+      computerExpanded = false;
     });
   }
 
@@ -470,6 +564,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ..clear()
         ..addAll(snap.answered);
       lastServerId = snap.lastServerId;
+      computer.replay(events);
     });
     if (snap.events.isEmpty) {
       try {
@@ -567,9 +662,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _tick?.cancel();
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || turnStartedAt == null) return;
-      setState(() {});
+      setState(() => _checkLivePause());
       unawaited(_notifyProgress());
     });
+    _syncBrowserStream();
     unawaited(TaskNotifications.startTurn(
       instanceId: id,
       name: instanceName,
@@ -588,6 +684,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     turnStartedAt = null;
     _tick?.cancel();
     _tick = null;
+    _syncBrowserStream();
     _persist();
     unawaited(
       TaskNotifications.finishTurn(
@@ -642,6 +739,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<List<AppChatEvent>> _grouped() {
     final groups = <List<AppChatEvent>>[];
     for (final ev in events) {
+      if (ev.type == 'computer') continue;
       if ((ev.type == 'ask' || ev.type == 'approve') && answered.contains(ev.ref ?? ev.id)) {
         continue;
       }
@@ -664,7 +762,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     disposed = true;
     WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
+    _browserSub?.cancel();
     _tick?.cancel();
+    _liveTick?.cancel();
     _input.dispose();
     _scroll.removeListener(_onUserScroll);
     _scroll.dispose();
@@ -1172,6 +1272,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       case 'done':
       case 'typing':
       case 'progress':
+      case 'computer':
         return const SizedBox.shrink();
       default:
         if (ev.text.isEmpty) return const SizedBox.shrink();
@@ -1559,6 +1660,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             icon: const Icon(Icons.history),
           ),
           IconButton(
+            tooltip: 'Computer',
+            onPressed: () {
+              setState(() => computerExpanded = !computerExpanded);
+              _syncBrowserStream();
+            },
+            icon: Icon(
+              computer.isBrowser ? Icons.public : Icons.computer,
+              color: computer.hasActivity || working ? Vc.greenSoft : null,
+            ),
+          ),
+          IconButton(
             tooltip: 'Preview',
             onPressed: () => _openPreview(),
             icon: const Icon(Icons.language),
@@ -1634,6 +1746,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   onRemove: (f) => setState(() => pending.remove(f)),
                   onOpen: _openDraft,
                 ),
+              ComputerPane(
+                state: computer,
+                working: working,
+                expanded: computerExpanded,
+                onToggle: () {
+                  setState(() => computerExpanded = !computerExpanded);
+                  _syncBrowserStream();
+                },
+                onSelectTab: (tab) {
+                  setState(() {
+                    computer.tab = tab;
+                    computerExpanded = true;
+                  });
+                  _syncBrowserStream();
+                },
+              ),
               if (palette) _commandOverlay(),
               if (paymentBlocked)
                 SafeArea(

@@ -874,6 +874,10 @@ export async function writeSandboxConfig(
       inboxSecret ? `XIBECODE_APP_INBOX_SECRET=${inboxSecret}` : '',
       inboxSecret ? `XIBECODE_GATEWAY_TOKEN=${inboxSecret}` : '',
       `XIBECODE_APP_INBOX_PORT=8790`,
+      `AGENT_BROWSER_STREAM_PORT=9223`,
+      `AGENT_BROWSER_STREAM_QUALITY=40`,
+      `AGENT_BROWSER_STREAM_MAX_WIDTH=960`,
+      `AGENT_BROWSER_STREAM_MAX_HEIGHT=540`,
       input.instanceId
         ? `XIBECODE_INSTANCE_ID=${input.instanceId}`
         : '',
@@ -1534,6 +1538,10 @@ keys = {
   "XIBECODE_GATEWAY_TOKEN": ${JSON.stringify(secret)},
   "XIBECODE_APP_INBOX_PORT": "8790",
   "XIBECODE_DAEMON_WORKDIR": "/home/user/workspace",
+  "AGENT_BROWSER_STREAM_PORT": "9223",
+  "AGENT_BROWSER_STREAM_QUALITY": "40",
+  "AGENT_BROWSER_STREAM_MAX_WIDTH": "960",
+  "AGENT_BROWSER_STREAM_MAX_HEIGHT": "540",
   ${mediaBase ? `"XIBECODE_PUBLIC_MEDIA_BASE": ${JSON.stringify(mediaBase)},` : ''}
   ${instanceId ? `"XIBECODE_INSTANCE_ID": ${JSON.stringify(instanceId)},` : ''}
 }
