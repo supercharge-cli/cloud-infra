@@ -76,6 +76,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _tick;
   final pending = <DraftAttach>[];
   final computer = ComputerState();
+  bool computerExpanded = true;
   bool _browserListening = false;
   Timer? _liveTick;
 
@@ -1792,8 +1793,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ComputerPane(
                 state: computer,
                 working: working,
+                expanded: computerExpanded,
+                onToggle: () => setState(() => computerExpanded = !computerExpanded),
                 onSelectTab: (tab) {
-                  setState(() => computer.tab = tab);
+                  setState(() {
+                    computer.tab = tab;
+                    computerExpanded = true;
+                  });
                   _syncBrowserStream();
                 },
               ),
