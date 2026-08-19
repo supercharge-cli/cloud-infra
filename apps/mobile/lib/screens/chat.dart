@@ -496,34 +496,54 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _applyConversationEvent(AppChatEvent ev) async {
     final nextId = ev.sessionId;
     if (nextId == null || nextId.isEmpty) return;
-    final previousId = ev.previousSessionId ?? store.activeSessionId;
     final remote = ev.conversations
         .where((m) => '${m['sessionId'] ?? ''}'.isNotEmpty)
         .map((m) => ConversationMeta.fromJson(m))
         .toList();
+
+    // Already on this lane (optimistic /new or a first message already landed).
+    if (store.activeSessionId == nextId) {
+      if (remote.isNotEmpty) {
+        await store.mergeRemote(remote, active: nextId);
+      }
+      if (mounted) setState(() => _endTurn());
+      return;
+    }
+
+    final snapshot = List<AppChatEvent>.from(events);
+    final answeredSnap = Set<String>.from(answered);
+    final lastId = lastServerId;
+    final previousId = ev.previousSessionId ?? store.activeSessionId;
+
+    // Clear the old lane immediately so a racing first message is not archived
+    // into the previous chat, and unlock the composer (/new is not a long turn).
+    if (mounted) {
+      setState(() {
+        _endTurn();
+        events.removeWhere(snapshot.contains);
+        answered.clear();
+        lastServerId = null;
+        lastAssistantText = null;
+        toolCount = 0;
+        showKickoff = false;
+        computer.clear();
+        computerExpanded = false;
+      });
+    }
+    store.activeSessionId = nextId;
+
     await store.archiveAndStart(
       previousSessionId: previousId,
       newSessionId: nextId,
       previousTitle: ev.title,
-      currentEvents: List<AppChatEvent>.from(events),
-      answered: Set<String>.from(answered),
-      lastServerId: lastServerId,
+      currentEvents: snapshot,
+      answered: answeredSnap,
+      lastServerId: lastId,
     );
     if (remote.isNotEmpty) {
       await store.mergeRemote(remote, active: nextId);
     }
-    if (!mounted) return;
-    setState(() {
-      events.clear();
-      answered.clear();
-      lastServerId = null;
-      lastAssistantText = null;
-      turnStartedAt = null;
-      toolCount = 0;
-      showKickoff = false;
-      computer.clear();
-      computerExpanded = false;
-    });
+    if (mounted) setState(() {});
   }
 
   Future<void> _refreshConversations() async {
@@ -609,12 +629,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             children: [
               const ListTile(
                 title: Text('Conversation history', style: TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: Text('Previous chats stay here after /new'),
+                subtitle: Text('Previous chats stay here after New chat'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.edit_square, color: Vc.green),
+                title: const Text('New chat', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('Keeps this conversation in history', style: TextStyle(color: Vc.muted, fontSize: 12)),
+                onTap: () => unawaited(_startNewChat()),
               ),
               if (items.isEmpty)
                 const Padding(
                   padding: EdgeInsets.fromLTRB(16, 0, 16, 24),
-                  child: Text('No other conversations yet. /new will keep this one here.', style: TextStyle(color: Vc.muted)),
+                  child: Text('No other conversations yet. New chat will keep this one here.', style: TextStyle(color: Vc.muted)),
                 )
               else
                 ConstrainedBox(
@@ -805,17 +831,41 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (mounted) setState(() => hideCliUpdate = true);
   }
 
+  Future<void> _startNewChat() async {
+    if (working) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Stop the current task before starting a new chat.')),
+      );
+      return;
+    }
+    Navigator.of(context).maybePop();
+    try {
+      await api.startNewConversation(id);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => error = e.toString());
+    }
+  }
+
   Future<void> _send([String? text]) async {
     final t = (text ?? _input.text).trim();
     if (sending) return;
     if (t.isEmpty && pending.isEmpty) return;
     final drafts = List<DraftAttach>.from(pending);
+    final cmd = slashCommandName(t);
+    final agentTurn = drafts.isNotEmpty || cmd == null || commandStartsAgentTurn(cmd);
+    final newLane = isNewLaneCommand(t);
     _input.clear();
     HapticFeedback.lightImpact();
     setState(() {
-      _beginTurn();
+      if (agentTurn) {
+        _beginTurn();
+      } else {
+        sending = true;
+      }
       pending.clear();
-      if (t.isNotEmpty) {
+      if (t.isNotEmpty && !newLane) {
         events.add(AppChatEvent({
           'type': 'user',
           'text': t,
@@ -860,6 +910,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _endTurn(error: true, body: e.toString());
         error = e.toString();
       });
+    } finally {
+      if (!agentTurn && mounted) {
+        setState(() => sending = false);
+      }
     }
   }
 
@@ -1654,6 +1708,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+          IconButton(
+            tooltip: 'New chat',
+            onPressed: () => unawaited(_startNewChat()),
+            icon: const Icon(Icons.edit_square),
+          ),
           IconButton(
             tooltip: 'History',
             onPressed: _showHistory,

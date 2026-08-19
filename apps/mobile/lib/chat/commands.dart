@@ -31,7 +31,43 @@ const defaultBotCommands = <BotCommand>[
 
 final _slashOnly = {'start', 'help', 'new', 'reset', 'clear', 'stop', 'compact', 'status', 'queue', 'history', 'models', 'skills', 'update', 'mode'};
 
+/// Instant send from the palette — not all of these start an agent turn.
 bool commandSendsImmediately(String command) => _slashOnly.contains(command);
+
+/// Slash commands that must not lock the composer as "Thinking…".
+/// `/new` / `/history` / `/help` finish immediately; treating them as a
+/// long agent turn left the send button disabled after the pane cleared.
+final _noAgentTurn = {
+  'start',
+  'help',
+  'new',
+  'reset',
+  'clear',
+  'stop',
+  'status',
+  'queue',
+  'history',
+  'models',
+  'skills',
+  'mode',
+};
+
+bool commandStartsAgentTurn(String command) => !_noAgentTurn.contains(command);
+
+String? slashCommandName(String text) {
+  final t = text.trim();
+  if (!t.startsWith('/')) return null;
+  final body = t.substring(1).trim();
+  if (body.isEmpty) return null;
+  final space = body.indexOf(RegExp(r'\s'));
+  final cmd = (space < 0 ? body : body.substring(0, space)).toLowerCase();
+  return cmd.replaceAll(RegExp(r'[^a-z0-9_].*$'), '');
+}
+
+bool isNewLaneCommand(String text) {
+  final cmd = slashCommandName(text);
+  return cmd == 'new' || cmd == 'reset' || cmd == 'clear';
+}
 
 List<BotCommand> filterCommands(List<BotCommand> all, String input) {
   var q = input.trim();

@@ -201,8 +201,14 @@ class AppChatEvent {
   bool get isUser => local || type == 'user' || role == 'user';
   bool get isImage => looksLikeImage(name: name, mime: mime, kind: kind);
   bool get isTerminal => type == 'done' || type == 'error';
-  String? get sessionId => raw['sessionId'] as String?;
-  String? get previousSessionId => raw['previousSessionId'] as String?;
+  String? get sessionId {
+    final v = '${raw['sessionId'] ?? ''}'.trim();
+    return v.isEmpty ? null : v;
+  }
+  String? get previousSessionId {
+    final v = '${raw['previousSessionId'] ?? ''}'.trim();
+    return v.isEmpty ? null : v;
+  }
   List<Map<String, dynamic>> get conversations =>
       (raw['conversations'] as List?)
           ?.whereType<Map>()

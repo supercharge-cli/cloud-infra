@@ -225,7 +225,8 @@ class ChatStore {
     }
     activeSessionId = newSessionId;
     await _saveIndex();
-    await save(events: [], answered: {}, sessionId: newSessionId);
+    // Do not write an empty events file here. The live buffer is the source of
+    // truth; a racing first message after /new would be wiped by save([]).
   }
 
   String? _titleFrom(List<AppChatEvent> events, String? fallback) {

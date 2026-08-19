@@ -17,4 +17,17 @@ void main() {
     final hist = filterCommands(defaultBotCommands, '/hist');
     expect(hist.any((c) => c.command == 'history'), isTrue);
   });
+
+  test('/new does not lock the composer as an agent turn', () {
+    expect(commandStartsAgentTurn('new'), isFalse);
+    expect(commandStartsAgentTurn('reset'), isFalse);
+    expect(commandStartsAgentTurn('clear'), isFalse);
+    expect(commandStartsAgentTurn('history'), isFalse);
+    expect(commandStartsAgentTurn('compact'), isTrue);
+    expect(isNewLaneCommand('/new'), isTrue);
+    expect(isNewLaneCommand('/reset'), isTrue);
+    expect(isNewLaneCommand('hello'), isFalse);
+    expect(slashCommandName('/new'), 'new');
+    expect(slashCommandName('/history open abc'), 'history');
+  });
 }
