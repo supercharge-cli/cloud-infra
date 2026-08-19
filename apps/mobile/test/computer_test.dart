@@ -129,6 +129,33 @@ void main() {
     expect(s.livePaused, isTrue);
   });
 
+  test('status labels follow the focused tab', () {
+    final s = ComputerState();
+    expect(s.usingLabel, 'Vectra is using Terminal');
+    expect(s.usingDetail, 'Waiting for commands');
+    s.apply(ev({
+      'type': 'computer',
+      'tab': 'terminal',
+      'kind': 'shell',
+      'state': 'start',
+      'command': 'ls -la',
+      'label': 'ls -la',
+    }));
+    expect(s.usingDetail, 'Executing command: ls -la');
+    s.apply(ev({
+      'type': 'computer',
+      'tab': 'browser',
+      'kind': 'focus',
+      'focus': true,
+      'action': 'show',
+      'url': 'https://example.com',
+      'label': 'Open example.com',
+    }));
+    expect(s.usingLabel, 'Vectra is using Browser');
+    expect(s.usingDetail, 'https://example.com');
+    s.dispose();
+  });
+
   test('image file becomes browser still without switching', () {
     final s = ComputerState();
     s.setStill(path: '/tmp/shot.png', url: 'https://example/shot.png');

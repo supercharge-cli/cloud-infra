@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 
 import '../api/models.dart';
 
@@ -53,8 +53,8 @@ class ComputerLine {
   }
 }
 
-class ComputerState {
-  String tab = 'terminal';
+class ComputerState extends ChangeNotifier {
+  String _tab = 'terminal';
   final List<ComputerLine> lines = [];
   String? browserLabel;
   String? browserUrl;
@@ -65,11 +65,44 @@ class ComputerState {
   bool livePaused = false;
   DateTime? lastFrameAt;
   bool hasActivity = false;
+  bool agentWorking = false;
 
-  bool get isBrowser => tab == 'browser';
+  String get tab => _tab;
+  set tab(String value) {
+    if (_tab == value) return;
+    _tab = value;
+    notifyListeners();
+  }
+
+  bool get isBrowser => _tab == 'browser';
+
+  bool get hasPreview =>
+      (liveJpeg != null && liveJpeg!.isNotEmpty) ||
+      (stillPath != null && stillPath!.isNotEmpty) ||
+      (stillUrl != null && stillUrl!.isNotEmpty);
+
+  String get usingLabel => isBrowser ? 'Vectra is using Browser' : 'Vectra is using Terminal';
+
+  String get usingDetail {
+    if (isBrowser) {
+      if (browserUrl != null && browserUrl!.isNotEmpty) return browserUrl!;
+      if (browserLabel != null && browserLabel!.isNotEmpty) return browserLabel!;
+      return 'No page open';
+    }
+    if (lines.isEmpty) return 'Waiting for commands';
+    final last = lines.last;
+    if (last.running) return 'Executing command: ${last.command}';
+    return last.command;
+  }
+
+  void setAgentWorking(bool value) {
+    if (agentWorking == value) return;
+    agentWorking = value;
+    notifyListeners();
+  }
 
   void clear() {
-    tab = 'terminal';
+    _tab = 'terminal';
     lines.clear();
     browserLabel = null;
     browserUrl = null;
@@ -80,6 +113,8 @@ class ComputerState {
     livePaused = false;
     lastFrameAt = null;
     hasActivity = false;
+    agentWorking = false;
+    notifyListeners();
   }
 
   void replay(Iterable<AppChatEvent> events) {
@@ -109,7 +144,7 @@ class ComputerState {
     final nextTab = ev.tab;
     final shouldFocus = ev.focus || ev.kind == 'focus' || ev.action == 'show';
     if (shouldFocus && (nextTab == 'browser' || nextTab == 'terminal')) {
-      tab = nextTab!;
+      _tab = nextTab!;
     }
     if (ev.kind == 'browser' || nextTab == 'browser') {
       browserLabel = (ev.label != null && ev.label!.isNotEmpty) ? ev.label : ev.text;
@@ -119,6 +154,7 @@ class ComputerState {
         (nextTab == 'terminal' && ev.command != null && ev.kind != 'file' && ev.kind != 'focus')) {
       _applyTerminal(ev);
     }
+    notifyListeners();
   }
 
   void _applyTerminal(AppChatEvent ev) {
@@ -154,25 +190,38 @@ class ComputerState {
     livePaused = false;
     lastFrameAt = DateTime.now();
     hasActivity = true;
+    notifyListeners();
   }
 
   void markLivePaused() {
-    if (live && !livePaused) livePaused = true;
+    if (live && !livePaused) {
+      livePaused = true;
+      notifyListeners();
+    }
   }
 
   void setLiveStatus({bool? connected, bool? screencasting}) {
     if (screencasting == false || connected == false) {
       live = false;
       if (liveJpeg != null) livePaused = true;
+      notifyListeners();
     }
   }
 
   void setStill({String? path, String? url}) {
-    if (path != null && path.isNotEmpty) stillPath = path;
-    if (url != null && url.isNotEmpty) stillUrl = url;
+    var changed = false;
+    if (path != null && path.isNotEmpty) {
+      stillPath = path;
+      changed = true;
+    }
+    if (url != null && url.isNotEmpty) {
+      stillUrl = url;
+      changed = true;
+    }
     if (stillPath != null || stillUrl != null) {
       hasActivity = true;
     }
+    if (changed) notifyListeners();
   }
 
   void _trim() {

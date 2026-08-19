@@ -76,7 +76,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _tick;
   final pending = <DraftAttach>[];
   final computer = ComputerState();
-  bool computerExpanded = true;
+  bool _computerOpen = false;
   bool _browserListening = false;
   Timer? _liveTick;
 
@@ -213,6 +213,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ? DateTime.fromMillisecondsSinceEpoch(started)
               : DateTime.now();
           toolCount = (t['tools'] as num?)?.toInt() ?? toolCount;
+          computer.setAgentWorking(true);
         }
       });
     }).catchError((_) {});
@@ -379,8 +380,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           turnStartedAt ??= DateTime.now();
         }
         if (ev.tools != null) toolCount = ev.tools!;
+        computer.setAgentWorking(true);
       } else {
         turnStartedAt = null;
+        computer.setAgentWorking(false);
       }
       return;
     }
@@ -687,6 +690,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     sending = true;
     error = null;
     lastAssistantText = null;
+    computer.setAgentWorking(true);
     _tick?.cancel();
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || turnStartedAt == null) return;
@@ -710,6 +714,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       lastTurnElapsed = DateTime.now().difference(turnStartedAt!);
     }
     turnStartedAt = null;
+    computer.setAgentWorking(false);
     _tick?.cancel();
     _tick = null;
     _syncBrowserStream();
@@ -796,6 +801,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _input.dispose();
     _scroll.removeListener(_onUserScroll);
     _scroll.dispose();
+    computer.dispose();
     unawaited(store.save(events: events, answered: answered, lastServerId: lastServerId));
     if (turnStartedAt == null) {
       unawaited(TaskNotifications.cancelSilent());
@@ -1628,6 +1634,42 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return true;
   }
 
+  String get _computerTaskTitle {
+    for (var i = events.length - 1; i >= 0; i--) {
+      final e = events[i];
+      if (e.isUser && e.text.trim().isNotEmpty) return e.text.trim();
+    }
+    return computer.peekLabel;
+  }
+
+  void _openComputer() {
+    if (_computerOpen) return;
+    _computerOpen = true;
+    _syncBrowserStream();
+    Navigator.of(context)
+        .push(
+          PageRouteBuilder<void>(
+            fullscreenDialog: true,
+            pageBuilder: (ctx, anim, sec) => ComputerPage(
+              state: computer,
+              instanceName: instanceName,
+              onClose: () => Navigator.of(ctx).pop(),
+              onSelectTab: (tab) {
+                computer.tab = tab;
+                _syncBrowserStream();
+              },
+            ),
+            transitionsBuilder: (ctx, anim, sec, child) {
+              return FadeTransition(opacity: anim, child: child);
+            },
+          ),
+        )
+        .whenComplete(() {
+          _computerOpen = false;
+          if (mounted) _syncBrowserStream();
+        });
+  }
+
   void _openPreview([String? url]) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -1790,19 +1832,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   onRemove: (f) => setState(() => pending.remove(f)),
                   onOpen: _openDraft,
                 ),
-              ComputerPane(
-                state: computer,
-                working: working,
-                expanded: computerExpanded,
-                onToggle: () => setState(() => computerExpanded = !computerExpanded),
-                onSelectTab: (tab) {
-                  setState(() {
-                    computer.tab = tab;
-                    computerExpanded = true;
-                  });
-                  _syncBrowserStream();
-                },
-              ),
               if (palette) _commandOverlay(),
               if (paymentBlocked)
                 SafeArea(
@@ -1816,11 +1845,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 )
               else
                 SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      ListenableBuilder(
+                        listenable: computer,
+                        builder: (context, _) => ComputerBar(
+                          state: computer,
+                          title: _computerTaskTitle,
+                          onOpen: _openComputer,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                         if (working || showKickoff)
                           const Padding(
                             padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
@@ -1894,6 +1934,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                       ],
                     ),
+                  ),
+                    ],
                   ),
                 ),
             ],
