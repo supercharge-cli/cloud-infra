@@ -128,6 +128,15 @@ const sandboxLifecycle =
     : ({ onTimeout: 'kill' as const, autoResume: false as const });
 // Docs use *.e2b.app (https://e2b.dev/docs/network/public-url)
 const previewDomain = process.env.XIBECODE_E2B_PREVIEW_DOMAIN?.trim() || 'e2b.app';
+const sandboxDaemonCommand =
+  process.env.XIBECODE_SANDBOX_DAEMON_COMMAND?.trim() ||
+  'xibecode daemon --workdir /home/user/workspace';
+const sandboxDaemonPidFile =
+  process.env.XIBECODE_SANDBOX_DAEMON_PIDFILE?.trim() || '/tmp/xibecode-daemon.pid';
+const sandboxDaemonLogFile =
+  process.env.XIBECODE_SANDBOX_DAEMON_LOGFILE?.trim() || '/tmp/xibecode-daemon.log';
+const sandboxDaemonMatch =
+  process.env.XIBECODE_SANDBOX_DAEMON_MATCH?.trim() || 'node.*xibecode|xibecode/dist';
 const maxExportBytes = Math.max(
   1,
   Number(process.env.XIBECODE_EXPORT_MAX_MB || 64),
@@ -1345,14 +1354,14 @@ const server = createServer(async (req, res) => {
               '  TOK="${TELEGRAM_BOT_TOKEN:-$XIBECODE_TELEGRAM_BOT_TOKEN}"',
               '  curl -sS -m 10 -X POST "https://api.telegram.org/bot${TOK}/deleteWebhook" -d "drop_pending_updates=false" >/dev/null 2>&1 || true',
               'fi',
-              // Do not pkill -f "xibecode daemon" — matches this exec shell cmdline and
-              // kills the restart (signal: terminated). Pidfile + careful node match only.
-              'if [ -f /tmp/xibecode-daemon.pid ]; then',
-              '  OLD="$(cat /tmp/xibecode-daemon.pid 2>/dev/null)"',
+              // Stop only the configured sandbox daemon. The pidfile avoids matching
+              // the restart shell itself; the optional pattern handles legacy templates.
+              `if [ -f ${shQuote(sandboxDaemonPidFile)} ]; then`,
+              `  OLD="$(cat ${shQuote(sandboxDaemonPidFile)} 2>/dev/null)"`,
               '  if [ -n "$OLD" ]; then kill "$OLD" 2>/dev/null || true; sleep 1; kill -9 "$OLD" 2>/dev/null || true; fi',
-              '  rm -f /tmp/xibecode-daemon.pid',
+              `  rm -f ${shQuote(sandboxDaemonPidFile)}`,
               'fi',
-              'for pid in $(pgrep -f "node.*xibecode|xibecode/dist" 2>/dev/null || true); do',
+              `for pid in $(pgrep -f ${shQuote(sandboxDaemonMatch)} 2>/dev/null || true); do`,
               '  if [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ]; then',
               '    case "$(tr "\\0" " " < /proc/$pid/cmdline 2>/dev/null || true)" in',
               '      *daemon*) kill "$pid" 2>/dev/null || true ;;',
@@ -1360,22 +1369,22 @@ const server = createServer(async (req, res) => {
               '  fi',
               'done',
               'sleep 1',
-              'nohup xibecode daemon --workdir /home/user/workspace >/tmp/xibecode-daemon.log 2>&1 &',
-              'echo $! > /tmp/xibecode-daemon.pid',
+              `nohup ${sandboxDaemonCommand} >${shQuote(sandboxDaemonLogFile)} 2>&1 &`,
+              `echo $! > ${shQuote(sandboxDaemonPidFile)}`,
               'OK=0',
               'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do',
               '  sleep 1',
-              '  if [ -f /tmp/xibecode-daemon.pid ] && kill -0 "$(cat /tmp/xibecode-daemon.pid)" 2>/dev/null; then OK=1; break; fi',
-              '  if pgrep -af "node" 2>/dev/null | grep -F "xibecode" | grep -vF "pgrep" | grep -q .; then OK=1; break; fi',
+              `  if [ -f ${shQuote(sandboxDaemonPidFile)} ] && kill -0 "$(cat ${shQuote(sandboxDaemonPidFile)})" 2>/dev/null; then OK=1; break; fi`,
+              `  if pgrep -af ${shQuote(sandboxDaemonMatch)} 2>/dev/null | grep -vF "pgrep" | grep -q .; then OK=1; break; fi`,
               'done',
               'if [ "$OK" = "1" ]; then echo DAEMON_OK; else echo DAEMON_FAIL; fi',
               'WP="${VECTRA_WAKE_PORT:-8788}"',
               'curl -sS -m 2 "http://127.0.0.1:${WP}/health" 2>/dev/null | head -c 200 || true',
               'echo',
               'echo "--- daemon pid ---"',
-              'cat /tmp/xibecode-daemon.pid 2>/dev/null || true',
+              `cat ${shQuote(sandboxDaemonPidFile)} 2>/dev/null || true`,
               'echo "--- daemon log (tail) ---"',
-              'tail -50 /tmp/xibecode-daemon.log 2>/dev/null || true',
+              `tail -50 ${shQuote(sandboxDaemonLogFile)} 2>/dev/null || true`,
             ].join('\n'),
             timeout: 120,
           });

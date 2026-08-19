@@ -112,9 +112,15 @@ After the gateway has a public URL, put it in Vercel as `XIBECODE_SANDBOX_GATEWA
 
 ### CLI updates on existing sandboxes
 
-New sandboxes get the CLI version pinned in the E2B template (`XIBECODE_E2B_TEMPLATE`,
+New sandboxes get the runtime pinned in the E2B template (`XIBECODE_E2B_TEMPLATE`,
 e.g. `xibecode-full-sandbox`). **Rebuilding/republishing that template** is still how you
 raise the baseline for *new* instances.
+
+### Second Rust-agent template
+
+The Rust-first agent repository contains a second template at `sandbox/e2b-agent-template`. It reuses the existing interactive image baseline—Chromium with `agent-browser`, Node.js, Bun, Python/uv, Git/GitHub CLI, search utilities, process tools, and the workspace—but starts `xai-grok-superagent-server` as the primary daemon. It exposes the app-compatible daemon on port `8790`, the E2B wake/file-share service on `8788`, and the local browser stream on `9223`. Build the Rust binaries with `./sandbox/prepare-e2b-agent-assets.sh`, publish the template, and set the gateway’s `XIBECODE_E2B_TEMPLATE` to its new alias.
+
+The gateway restart route remains backward-compatible. For the Rust-agent template, set `XIBECODE_SANDBOX_DAEMON_COMMAND=xai-grok-superagent-server`, `XIBECODE_SANDBOX_DAEMON_PIDFILE=/tmp/superagent-daemon.pid`, `XIBECODE_SANDBOX_DAEMON_LOGFILE=/tmp/superagent-daemon.log`, and `XIBECODE_SANDBOX_DAEMON_MATCH=xai-grok-superagent-server`. The web and mobile Computer pane already proxy `/v1/computer/browser`; the Rust daemon now emits the same view-only SSE frame contract used by the existing app.
 
 For **existing** instances, the dashboard offers an **opt-in** upgrade when npm has a
 newer `xibecode` than `xibecode -v` inside the sandbox:
@@ -144,6 +150,10 @@ APIs:
 | `XIBECODE_E2B_AUTO_RESUME` | `true` | Wake on SDK/HTTP when paused |
 | `XIBECODE_E2B_SANDBOX_TIMEOUT_MS` | `900000` (15m) | Idle before lifecycle pause |
 | `XIBECODE_E2B_MAX_CONTINUOUS_MS` | `82800000` (~23h) | Pause/resume before E2B 24h hard limit; `0` = off |
+| `XIBECODE_SANDBOX_DAEMON_COMMAND` | `xibecode daemon --workdir /home/user/workspace` | Command used by the restart route inside a sandbox |
+| `XIBECODE_SANDBOX_DAEMON_PIDFILE` | `/tmp/xibecode-daemon.pid` | PID file used for safe daemon restarts |
+| `XIBECODE_SANDBOX_DAEMON_LOGFILE` | `/tmp/xibecode-daemon.log` | Log file tailed after restart |
+| `XIBECODE_SANDBOX_DAEMON_MATCH` | `node.*xibecode|xibecode/dist` | Optional process match for legacy fallback cleanup |
 
 ## Local dev
 

@@ -3,6 +3,7 @@
  * API keys for the cloud provider stay on the gateway, not in the browser.
  */
 
+import { stockBaseUrl } from './provider-defaults';
 import {
   envKeysForProvider,
   parseSavedProviders,
@@ -383,7 +384,7 @@ function parseEnvFile(raw: string): Record<string, string> {
     const body = t.startsWith('export ') ? t.slice(7).trim() : t;
     const i = body.indexOf('=');
     if (i < 0) continue;
-    let key = body.slice(0, i).trim();
+    const key = body.slice(0, i).trim();
     let val = body.slice(i + 1).trim();
     // strip matching single/double quotes around values
     if (
@@ -843,6 +844,49 @@ export async function writeSandboxConfig(
   );
   const sandboxWakeHttp =
     Boolean(telegramBotToken) && Boolean(tgWebhookUrl) && tgWebhookPort > 0;
+  const rustAgentTemplate = (process.env.XIBECODE_E2B_TEMPLATE || '')
+    .trim()
+    .toLowerCase()
+    .includes('superagent');
+  const providerKeyEnv = envKeysForProvider(provider)[0] || 'OPENAI_API_KEY';
+  const rustProviderBaseUrl = baseUrl || stockBaseUrl(provider);
+  const rustProviderFormat = provider === 'anthropic' ? 'anthropic' : 'openai';
+  const rustEnvBody = rustAgentTemplate
+    ? [
+        `SUPERAGENT_PROVIDER=${provider}`,
+        inboxSecret ? `SUPERAGENT_API_TOKEN=${inboxSecret}` : '',
+        model ? `SUPERAGENT_MODEL=${model}` : '',
+        rustProviderBaseUrl ? `SUPERAGENT_PROVIDER_BASE_URL=${rustProviderBaseUrl}` : '',
+        `SUPERAGENT_PROVIDER_FORMAT=${rustProviderFormat}`,
+        `SUPERAGENT_PROVIDER_API_KEY_ENV=${providerKeyEnv}`,
+        `SUPERAGENT_PROVIDER_CONFIG_PATH=/var/lib/superagent/provider-config.toml`,
+        `SUPERAGENT_AGENT_BINARY=/usr/local/bin/superagent-provider-bridge`,
+        `SUPERAGENT_DAEMON_COMMAND=/usr/local/bin/superagent-server`,
+        `SUPERAGENT_DAEMON_WORKDIR=/home/user/workspace`,
+        inboxSecret ? `SUPERAGENT_APP_INBOX_SECRET=${inboxSecret}` : '',
+        inboxSecret ? `SUPERAGENT_GATEWAY_TOKEN=${inboxSecret}` : '',
+        `SUPERAGENT_APP_INBOX_PORT=8790`,
+        `AGENT_BROWSER_STREAM_PORT=9223`,
+        `AGENT_BROWSER_STREAM_QUALITY=40`,
+        `AGENT_BROWSER_STREAM_MAX_WIDTH=960`,
+        `AGENT_BROWSER_STREAM_MAX_HEIGHT=540`,
+        input.instanceId ? `SUPERAGENT_INSTANCE_ID=${input.instanceId}` : '',
+        input.instanceId
+          ? `SUPERAGENT_PUBLIC_MEDIA_BASE=${(
+              process.env.PUBLIC_BASE_URL?.trim() ||
+              process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+              'https://infra.xibeai.in'
+            ).replace(/\/$/, '')}/api/public/media/${encodeURIComponent(input.instanceId)}`
+          : '',
+        sandboxWakeHttp ? `SUPERAGENT_WAKE_PORT=${tgWebhookPort}` : '',
+        sandboxWakeHttp ? `SUPERAGENT_TG_WEBHOOK_URL=${tgWebhookUrl}` : '',
+        sandboxWakeHttp && tgWebhookSecret
+          ? `SUPERAGENT_TELEGRAM_WEBHOOK_SECRET=${tgWebhookSecret}`
+          : '',
+      ]
+        .filter((line) => line !== '')
+        .join('\n') + '\n'
+    : '';
 
   const envBody =
     [
@@ -926,14 +970,43 @@ export async function writeSandboxConfig(
     envBody,
     sandboxId,
   );
-  const w3 = await writeFileInSession(
+    const w3 = await writeFileInSession(
     sessionId,
     '/home/user/.xibecode/profile-default.json',
     profileJson,
     sandboxId,
   );
+  const w4 = rustAgentTemplate
+    ? await execInSession(sessionId, 'mkdir -p /home/user/.superagent', {
+        timeout: 30,
+        sandboxId,
+      })
+    : { success: true };
+  const w5 = rustAgentTemplate
+    ? await writeFileInSession(
+        sessionId,
+        '/home/user/.superagent/daemon.env',
+        rustEnvBody,
+        sandboxId,
+      )
+    : { success: true };
+  const w6 = rustAgentTemplate
+    ? await writeFileInSession(
+        sessionId,
+        '/home/user/.superagent/gateway.env',
+        rustEnvBody,
+        sandboxId,
+      )
+    : { success: true };
+  if (
+    w1.success === false ||
+    w2.success === false ||
+    w3.success === false ||
+    w4.success === false ||
+    w5.success === false ||
+    w6.success === false
+  ) {
 
-  if (w1.success === false || w2.success === false || w3.success === false) {
     logs.push(
       redact(
         `WRITE FAILED: daemon.env=${w1.message || w1.success} gateway.env=${w2.message || w2.success} profile=${w3.message || w3.success}`,
@@ -944,7 +1017,7 @@ export async function writeSandboxConfig(
 
   await execInSession(
     sessionId,
-    'chmod 600 /home/user/.xibecode/daemon.env /home/user/.xibecode/gateway.env /home/user/.xibecode/profile-default.json 2>/dev/null; true',
+    'chmod 600 /home/user/.xibecode/daemon.env /home/user/.xibecode/gateway.env /home/user/.xibecode/profile-default.json /home/user/.superagent/daemon.env /home/user/.superagent/gateway.env 2>/dev/null; true',
     { timeout: 30, sandboxId },
   );
 
