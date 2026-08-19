@@ -76,7 +76,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _tick;
   final pending = <DraftAttach>[];
   final computer = ComputerState();
-  bool computerExpanded = false;
   bool _browserListening = false;
   Timer? _liveTick;
 
@@ -262,7 +261,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final want = !disposed &&
         !backgrounded &&
         !paymentBlocked &&
-        (computerExpanded || computer.isBrowser || computer.live || working);
+        (computer.isBrowser || computer.live || working);
     if (want) {
       _listenBrowser();
     } else {
@@ -439,7 +438,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       showKickoff = false;
       computer.apply(ev);
       if (computerTabForEvent(ev) == 'browser') {
-        computerExpanded = true;
         _syncBrowserStream();
       }
     }
@@ -527,7 +525,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         toolCount = 0;
         showKickoff = false;
         computer.clear();
-        computerExpanded = false;
       });
     }
     store.activeSessionId = nextId;
@@ -852,6 +849,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final t = (text ?? _input.text).trim();
     if (sending) return;
     if (t.isEmpty && pending.isEmpty) return;
+    if (pending.isEmpty && slashCommandName(t) == 'history') {
+      _input.clear();
+      _showHistory();
+      return;
+    }
     final drafts = List<DraftAttach>.from(pending);
     final cmd = slashCommandName(t);
     final agentTurn = drafts.isNotEmpty || cmd == null || commandStartsAgentTurn(cmd);
@@ -1173,6 +1175,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _pickCommand(BotCommand c) {
+    if (c.command == 'history') {
+      _input.clear();
+      _showHistory();
+      return;
+    }
     if (commandSendsImmediately(c.command)) {
       _input.clear();
       _send('/${c.command}');
@@ -1709,37 +1716,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ),
             ),
           IconButton(
-            tooltip: 'New chat',
-            onPressed: () => unawaited(_startNewChat()),
-            icon: const Icon(Icons.edit_square),
-          ),
-          IconButton(
-            tooltip: 'History',
-            onPressed: _showHistory,
-            icon: const Icon(Icons.history),
-          ),
-          IconButton(
-            tooltip: 'Computer',
-            onPressed: () {
-              setState(() => computerExpanded = !computerExpanded);
-              _syncBrowserStream();
-            },
-            icon: Icon(
-              computer.isBrowser ? Icons.public : Icons.computer,
-              color: computer.hasActivity || working ? Vc.greenSoft : null,
-            ),
-          ),
-          IconButton(
             tooltip: 'Preview',
             onPressed: () => _openPreview(),
             icon: const Icon(Icons.language),
           ),
-          if (working)
-            IconButton(
-              tooltip: 'Stop',
-              onPressed: () => api.stopChat(id),
-              icon: const Icon(Icons.stop_circle_outlined),
-            ),
           IconButton(
             tooltip: 'Control',
             onPressed: () => context.push('/instance/$id', extra: inst),
@@ -1808,16 +1788,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ComputerPane(
                 state: computer,
                 working: working,
-                expanded: computerExpanded,
-                onToggle: () {
-                  setState(() => computerExpanded = !computerExpanded);
-                  _syncBrowserStream();
-                },
                 onSelectTab: (tab) {
-                  setState(() {
-                    computer.tab = tab;
-                    computerExpanded = true;
-                  });
+                  setState(() => computer.tab = tab);
                   _syncBrowserStream();
                 },
               ),

@@ -10,20 +10,15 @@ class ComputerPane extends StatelessWidget {
     super.key,
     required this.state,
     required this.working,
-    required this.expanded,
-    required this.onToggle,
     required this.onSelectTab,
   });
 
   final ComputerState state;
   final bool working;
-  final bool expanded;
-  final VoidCallback onToggle;
   final ValueChanged<String> onSelectTab;
 
   @override
   Widget build(BuildContext context) {
-    if (!state.hasActivity && !working) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       child: DecoratedBox(
@@ -35,78 +30,64 @@ class ComputerPane extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            InkWell(
-              onTap: onToggle,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-                child: Row(
-                  children: [
-                    Icon(
-                      state.isBrowser ? Icons.public : Icons.terminal,
-                      size: 16,
-                      color: working ? Vc.greenSoft : Vc.muted,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              child: Row(
+                children: [
+                  Icon(
+                    state.isBrowser ? Icons.public : Icons.terminal,
+                    size: 16,
+                    color: working ? Vc.greenSoft : Vc.muted,
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Computer',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
                     ),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Computer',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      state.peekLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: Vc.muted),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        state.peekLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12, color: Vc.muted),
-                      ),
+                  ),
+                  if (working)
+                    const SizedBox(
+                      width: 10,
+                      height: 10,
+                      child: CircularProgressIndicator(strokeWidth: 1.5, color: Vc.greenSoft),
                     ),
-                    if (working)
-                      const Padding(
-                        padding: EdgeInsets.only(right: 4),
-                        child: SizedBox(
-                          width: 10,
-                          height: 10,
-                          child: CircularProgressIndicator(strokeWidth: 1.5, color: Vc.greenSoft),
-                        ),
-                      ),
-                    Icon(
-                      expanded ? Icons.expand_more : Icons.expand_less,
-                      size: 18,
-                      color: Vc.faint,
-                    ),
-                  ],
-                ),
+                ],
               ),
             ),
-            if (expanded) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                child: Row(
-                  children: [
-                    _TabChip(
-                      label: 'Terminal',
-                      selected: !state.isBrowser,
-                      onTap: () => onSelectTab('terminal'),
-                    ),
-                    const SizedBox(width: 6),
-                    _TabChip(
-                      label: 'Browser',
-                      selected: state.isBrowser,
-                      onTap: () => onSelectTab('browser'),
-                    ),
-                  ],
-                ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Row(
+                children: [
+                  _TabChip(
+                    label: 'Terminal',
+                    selected: !state.isBrowser,
+                    onTap: () => onSelectTab('terminal'),
+                  ),
+                  const SizedBox(width: 6),
+                  _TabChip(
+                    label: 'Browser',
+                    selected: state.isBrowser,
+                    onTap: () => onSelectTab('browser'),
+                  ),
+                ],
               ),
-              SizedBox(
-                height: 220,
-                child: state.isBrowser ? _BrowserView(state: state) : _TerminalView(state: state),
-              ),
-            ],
+            ),
+            SizedBox(
+              height: 220,
+              child: state.isBrowser ? _BrowserView(state: state) : _TerminalView(state: state),
+            ),
           ],
         ),
       ),
@@ -208,7 +189,7 @@ class _BrowserView extends StatelessWidget {
     } else {
       frame = Center(
         child: Text(
-          state.browserLabel ?? 'Waiting for the page…',
+          state.browserLabel ?? 'No page open',
           textAlign: TextAlign.center,
           style: const TextStyle(color: Vc.muted, fontSize: 12),
         ),
