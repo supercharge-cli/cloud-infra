@@ -67,6 +67,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
   const [message, setMessage] = useState('');
   const [frame, setFrame] = useState('');
   const [browserStatus, setBrowserStatus] = useState('connecting');
+  const [previewHosts, setPreviewHosts] = useState<{ app: string; wake: string; browser: string }>({ app: '', wake: '', browser: '' });
 
   const loadDirectory = useCallback(async (path: string) => {
     setLoadingFiles(true);
@@ -89,6 +90,22 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
   useEffect(() => {
     if (tab === 'files' && !disabled) void loadDirectory(directory);
   }, [directory, disabled, loadDirectory, tab]);
+
+  useEffect(() => {
+    if (disabled) return;
+    const controller = new AbortController();
+    void Promise.all([8790, 8788, 9223].map(async (port) => {
+      const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/preview?port=${port}`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) return '';
+      const data = (await res.json()) as { host?: string };
+      return String(data.host || '');
+    })).then(([app, wake, browser]) => {
+      if (!controller.signal.aborted) setPreviewHosts({ app, wake, browser });
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [disabled, instanceId]);
 
   useEffect(() => {
     if (tab !== 'browser' || disabled) return;
@@ -252,8 +269,11 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
 
       {tab === 'browser' ? (
         <div className="overflow-hidden rounded-xl border border-zinc-800 bg-black">
-          <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-xs text-zinc-400">
-            <span>Computer stream · port 9223 · {browserStatus}</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2 text-xs text-zinc-400">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+              <span>Computer stream · port 9223 · {browserStatus}</span>
+              {previewHosts.browser ? <a href={previewHosts.browser} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">Open raw port</a> : null}
+            </div>
             {sandboxId ? <span className="font-mono text-zinc-600">{sandboxId.slice(0, 16)}…</span> : null}
           </div>
           <div className="flex min-h-[320px] items-center justify-center bg-zinc-950 p-2">
@@ -269,7 +289,12 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
           </div>
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+        <>
+          <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-zinc-500">
+            {previewHosts.app ? <a href={previewHosts.app} target="_blank" rel="noreferrer" className="rounded border border-zinc-800 px-2 py-1 hover:border-sky-700 hover:text-sky-300">App API · {previewHosts.app}</a> : null}
+            {previewHosts.wake ? <a href={`${previewHosts.wake}/health`} target="_blank" rel="noreferrer" className="rounded border border-zinc-800 px-2 py-1 hover:border-sky-700 hover:text-sky-300">Wake/share · {previewHosts.wake}</a> : null}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
           <div className="rounded-xl border border-zinc-800 bg-black p-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="truncate font-mono text-xs text-zinc-400">{directory}</span>
@@ -304,7 +329,8 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
             <textarea value={content} onChange={(event) => setContent(event.target.value)} disabled={!selectedPath} spellCheck={false} className="min-h-[290px] w-full resize-y rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs leading-relaxed text-zinc-200 outline-none focus:border-sky-700 disabled:opacity-60" placeholder="Select a text file to inspect or edit it." />
             {shareUrl ? <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-900/50 bg-emerald-950/20 px-3 py-2 text-xs"><Check className="h-3.5 w-3.5 text-emerald-400" /><a href={shareUrl} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-emerald-300 hover:underline">{shareUrl}</a><a href={shareUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-emerald-300 hover:underline"><ExternalLink className="h-3.5 w-3.5" /> Open</a></div> : null}
           </div>
-        </div>
+          </div>
+        </>
       )}
     </section>
   );
