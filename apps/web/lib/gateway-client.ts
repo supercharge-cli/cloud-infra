@@ -1361,6 +1361,25 @@ export function getGatewayUrl(): string {
   return gatewayBase();
 }
 
+/** Server-only request helper for control-plane workspace operations. */
+export async function gatewaySessionFetch(
+  sessionId: string,
+  path: string,
+  init: RequestInit = {},
+  opts?: { sandboxId?: string },
+): Promise<Response> {
+  if (opts?.sandboxId) {
+    await ensureGatewaySession(sessionId, opts.sandboxId).catch(() => undefined);
+  }
+  const doFetch = () => gwFetch(`/sessions/${encodeURIComponent(sessionId)}${path}`, init);
+  let res = await doFetch();
+  if ((res.status === 404 || res.status === 502) && opts?.sandboxId) {
+    await ensureGatewaySession(sessionId, opts.sandboxId);
+    res = await doFetch();
+  }
+  return res;
+}
+
 /** Public host for a port inside the sandbox (E2B getHost / preview URL). */
 export async function getSandboxPreviewHost(
   sessionId: string,
@@ -1672,4 +1691,51 @@ export async function appInboxFetch(
   if (secret) headers.set('authorization', `Bearer ${secret}`);
   if (!headers.has('accept')) headers.set('accept', 'application/json');
   return fetch(`${base}${path}`, { ...init, headers });
+}
+
+export type SandboxShare = {
+  token: string;
+  name: string;
+  path: string;
+  url: string;
+  expiresAt?: string;
+};
+
+/** Mint a public, capability-scoped download URL from the template share service. */
+export async function createSandboxShare(
+  sessionId: string,
+  path: string,
+  opts?: { sandboxId?: string; name?: string },
+): Promise<SandboxShare> {
+  if (opts?.sandboxId) {
+    await ensureGatewaySession(sessionId, opts.sandboxId).catch(() => undefined);
+  }
+  const host = await getSandboxPreviewHost(sessionId, 8788);
+  if (!host) throw new Error('Wake/file-share service is not reachable; wake the sandbox and try again.');
+  const secret = appInboxSecret();
+  const headers = new Headers({ 'content-type': 'application/json', accept: 'application/json' });
+  if (secret) headers.set('authorization', `Bearer ${secret}`);
+  const res = await fetch(`${host.replace(/\/$/, '')}/share`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ path, name: opts?.name }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const text = await res.text();
+  let data: Partial<SandboxShare> & { ok?: boolean; error?: string } = {};
+  try {
+    data = JSON.parse(text) as typeof data;
+  } catch {
+    data = { error: text.slice(0, 300) };
+  }
+  if (!res.ok || data.ok === false || !data.url || !data.token) {
+    throw new Error(data.error || `Share request failed (${res.status})`);
+  }
+  return {
+    token: String(data.token),
+    name: String(data.name || opts?.name || path.split('/').pop() || 'file'),
+    path: String(data.path || path),
+    url: String(data.url),
+    expiresAt: data.expiresAt ? String(data.expiresAt) : undefined,
+  };
 }

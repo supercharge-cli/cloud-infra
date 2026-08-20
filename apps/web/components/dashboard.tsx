@@ -10,6 +10,7 @@ import {
   stockBaseUrl,
 } from '@/lib/provider-defaults';
 import type { Instance } from '@/lib/store';
+import { SandboxWorkspace } from '@/components/sandbox-workspace';
 
 type SavedSlot = {
   id: string;
@@ -1626,6 +1627,12 @@ export function Dashboard({ email }: { email: string }) {
               )}
             </div>
           </div>
+
+          <SandboxWorkspace
+            instanceId={selectedInst.id}
+            sandboxId={selectedInst.sandboxId}
+            disabled={selectedInst.paid === false || selectedInst.billingStatus === 'past_due'}
+          />
 
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
             <h3 className="mb-3 font-semibold text-white">Channel pairing</h3>
