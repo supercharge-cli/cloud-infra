@@ -68,6 +68,11 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
   const [frame, setFrame] = useState('');
   const [browserStatus, setBrowserStatus] = useState('connecting');
   const [previewHosts, setPreviewHosts] = useState<{ app: string; wake: string; browser: string }>({ app: '', wake: '', browser: '' });
+  const [controlBusy, setControlBusy] = useState(false);
+  const [browserUrl, setBrowserUrl] = useState('');
+  const [browserSelector, setBrowserSelector] = useState('');
+  const [browserText, setBrowserText] = useState('');
+  const [browserKey, setBrowserKey] = useState('Enter');
 
   const loadDirectory = useCallback(async (path: string) => {
     setLoadingFiles(true);
@@ -227,6 +232,26 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
     window.open(`/api/instances/${encodeURIComponent(instanceId)}/workspace/export`, '_blank', 'noopener,noreferrer');
   }
 
+  async function runBrowserAction(action: Record<string, unknown>) {
+    if (controlBusy) return;
+    setControlBusy(true);
+    setMessage('');
+    try {
+      const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/control`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(action),
+      });
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || data.stderr || 'Browser action failed');
+      setMessage(`Browser action completed: ${String(data.action || action.action)}.`);
+    } catch (error) {
+      setMessage((error as Error).message);
+    } finally {
+      setControlBusy(false);
+    }
+  }
+
   const tabs = [
     { id: 'browser' as const, label: 'Browser', icon: Monitor },
     { id: 'files' as const, label: 'Files', icon: File },
@@ -275,6 +300,26 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
               {previewHosts.browser ? <a href={previewHosts.browser} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">Open raw port</a> : null}
             </div>
             {sandboxId ? <span className="font-mono text-zinc-600">{sandboxId.slice(0, 16)}…</span> : null}
+          </div>
+          <div className="grid gap-2 border-b border-zinc-800 bg-zinc-950 p-3 text-xs sm:grid-cols-2">
+            <div className="flex gap-2 sm:col-span-2">
+              <input value={browserUrl} onChange={(event) => setBrowserUrl(event.target.value)} placeholder="https://example.com" className="min-w-0 flex-1 rounded border border-zinc-800 bg-black px-2 py-1.5 text-zinc-200 outline-none focus:border-sky-700" />
+              <button type="button" disabled={controlBusy || !browserUrl.trim() || disabled} onClick={() => void runBrowserAction({ action: 'navigate', url: browserUrl.trim() })} className="rounded bg-sky-700 px-3 py-1.5 font-medium text-white hover:bg-sky-600 disabled:opacity-50">Go</button>
+            </div>
+            <input value={browserSelector} onChange={(event) => setBrowserSelector(event.target.value)} placeholder="CSS selector or @ref" className="rounded border border-zinc-800 bg-black px-2 py-1.5 text-zinc-200 outline-none focus:border-sky-700" />
+            <div className="flex gap-2">
+              <button type="button" disabled={controlBusy || !browserSelector.trim() || disabled} onClick={() => void runBrowserAction({ action: 'click', selector: browserSelector.trim() })} className="flex-1 rounded border border-zinc-700 px-2 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Click</button>
+              <button type="button" disabled={controlBusy || disabled} onClick={() => void runBrowserAction({ action: 'scroll', direction: 'down', pixels: 650 })} className="flex-1 rounded border border-zinc-700 px-2 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Scroll down</button>
+              <button type="button" disabled={controlBusy || disabled} onClick={() => void runBrowserAction({ action: 'back' })} className="rounded border border-zinc-700 px-2 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Back</button>
+            </div>
+            <input value={browserText} onChange={(event) => setBrowserText(event.target.value)} placeholder="Text to fill/type" className="rounded border border-zinc-800 bg-black px-2 py-1.5 text-zinc-200 outline-none focus:border-sky-700" />
+            <div className="flex gap-2">
+              <button type="button" disabled={controlBusy || !browserSelector.trim() || disabled} onClick={() => void runBrowserAction({ action: 'fill', selector: browserSelector.trim(), text: browserText })} className="flex-1 rounded border border-zinc-700 px-2 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Fill</button>
+              <button type="button" disabled={controlBusy || !browserSelector.trim() || disabled} onClick={() => void runBrowserAction({ action: 'type', selector: browserSelector.trim(), text: browserText })} className="flex-1 rounded border border-zinc-700 px-2 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Type</button>
+              <input value={browserKey} onChange={(event) => setBrowserKey(event.target.value)} placeholder="Enter" className="w-20 rounded border border-zinc-800 bg-black px-2 py-1.5 text-zinc-200" />
+              <button type="button" disabled={controlBusy || !browserKey.trim() || disabled} onClick={() => void runBrowserAction({ action: 'press', key: browserKey.trim() })} className="rounded border border-zinc-700 px-2 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Key</button>
+            </div>
+            <p className="sm:col-span-2 text-[10px] text-amber-500/80">Every action is sent through the authenticated app route and requires browser control to be enabled in the sandbox environment.</p>
           </div>
           <div className="flex min-h-[320px] items-center justify-center bg-zinc-950 p-2">
             {frame ? (
