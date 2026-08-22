@@ -58,17 +58,21 @@ export async function requireChatInstance(
 }
 
 async function inboxHealthy(inst: Instance): Promise<boolean> {
-  try {
-    const health = await appInboxFetch(
-      inst.sessionId,
-      "/health",
-      { signal: AbortSignal.timeout(5_000) },
-      { sandboxId: inst.sandboxId, runtime: inst.runtime || "xibecode" },
-    );
-    return health.ok;
-  } catch {
-    return false;
+  const opts = {
+    sandboxId: inst.sandboxId,
+    runtime: inst.runtime || "xibecode",
+  } as const;
+  for (const path of ["/health", "/healthz"]) {
+    try {
+      const health = await appInboxFetch(inst.sessionId, path, {
+        signal: AbortSignal.timeout(5_000),
+      }, opts);
+      if (health.ok) return true;
+    } catch {
+      // try next path
+    }
   }
+  return false;
 }
 
 const inboxLocks = new Map<string, Promise<void>>();
