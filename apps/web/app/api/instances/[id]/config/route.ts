@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import {
+  detectSandboxRuntime,
   getSandboxPreviewHost,
   readSandboxConfig,
   restartDaemon,
@@ -29,11 +30,20 @@ export async function GET(_req: Request, ctx: Ctx) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
   try {
+    const runtime = inst.runtime || "xibecode";
     const sandbox = await readSandboxConfig(
       inst.sessionId,
       inst.sandboxId,
-      inst.runtime || "xibecode",
+      runtime,
     );
+    const detectedSandboxRuntime = await detectSandboxRuntime(
+      inst.sessionId,
+      inst.sandboxId,
+      runtime,
+    );
+    const runtimeMismatch =
+      detectedSandboxRuntime !== "unknown" &&
+      detectedSandboxRuntime !== runtime;
     console.info("[timing] instance config", {
       instanceId: id,
       ms: Math.round(performance.now() - started),
@@ -42,9 +52,14 @@ export async function GET(_req: Request, ctx: Ctx) {
     return NextResponse.json({
       instanceId: inst.id,
       name: inst.name,
-      runtime: inst.runtime || "xibecode",
+      runtime,
       stored: inst.config || {},
       sandbox,
+      detectedSandboxRuntime,
+      runtimeMismatch,
+      runtimeMismatchMessage: runtimeMismatch
+        ? `This instance is recorded as ${runtime}, but the live sandbox image looks like ${detectedSandboxRuntime}. Create a new instance with the correct agent image — runtime cannot be changed after creation.`
+        : null,
       wake: {
         secretSet: Boolean(wakeSecret),
         publicBaseUrl: publicBaseUrl() || null,

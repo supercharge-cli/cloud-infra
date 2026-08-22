@@ -77,58 +77,26 @@ class _InstancesScreenState extends State<InstancesScreen> {
   }
 
   Future<void> _create() async {
-    final name = await showDialog<String>(
+    final request = await showDialog<CreateInstanceRequest>(
       context: context,
-      builder: (ctx) {
-        final c = TextEditingController(text: 'workspace');
-        return AlertDialog(
-          title: const Text('New instance'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(controller: c, decoration: const InputDecoration(labelText: 'Name')),
-              const SizedBox(height: 12),
-              Text(
-                quota.canCreateFree
-                    ? 'Free slot available (${quota.used}/${quota.limit} used).'
-                    : 'Free quota used. Extra instances are paid.',
-                style: const TextStyle(color: Vc.muted, fontSize: 12),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            if (!quota.canCreateFree)
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, 'pay:${c.text.trim()}'),
-                child: const Text('Pay & create'),
-              )
-            else ...[
-              OutlinedButton(
-                onPressed: () => Navigator.pop(ctx, 'pay:${c.text.trim()}'),
-                child: const Text('Pay extra'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, c.text.trim()),
-                child: const Text('Create free'),
-              ),
-            ],
-          ],
-        );
-      },
+      builder: (ctx) => _CreateInstanceDialog(canCreateFree: quota.canCreateFree),
     );
-    if (name == null || name.isEmpty) return;
-    if (name.startsWith('pay:')) {
-      final paidName = name.substring(4);
-      if (paidName.isEmpty) return;
+    if (request == null || request.name.isEmpty) return;
+    final name = request.name;
+    final runtime = request.runtime;
+    if (request.paid) {
       if (!mounted) return;
-      await _afterPush(context.push('/billing', extra: BillingArgs(name: paidName)));
+      await _afterPush(
+        context.push(
+          '/billing',
+          extra: BillingArgs(name: name, runtime: runtime),
+        ),
+      );
       return;
     }
     setState(() => overlay = 'Provisioning sandbox…');
     try {
-      final created = await api.createInstance(name);
+      final created = await api.createInstance(name, runtime: runtime);
       await _reload();
       if (!mounted) return;
       context.push('/chat/${created.id}', extra: created);
@@ -136,7 +104,12 @@ class _InstancesScreenState extends State<InstancesScreen> {
       if (!mounted) return;
       if (e.paymentRequired) {
         if (!mounted) return;
-        await _afterPush(context.push('/billing', extra: BillingArgs(name: name)));
+        await _afterPush(
+          context.push(
+            '/billing',
+            extra: BillingArgs(name: name, runtime: runtime),
+          ),
+        );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
       }
@@ -323,6 +296,14 @@ class _InstancesScreenState extends State<InstancesScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(inst.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
+                          Text(
+                            inst.runtimeLabel,
+                            style: TextStyle(
+                              color: inst.runtime == AgentRuntime.supercharge ? Vc.green : Vc.muted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                           if (inst.paidUntil != null && inst.paidUntil!.isNotEmpty)
                             Text('Paid until ${inst.paidUntil}', style: const TextStyle(color: Vc.faint, fontSize: 11)),
                         ],
@@ -396,6 +377,98 @@ class _InstancesScreenState extends State<InstancesScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _CreateInstanceDialog extends StatefulWidget {
+  const _CreateInstanceDialog({required this.canCreateFree});
+  final bool canCreateFree;
+
+  @override
+  State<_CreateInstanceDialog> createState() => _CreateInstanceDialogState();
+}
+
+class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
+  final _name = TextEditingController(text: 'workspace');
+  AgentRuntime _runtime = AgentRuntime.xibecode;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  void _submit({required bool paid}) {
+    final name = _name.text.trim();
+    if (name.isEmpty) return;
+    Navigator.pop(
+      context,
+      CreateInstanceRequest(name: name, runtime: _runtime, paid: paid),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('New instance'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Agent image',
+            style: TextStyle(color: Vc.muted, fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          SegmentedButton<AgentRuntime>(
+            segments: const [
+              ButtonSegment(value: AgentRuntime.xibecode, label: Text('XibeCode')),
+              ButtonSegment(value: AgentRuntime.supercharge, label: Text('Supercharge')),
+            ],
+            selected: {_runtime},
+            onSelectionChanged: (value) {
+              if (value.isEmpty) return;
+              setState(() => _runtime = value.first);
+            },
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Supercharge uses the published Supercharge E2B template. XibeCode keeps the existing image.',
+            style: TextStyle(color: Vc.faint, fontSize: 11, height: 1.35),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _name,
+            decoration: const InputDecoration(labelText: 'Name'),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            widget.canCreateFree
+                ? 'Free slot available.'
+                : 'Free quota used. Extra instances are paid.',
+            style: const TextStyle(color: Vc.muted, fontSize: 12),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        if (!widget.canCreateFree)
+          FilledButton(
+            onPressed: () => _submit(paid: true),
+            child: const Text('Pay & create'),
+          )
+        else ...[
+          OutlinedButton(
+            onPressed: () => _submit(paid: true),
+            child: const Text('Pay extra'),
+          ),
+          FilledButton(
+            onPressed: () => _submit(paid: false),
+            child: const Text('Create free'),
+          ),
+        ],
+      ],
     );
   }
 }

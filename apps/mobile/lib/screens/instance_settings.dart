@@ -66,6 +66,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   bool byopReady = false;
   bool byopConnected = false;
   bool pastePollinationsKey = false;
+  String? runtimeMismatchMessage;
   final history = <ExecResult>[];
 
   VectraClient get api => context.read<SessionController>().client;
@@ -292,6 +293,9 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       } catch (_) {}
       final cfg = await api.getConfig(id);
       config = cfg;
+      runtimeMismatchMessage = cfg['runtimeMismatch'] == true
+          ? '${cfg['runtimeMismatchMessage'] ?? 'Runtime mismatch detected.'}'
+          : null;
       final stored = cfg['stored'] as Map<String, dynamic>? ?? {};
       final sandbox = cfg['sandbox'] as Map<String, dynamic>? ?? {};
       provider.text = _str(sandbox, stored, 'provider').isEmpty
@@ -573,6 +577,22 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                             ],
                           ],
                         ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Agent image: ${inst?.runtimeLabel ?? AgentRuntime.xibecode.label}',
+                          style: TextStyle(
+                            color: inst?.runtime == AgentRuntime.supercharge ? Vc.green : Vc.muted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (runtimeMismatchMessage != null) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            runtimeMismatchMessage!,
+                            style: const TextStyle(color: Vc.amber, fontSize: 12, height: 1.35),
+                          ),
+                        ],
                         const SizedBox(height: 14),
                         Row(
                           children: [

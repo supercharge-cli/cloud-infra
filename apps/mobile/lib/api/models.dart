@@ -1,5 +1,27 @@
 import '../files/kinds.dart' show fileExt, imageExts;
 
+enum AgentRuntime { xibecode, supercharge }
+
+extension AgentRuntimeApi on AgentRuntime {
+  String get apiValue => name;
+
+  String get label => this == AgentRuntime.supercharge ? 'Supercharge' : 'XibeCode';
+
+  static AgentRuntime parse(Object? raw) =>
+      '$raw'.toLowerCase() == 'supercharge' ? AgentRuntime.supercharge : AgentRuntime.xibecode;
+}
+
+class CreateInstanceRequest {
+  const CreateInstanceRequest({
+    required this.name,
+    this.runtime = AgentRuntime.xibecode,
+    this.paid = false,
+  });
+  final String name;
+  final AgentRuntime runtime;
+  final bool paid;
+}
+
 class AuthUser {
   AuthUser({required this.id, required this.email, this.role});
   final String id;
@@ -92,6 +114,7 @@ class CloudInstance {
     this.billingStatus,
     this.liveMessage,
     this.paidUntil,
+    this.runtime = AgentRuntime.xibecode,
   });
   final String id;
   final String name;
@@ -105,6 +128,9 @@ class CloudInstance {
   final String? billingStatus;
   final String? liveMessage;
   final String? paidUntil;
+  final AgentRuntime runtime;
+
+  String get runtimeLabel => runtime.label;
 
   String get displayState => liveState ?? status;
   bool get isPaused => displayState.toLowerCase() == 'paused';
@@ -125,6 +151,7 @@ class CloudInstance {
         billingStatus: j['billingStatus'] as String?,
         liveMessage: j['liveMessage'] as String?,
         paidUntil: j['paidUntil'] as String?,
+        runtime: AgentRuntimeApi.parse(j['runtime']),
       );
 }
 
@@ -261,9 +288,14 @@ class ExecResult {
 }
 
 class BillingArgs {
-  const BillingArgs({this.instanceId, this.name});
+  const BillingArgs({
+    this.instanceId,
+    this.name,
+    this.runtime = AgentRuntime.xibecode,
+  });
   final String? instanceId;
   final String? name;
+  final AgentRuntime runtime;
   bool get renew => instanceId != null && instanceId!.isNotEmpty;
 }
 

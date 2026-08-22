@@ -147,8 +147,14 @@ class VectraClient {
     return CloudInstance.fromJson(data['instance'] as Map<String, dynamic>);
   }
 
-  Future<CloudInstance> createInstance(String name) async {
-    final data = await _json('POST', '/api/instances', body: {'name': name}, timeout: _slow);
+  Future<CloudInstance> createInstance(
+    String name, {
+    AgentRuntime runtime = AgentRuntime.xibecode,
+  }) async {
+    final data = await _json('POST', '/api/instances', body: {
+      'name': name,
+      'runtime': runtime.apiValue,
+    }, timeout: _slow);
     return CloudInstance.fromJson(data['instance'] as Map<String, dynamic>);
   }
 
@@ -398,12 +404,14 @@ class VectraClient {
     String? name,
     String? instanceId,
     String currency = 'INR',
+    AgentRuntime runtime = AgentRuntime.xibecode,
   }) =>
       _json('POST', '/api/billing/create-order', body: {
         'purpose': purpose,
         'name': ?name,
         'instanceId': ?instanceId,
         'currency': currency,
+        'runtime': runtime.apiValue,
       }, timeout: _fast);
 
   Future<Map<String, dynamic>> verifyPayment({

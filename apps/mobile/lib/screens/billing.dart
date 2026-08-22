@@ -64,6 +64,7 @@ class _BillingScreenState extends State<BillingScreen> {
         instanceId: args.instanceId,
         name: args.name,
         currency: currency,
+        runtime: args.runtime,
       );
       _rzp.open({
         'key': order['keyId'],
@@ -151,6 +152,7 @@ class _BillingScreenState extends State<BillingScreen> {
                         if (args.name != null) ...[
                           const SizedBox(height: 10),
                           Text('Instance: ${args.name}', style: const TextStyle(color: Vc.muted)),
+                          Text('Runtime: ${args.runtime.label}', style: const TextStyle(color: Vc.muted)),
                         ],
                         const SizedBox(height: 18),
                         FilledButton(

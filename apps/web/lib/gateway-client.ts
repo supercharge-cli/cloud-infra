@@ -536,9 +536,9 @@ function hint(secret: string | undefined): string | undefined {
   return `${secret.slice(0, 4)}…${secret.slice(-4)}`;
 }
 
-function emptyConfigView(): SandboxConfigView {
+function emptyConfigView(runtime: AgentRuntime = "xibecode"): SandboxConfigView {
   return {
-    runtime: "xibecode",
+    runtime,
     hasApiKey: false,
     hasTelegramToken: false,
     hasDiscordToken: false,
@@ -583,6 +583,7 @@ function strField(obj: Record<string, unknown>, key: string): string {
 function viewFromSources(
   env: Record<string, string>,
   profile: Record<string, unknown>,
+  runtimeHint?: AgentRuntime,
 ): SandboxConfigView {
   // Prefer profile (what xibecode CLI/Telegram setup writes) then daemon/gateway env.
   const apiKey = pick(strField(profile, "apiKey"), apiKeyFromEnv(env));
@@ -619,12 +620,13 @@ function viewFromSources(
     env.OPENAI_BASE_URL,
     env.ANTHROPIC_BASE_URL,
   );
-  const runtime: AgentRuntime =
+  const inferredRuntime: AgentRuntime =
     strField(profile, "runtime").toLowerCase() === "supercharge" ||
     env.SUPERCHARGE_RUNTIME === "supercharge" ||
     env.SUPERAGENT_RUNTIME === "supercharge"
       ? "supercharge"
       : "xibecode";
+  const runtime = runtimeHint || inferredRuntime;
   const provider = pick(
     strField(profile, "provider"),
     env.SUPERAGENT_PROVIDER,
@@ -768,7 +770,7 @@ PY`,
           env?: Record<string, string>;
           profile?: Record<string, unknown>;
         };
-        return viewFromSources(parsed.env || {}, parsed.profile || {});
+        return viewFromSources(parsed.env || {}, parsed.profile || {}, runtime);
       } catch {
         /* fall through to file reads */
       }
@@ -802,9 +804,35 @@ PY`,
       ...parseEnvFile(envFile.content || ""),
     };
     const profile = parseProfileJson(profileFile.content || "");
-    return viewFromSources(env, profile);
+    return viewFromSources(env, profile, runtime);
   } catch {
-    return emptyConfigView();
+    return emptyConfigView(runtime);
+  }
+}
+
+/** Inspect the live sandbox image to see which agent stack is installed. */
+export async function detectSandboxRuntime(
+  sessionId: string,
+  sandboxId?: string,
+  runtime?: AgentRuntime,
+): Promise<AgentRuntime | "unknown"> {
+  try {
+    const r = await execInSession(
+      sessionId,
+      [
+        "if [ -x /usr/local/bin/supercharge-superagent-server ] || [ -x /usr/local/bin/supercharge ]; then echo supercharge; exit 0; fi",
+        "if command -v xibecode >/dev/null 2>&1; then echo xibecode; exit 0; fi",
+        "if pgrep -af 'xibecode|supercharge-superagent-server' 2>/dev/null | grep -q supercharge-superagent-server; then echo supercharge; exit 0; fi",
+        "if pgrep -af xibecode 2>/dev/null | grep -q xibecode; then echo xibecode; exit 0; fi",
+        "echo unknown",
+      ].join("\n"),
+      { timeout: 30, sandboxId, runtime },
+    );
+    const line = (r.stdout || "").trim().split("\n").pop()?.trim();
+    if (line === "supercharge" || line === "xibecode") return line;
+    return "unknown";
+  } catch {
+    return "unknown";
   }
 }
 
@@ -1010,6 +1038,8 @@ export async function writeSandboxConfig(
           `SUPERAGENT_MEDIA_ROOT=/home/user/workspace/.superagent-media`,
           `SUPERAGENT_BROWSER_CONTROL_ENABLED=true`,
           `SUPERAGENT_WAKE_PORT=8788`,
+          `SUPERAGENT_RUNTIME=supercharge`,
+          `SUPERCHARGE_RUNTIME=supercharge`,
           `SUPERAGENT_APP_INBOX_PORT=8790`,
           `AGENT_BROWSER_STREAM_PORT=9223`,
           `AGENT_BROWSER_STREAM_QUALITY=40`,
@@ -1031,6 +1061,7 @@ export async function writeSandboxConfig(
             ? `OPENAI_BASE_URL=${baseUrl}`
             : "",
           `XIBECODE_DAEMON_WORKDIR=/home/user/workspace`,
+          `XIBECODE_RUNTIME=xibecode`,
           inboxSecret ? `XIBECODE_APP_INBOX_SECRET=${inboxSecret}` : "",
           inboxSecret ? `XIBECODE_GATEWAY_TOKEN=${inboxSecret}` : "",
           `XIBECODE_APP_INBOX_PORT=8790`,
@@ -1886,6 +1917,8 @@ export async function bootstrapAppInbox(
           SUPERAGENT_MEDIA_ROOT: "/home/user/workspace/.superagent-media",
           SUPERAGENT_BROWSER_CONTROL_ENABLED: "true",
           SUPERAGENT_WAKE_PORT: "8788",
+          SUPERAGENT_RUNTIME: "supercharge",
+          SUPERCHARGE_RUNTIME: "supercharge",
           AGENT_BROWSER_STREAM_PORT: "9223",
           AGENT_BROWSER_STREAM_QUALITY: "40",
           AGENT_BROWSER_STREAM_MAX_WIDTH: "960",
