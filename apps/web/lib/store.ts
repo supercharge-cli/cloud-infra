@@ -1,8 +1,8 @@
-import { nanoid } from 'nanoid';
-import { getDb } from './mongodb';
-import { hashPassword, verifyPassword } from './auth';
+import { nanoid } from "nanoid";
+import { getDb } from "./mongodb";
+import { hashPassword, verifyPassword } from "./auth";
 
-export type UserRole = 'admin' | 'user';
+export type UserRole = "admin" | "user";
 
 export type UserPollinations = {
   accessToken: string;
@@ -42,27 +42,32 @@ export function publicUser(u: User): PublicUser {
 
 /** Emails in ADMIN_EMAILS env are always treated as admin (comma-separated). */
 export function isAdminEmail(email: string): boolean {
-  const list = (process.env.ADMIN_EMAILS || '')
-    .split(',')
+  const list = (process.env.ADMIN_EMAILS || "")
+    .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   return list.includes(email.trim().toLowerCase());
 }
 
-export function resolveUserRole(user: Pick<User, 'email' | 'role'>): UserRole {
-  if (user.role === 'admin') return 'admin';
-  if (isAdminEmail(user.email)) return 'admin';
-  return user.role === 'user' ? 'user' : 'user';
+export function resolveUserRole(user: Pick<User, "email" | "role">): UserRole {
+  if (user.role === "admin") return "admin";
+  if (isAdminEmail(user.email)) return "admin";
+  return user.role === "user" ? "user" : "user";
 }
 
-export function isAdminUser(user: Pick<User, 'email' | 'role'> | null | undefined): boolean {
+export function isAdminUser(
+  user: Pick<User, "email" | "role"> | null | undefined,
+): boolean {
   if (!user) return false;
-  return resolveUserRole(user) === 'admin';
+  return resolveUserRole(user) === "admin";
 }
 
-export type InstanceStatus = 'creating' | 'running' | 'paused' | 'error' | 'destroyed';
+export type InstanceStatus =
+  "creating" | "running" | "paused" | "error" | "destroyed";
+export type AgentRuntime = "xibecode" | "supercharge";
 
 export type InstanceConfigMeta = {
+  runtime?: AgentRuntime;
   provider?: string;
   model?: string;
   baseUrl?: string;
@@ -76,12 +81,13 @@ export type Instance = {
   id: string;
   userId: string;
   name: string;
+  runtime: AgentRuntime;
   sessionId: string;
   sandboxId?: string;
   status: InstanceStatus;
   aiConfigured: boolean;
   telegramConfigured: boolean;
-  plan: 'hosting-4c8g';
+  plan: "hosting-4c8g";
   config?: InstanceConfigMeta;
   /** Random secret in Telegram webhook URL — host fallback wake (legacy long-poll path). */
   wakeSecret?: string;
@@ -94,7 +100,7 @@ export type Instance = {
    * `sandbox` = Telegram → https://8788-{sandboxId}.e2b.app/telegram
    * `host` = legacy Vercel arm-on-pause + long-poll
    */
-  telegramWebhookMode?: 'sandbox' | 'host';
+  telegramWebhookMode?: "sandbox" | "host";
   /** Public HTTPS webhook URL on the sandbox (when mode=sandbox). */
   sandboxTelegramWebhookUrl?: string;
   /** Telegram secret_token for sandbox webhook. */
@@ -106,7 +112,7 @@ export type Instance = {
   isFree?: boolean;
   /** ISO — access valid until this time (see BILLING_* env for price/period). Ignored when isFree. */
   paidUntil?: string;
-  billingStatus?: 'active' | 'past_due' | 'none';
+  billingStatus?: "active" | "past_due" | "none";
   lastPaymentId?: string;
   lastOrderId?: string;
   createdAt: string;
@@ -118,13 +124,14 @@ export type PendingOrder = {
   id: string;
   userId: string;
   email: string;
-  purpose: 'new_instance' | 'renew';
+  purpose: "new_instance" | "renew";
   instanceId?: string;
   instanceName: string;
+  runtime?: AgentRuntime;
   razorpayOrderId: string;
   amountCents: number;
   currency: string;
-  status: 'created' | 'paid' | 'failed';
+  status: "created" | "paid" | "failed";
   createdAt: string;
   paidAt?: string;
   paymentId?: string;
@@ -145,33 +152,32 @@ export async function ensureBootstrapAdmins(database: {
     updateOne: (q: object, u: object) => Promise<unknown>;
   };
 }): Promise<void> {
-  const password = process.env.ADMIN_BOOTSTRAP_PASSWORD?.trim() || '';
+  const password = process.env.ADMIN_BOOTSTRAP_PASSWORD?.trim() || "";
   if (password.length < 8) return;
 
-  const emails = (process.env.ADMIN_EMAILS || '')
-    .split(',')
+  const emails = (process.env.ADMIN_EMAILS || "")
+    .split(",")
     .map((s) => s.trim().toLowerCase())
-    .filter((e) => e.includes('@'));
+    .filter((e) => e.includes("@"));
   if (!emails.length) return;
 
   for (const email of emails) {
-    const existing = await database.collection('users').findOne({ email });
+    const existing = await database.collection("users").findOne({ email });
     const passwordHash = hashPassword(password);
     if (!existing) {
       const user: User = {
         id: nanoid(12),
         email,
         passwordHash,
-        role: 'admin',
+        role: "admin",
         createdAt: new Date().toISOString(),
       };
-      await database.collection('users').insertOne(user);
+      await database.collection("users").insertOne(user);
       console.log(`[bootstrap] created admin ${email}`);
     } else {
-      await database.collection('users').updateOne(
-        { email },
-        { $set: { passwordHash, role: 'admin' } },
-      );
+      await database
+        .collection("users")
+        .updateOne({ email }, { $set: { passwordHash, role: "admin" } });
       console.log(`[bootstrap] synced admin password/role ${email}`);
     }
   }
@@ -184,16 +190,19 @@ export async function createUser(
 ): Promise<User> {
   const db = await getDb();
   const normalized = email.trim().toLowerCase();
-  if (!normalized || !normalized.includes('@')) {
-    throw new Error('Valid email is required');
+  if (!normalized || !normalized.includes("@")) {
+    throw new Error("Valid email is required");
   }
-  if (password.length < 8) throw new Error('Password must be at least 8 characters');
+  if (password.length < 8)
+    throw new Error("Password must be at least 8 characters");
 
-  const existing = await db.collection<User>('users').findOne({ email: normalized });
-  if (existing) throw new Error('Email already registered');
+  const existing = await db
+    .collection<User>("users")
+    .findOne({ email: normalized });
+  if (existing) throw new Error("Email already registered");
 
   const role: UserRole =
-    opts?.role === 'admin' || isAdminEmail(normalized) ? 'admin' : 'user';
+    opts?.role === "admin" || isAdminEmail(normalized) ? "admin" : "user";
 
   const user: User = {
     id: nanoid(12),
@@ -202,18 +211,20 @@ export async function createUser(
     role,
     createdAt: new Date().toISOString(),
   };
-  await db.collection<User>('users').insertOne(user);
+  await db.collection<User>("users").insertOne(user);
   return user;
 }
 
 export async function findUserByEmail(email: string): Promise<User | null> {
   const db = await getDb();
-  return db.collection<User>('users').findOne({ email: email.trim().toLowerCase() });
+  return db
+    .collection<User>("users")
+    .findOne({ email: email.trim().toLowerCase() });
 }
 
 export async function findUserById(id: string): Promise<User | null> {
   const db = await getDb();
-  return db.collection<User>('users').findOne({ id });
+  return db.collection<User>("users").findOne({ id });
 }
 
 export async function setUserPollinations(
@@ -222,9 +233,13 @@ export async function setUserPollinations(
 ): Promise<User | null> {
   const db = await getDb();
   if (pollinations) {
-    await db.collection<User>('users').updateOne({ id: userId }, { $set: { pollinations } });
+    await db
+      .collection<User>("users")
+      .updateOne({ id: userId }, { $set: { pollinations } });
   } else {
-    await db.collection<User>('users').updateOne({ id: userId }, { $unset: { pollinations: '' } });
+    await db
+      .collection<User>("users")
+      .updateOne({ id: userId }, { $unset: { pollinations: "" } });
   }
   return findUserById(userId);
 }
@@ -241,50 +256,57 @@ export async function authenticateUser(
 export async function listAllUsers(): Promise<PublicUser[]> {
   const db = await getDb();
   const rows = await db
-    .collection<User>('users')
+    .collection<User>("users")
     .find({})
     .sort({ createdAt: -1 })
     .toArray();
   return rows.map(publicUser);
 }
 
-export async function setUserRole(userId: string, role: UserRole): Promise<PublicUser | null> {
+export async function setUserRole(
+  userId: string,
+  role: UserRole,
+): Promise<PublicUser | null> {
   const db = await getDb();
   const user = await findUserById(userId);
   if (!user) return null;
-  await db.collection('users').updateOne({ id: userId }, { $set: { role } });
+  await db.collection("users").updateOne({ id: userId }, { $set: { role } });
   return publicUser({ ...user, role });
 }
 
 /** Permanently remove user row. Call after handling their instances. */
 export async function deleteUserById(userId: string): Promise<boolean> {
   const db = await getDb();
-  const r = await db.collection('users').deleteOne({ id: userId });
+  const r = await db.collection("users").deleteOne({ id: userId });
   return r.deletedCount > 0;
 }
 
 export async function countInstancesForUser(userId: string): Promise<number> {
   const db = await getDb();
-  return db.collection('instances').countDocuments({
+  return db.collection("instances").countDocuments({
     userId,
-    status: { $ne: 'destroyed' },
+    status: { $ne: "destroyed" },
   });
 }
 
 /** Non-destroyed free-tier instances for this user (for free quota). */
-export async function countFreeInstancesForUser(userId: string): Promise<number> {
+export async function countFreeInstancesForUser(
+  userId: string,
+): Promise<number> {
   const db = await getDb();
-  return db.collection('instances').countDocuments({
+  return db.collection("instances").countDocuments({
     userId,
     isFree: true,
-    status: { $ne: 'destroyed' },
+    status: { $ne: "destroyed" },
   });
 }
 
-export async function listInstancesForUser(userId: string): Promise<Instance[]> {
+export async function listInstancesForUser(
+  userId: string,
+): Promise<Instance[]> {
   const db = await getDb();
   return db
-    .collection<Instance>('instances')
+    .collection<Instance>("instances")
     .find({ userId })
     .sort({ createdAt: -1 })
     .toArray();
@@ -293,7 +315,7 @@ export async function listInstancesForUser(userId: string): Promise<Instance[]> 
 /** Hard-delete instance document from Mongo (after sandbox destroyed). */
 export async function hardDeleteInstance(id: string): Promise<boolean> {
   const db = await getDb();
-  const r = await db.collection('instances').deleteOne({ id });
+  const r = await db.collection("instances").deleteOne({ id });
   return r.deletedCount > 0;
 }
 
@@ -305,20 +327,22 @@ export async function reassignInstance(
   const prev = await getInstanceById(instanceId);
   if (!prev) return null;
   const owner = await findUserById(newUserId);
-  if (!owner) throw new Error('Target user not found');
+  if (!owner) throw new Error("Target user not found");
   const next: Instance = {
     ...prev,
     userId: newUserId,
     updatedAt: new Date().toISOString(),
   };
   const { _id: _drop, ...clean } = next as Instance & { _id?: unknown };
-  await db.collection('instances').updateOne({ id: instanceId }, { $set: clean });
+  await db
+    .collection("instances")
+    .updateOne({ id: instanceId }, { $set: clean });
   return clean as Instance;
 }
 
 export async function deleteOrdersForUser(userId: string): Promise<number> {
   const db = await getDb();
-  const r = await db.collection('orders').deleteMany({ userId });
+  const r = await db.collection("orders").deleteMany({ userId });
   return r.deletedCount || 0;
 }
 
@@ -329,10 +353,10 @@ export async function listAllInstances(opts?: {
   const db = await getDb();
   const filter: Record<string, unknown> = {};
   if (!opts?.includeDestroyed) {
-    filter.status = { $ne: 'destroyed' };
+    filter.status = { $ne: "destroyed" };
   }
   return db
-    .collection<Instance>('instances')
+    .collection<Instance>("instances")
     .find(filter)
     .sort({ createdAt: -1 })
     .limit(opts?.limit ?? 500)
@@ -341,7 +365,7 @@ export async function listAllInstances(opts?: {
 
 export async function getInstanceById(id: string): Promise<Instance | null> {
   const db = await getDb();
-  return db.collection<Instance>('instances').findOne({ id });
+  return db.collection<Instance>("instances").findOne({ id });
 }
 
 export async function adminUpdateInstance(
@@ -349,11 +373,7 @@ export async function adminUpdateInstance(
   patch: Partial<
     Pick<
       Instance,
-      | 'status'
-      | 'paidUntil'
-      | 'billingStatus'
-      | 'lastError'
-      | 'name'
+      "status" | "paidUntil" | "billingStatus" | "lastError" | "name"
     >
   >,
 ): Promise<Instance | null> {
@@ -366,14 +386,14 @@ export async function adminUpdateInstance(
     updatedAt: new Date().toISOString(),
   };
   const { _id: _drop, ...clean } = next as Instance & { _id?: unknown };
-  await db.collection('instances').updateOne({ id }, { $set: clean });
+  await db.collection("instances").updateOne({ id }, { $set: clean });
   return clean as Instance;
 }
 
 export async function listRecentOrders(limit = 100): Promise<PendingOrder[]> {
   const db = await getDb();
   return db
-    .collection<PendingOrder>('orders')
+    .collection<PendingOrder>("orders")
     .find({})
     .sort({ createdAt: -1 })
     .limit(limit)
@@ -391,19 +411,27 @@ export async function adminStats(): Promise<{
   ordersTotal: number;
 }> {
   const db = await getDb();
-  const users = await db.collection('users').countDocuments();
-  const allUsers = await db.collection<User>('users').find({}).toArray();
+  const users = await db.collection("users").countDocuments();
+  const allUsers = await db.collection<User>("users").find({}).toArray();
   const admins = allUsers.filter((u) => isAdminUser(u)).length;
-  const instances = await db.collection('instances').countDocuments({ status: { $ne: 'destroyed' } });
-  const running = await db.collection('instances').countDocuments({ status: 'running' });
-  const paused = await db.collection('instances').countDocuments({ status: 'paused' });
+  const instances = await db
+    .collection("instances")
+    .countDocuments({ status: { $ne: "destroyed" } });
+  const running = await db
+    .collection("instances")
+    .countDocuments({ status: "running" });
+  const paused = await db
+    .collection("instances")
+    .countDocuments({ status: "paused" });
   const now = new Date().toISOString();
-  const paidActive = await db.collection('instances').countDocuments({
-    status: { $ne: 'destroyed' },
+  const paidActive = await db.collection("instances").countDocuments({
+    status: { $ne: "destroyed" },
     paidUntil: { $gt: now },
   });
-  const ordersPaid = await db.collection('orders').countDocuments({ status: 'paid' });
-  const ordersTotal = await db.collection('orders').countDocuments();
+  const ordersPaid = await db
+    .collection("orders")
+    .countDocuments({ status: "paid" });
+  const ordersTotal = await db.collection("orders").countDocuments();
   return {
     users,
     admins,
@@ -424,19 +452,20 @@ export async function listInstances(
   const filter: Record<string, unknown> = { userId };
   // Paused/running/error always listed so the owner can resume. Destroyed hidden by default.
   if (!opts?.includeDestroyed) {
-    filter.status = { $ne: 'destroyed' };
+    filter.status = { $ne: "destroyed" };
   }
   return db
-    .collection<Instance>('instances')
+    .collection<Instance>("instances")
     .find(filter)
     .sort({ createdAt: -1 })
     .toArray();
 }
 
 /** Strip secrets before sending instance JSON to the browser. */
-export function publicInstance(
-  inst: Instance,
-): Omit<Instance, 'telegramBotToken' | 'wakeSecret' | 'telegramWebhookSecret'> & {
+export function publicInstance(inst: Instance): Omit<
+  Instance,
+  "telegramBotToken" | "wakeSecret" | "telegramWebhookSecret"
+> & {
   hasWakeSecret?: boolean;
   hasTelegramWebhookSecret?: boolean;
 } {
@@ -461,7 +490,7 @@ export async function getInstance(
   id: string,
 ): Promise<Instance | null> {
   const db = await getDb();
-  return db.collection<Instance>('instances').findOne({ id, userId });
+  return db.collection<Instance>("instances").findOne({ id, userId });
 }
 
 export async function createInstanceRecord(input: {
@@ -469,34 +498,38 @@ export async function createInstanceRecord(input: {
   name: string;
   sessionId: string;
   sandboxId?: string;
+  runtime?: AgentRuntime;
   isFree?: boolean;
   paidUntil?: string;
-  billingStatus?: Instance['billingStatus'];
+  billingStatus?: Instance["billingStatus"];
 }): Promise<Instance> {
   const db = await getDb();
   const now = new Date().toISOString();
   const inst: Instance = {
     id: nanoid(10),
     userId: input.userId,
-    name: input.name.trim() || 'workspace',
+    name: input.name.trim() || "workspace",
     sessionId: input.sessionId,
     sandboxId: input.sandboxId,
-    status: 'running',
+    runtime: input.runtime || "xibecode",
+    status: "running",
     aiConfigured: false,
     telegramConfigured: false,
-    plan: 'hosting-4c8g',
+    plan: "hosting-4c8g",
     config: {},
     wakeSecret: nanoid(24),
     ...(input.isFree
-      ? { isFree: true, billingStatus: 'active' as const }
+      ? { isFree: true, billingStatus: "active" as const }
       : {
           ...(input.paidUntil ? { paidUntil: input.paidUntil } : {}),
-          ...(input.billingStatus ? { billingStatus: input.billingStatus } : {}),
+          ...(input.billingStatus
+            ? { billingStatus: input.billingStatus }
+            : {}),
         }),
     createdAt: now,
     updatedAt: now,
   };
-  await db.collection<Instance>('instances').insertOne(inst);
+  await db.collection<Instance>("instances").insertOne(inst);
   return inst;
 }
 
@@ -506,23 +539,24 @@ export async function updateInstance(
   patch: Partial<
     Pick<
       Instance,
-      | 'status'
-      | 'sandboxId'
-      | 'aiConfigured'
-      | 'telegramConfigured'
-      | 'lastError'
-      | 'name'
-      | 'config'
-      | 'wakeSecret'
-      | 'telegramBotToken'
-      | 'telegramWebhookMode'
-      | 'sandboxTelegramWebhookUrl'
-      | 'telegramWebhookSecret'
-      | 'paidUntil'
-      | 'billingStatus'
-      | 'isFree'
-      | 'lastPaymentId'
-      | 'lastOrderId'
+      | "status"
+      | "sandboxId"
+      | "runtime"
+      | "aiConfigured"
+      | "telegramConfigured"
+      | "lastError"
+      | "name"
+      | "config"
+      | "wakeSecret"
+      | "telegramBotToken"
+      | "telegramWebhookMode"
+      | "sandboxTelegramWebhookUrl"
+      | "telegramWebhookSecret"
+      | "paidUntil"
+      | "billingStatus"
+      | "isFree"
+      | "lastPaymentId"
+      | "lastOrderId"
     >
   >,
 ): Promise<Instance | null> {
@@ -533,18 +567,23 @@ export async function updateInstance(
     ...prev,
     ...patch,
     config:
-      patch.config !== undefined ? { ...prev.config, ...patch.config } : prev.config,
+      patch.config !== undefined
+        ? { ...prev.config, ...patch.config }
+        : prev.config,
     updatedAt: new Date().toISOString(),
   };
   // strip Mongo _id if present from findOne
   const { _id: _drop, ...clean } = next as Instance & { _id?: unknown };
-  await db.collection('instances').updateOne({ id, userId }, { $set: clean });
+  await db.collection("instances").updateOne({ id, userId }, { $set: clean });
   return clean as Instance;
 }
 
-export async function deleteInstance(userId: string, id: string): Promise<boolean> {
+export async function deleteInstance(
+  userId: string,
+  id: string,
+): Promise<boolean> {
   const db = await getDb();
-  const r = await db.collection('instances').deleteOne({ id, userId });
+  const r = await db.collection("instances").deleteOne({ id, userId });
   return r.deletedCount > 0;
 }
 
@@ -554,19 +593,19 @@ export async function getInstanceByWake(
   wakeSecret: string,
 ): Promise<Instance | null> {
   const db = await getDb();
-  return db.collection<Instance>('instances').findOne({ id, wakeSecret });
+  return db.collection<Instance>("instances").findOne({ id, wakeSecret });
 }
 
 /** Lookup by E2B sandbox id (lifecycle webhooks, ops). */
 export async function getInstanceBySandboxId(
   sandboxId: string,
 ): Promise<Instance | null> {
-  const id = (sandboxId || '').trim();
+  const id = (sandboxId || "").trim();
   if (!id) return null;
   const db = await getDb();
-  return db.collection<Instance>('instances').findOne({
+  return db.collection<Instance>("instances").findOne({
     sandboxId: id,
-    status: { $nin: ['destroyed'] },
+    status: { $nin: ["destroyed"] },
   });
 }
 
@@ -579,19 +618,19 @@ export async function updateInstanceById(
   patch: Partial<
     Pick<
       Instance,
-      | 'status'
-      | 'lastError'
-      | 'sandboxId'
-      | 'telegramBotToken'
-      | 'wakeSecret'
-      | 'telegramWebhookMode'
-      | 'sandboxTelegramWebhookUrl'
-      | 'telegramWebhookSecret'
+      | "status"
+      | "lastError"
+      | "sandboxId"
+      | "telegramBotToken"
+      | "wakeSecret"
+      | "telegramWebhookMode"
+      | "sandboxTelegramWebhookUrl"
+      | "telegramWebhookSecret"
     >
   >,
 ): Promise<Instance | null> {
   const db = await getDb();
-  const prev = await db.collection<Instance>('instances').findOne({ id });
+  const prev = await db.collection<Instance>("instances").findOne({ id });
   if (!prev) return null;
   const next: Instance = {
     ...prev,
@@ -599,13 +638,16 @@ export async function updateInstanceById(
     updatedAt: new Date().toISOString(),
   };
   const { _id: _drop, ...clean } = next as Instance & { _id?: unknown };
-  await db.collection('instances').updateOne({ id }, { $set: clean });
+  await db.collection("instances").updateOne({ id }, { $set: clean });
   return clean as Instance;
 }
 
-export async function ensureWakeSecret(userId: string, id: string): Promise<string> {
+export async function ensureWakeSecret(
+  userId: string,
+  id: string,
+): Promise<string> {
   const inst = await getInstance(userId, id);
-  if (!inst) throw new Error('Instance not found');
+  if (!inst) throw new Error("Instance not found");
   if (inst.wakeSecret) return inst.wakeSecret;
   const wakeSecret = nanoid(24);
   await updateInstance(userId, id, { wakeSecret });
@@ -614,14 +656,14 @@ export async function ensureWakeSecret(userId: string, id: string): Promise<stri
 
 export async function savePendingOrder(order: PendingOrder): Promise<void> {
   const db = await getDb();
-  await db.collection<PendingOrder>('orders').insertOne(order);
+  await db.collection<PendingOrder>("orders").insertOne(order);
 }
 
 export async function findPendingOrderByRazorpayId(
   razorpayOrderId: string,
 ): Promise<PendingOrder | null> {
   const db = await getDb();
-  return db.collection<PendingOrder>('orders').findOne({ razorpayOrderId });
+  return db.collection<PendingOrder>("orders").findOne({ razorpayOrderId });
 }
 
 export async function markOrderPaid(
@@ -631,17 +673,14 @@ export async function markOrderPaid(
   const db = await getDb();
   const prev = await findPendingOrderByRazorpayId(razorpayOrderId);
   if (!prev) return null;
-  if (prev.status === 'paid') return prev;
+  if (prev.status === "paid") return prev;
   const next: PendingOrder = {
     ...prev,
-    status: 'paid',
+    status: "paid",
     paymentId,
     paidAt: new Date().toISOString(),
   };
   const { _id: _drop, ...clean } = next as PendingOrder & { _id?: unknown };
-  await db.collection('orders').updateOne(
-    { razorpayOrderId },
-    { $set: clean },
-  );
+  await db.collection("orders").updateOne({ razorpayOrderId }, { $set: clean });
   return clean as PendingOrder;
 }

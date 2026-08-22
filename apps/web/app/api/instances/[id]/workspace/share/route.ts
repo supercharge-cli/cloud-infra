@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server';
-import { createSandboxShare } from '@/lib/gateway-client';
-import { requireChatInstance } from '@/lib/app-chat';
+import { NextResponse } from "next/server";
+import { createSandboxShare } from "@/lib/gateway-client";
+import { requireChatInstance } from "@/lib/app-chat";
 
 export const maxDuration = 60;
 
@@ -18,21 +18,34 @@ export async function POST(req: Request, ctx: Ctx) {
   try {
     body = (await req.json()) as typeof body;
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const path = String(body.path || '').trim();
-  const name = String(body.name || '').trim();
-  if (!path || path.length > MAX_PATH_LENGTH || path.includes('\0') || path.includes('..')) {
-    return NextResponse.json({ error: 'Invalid workspace path' }, { status: 400 });
+  const path = String(body.path || "").trim();
+  const name = String(body.name || "").trim();
+  if (
+    !path ||
+    path.length > MAX_PATH_LENGTH ||
+    path.includes("\0") ||
+    path.includes("..")
+  ) {
+    return NextResponse.json(
+      { error: "Invalid workspace path" },
+      { status: 400 },
+    );
   }
-  if (name.length > MAX_NAME_LENGTH || name.includes('/') || name.includes('\\')) {
-    return NextResponse.json({ error: 'Invalid share name' }, { status: 400 });
+  if (
+    name.length > MAX_NAME_LENGTH ||
+    name.includes("/") ||
+    name.includes("\\")
+  ) {
+    return NextResponse.json({ error: "Invalid share name" }, { status: 400 });
   }
 
   try {
     const share = await createSandboxShare(gate.inst.sessionId, path, {
       sandboxId: gate.inst.sandboxId,
+      runtime: gate.inst.runtime || "xibecode",
       name: name || undefined,
     });
     return NextResponse.json({ ok: true, share });

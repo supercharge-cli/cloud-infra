@@ -1,14 +1,14 @@
-import { NextResponse } from 'next/server';
-import { getSessionUser } from '@/lib/auth';
-import { getPlan, hasInstanceAccess } from '@/lib/billing';
+import { NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth";
+import { getPlan, hasInstanceAccess } from "@/lib/billing";
 import {
   recreateSandboxSession,
   restartDaemon,
   wakeSession,
-} from '@/lib/gateway-client';
-import { buildSandboxTelegramWebhookUrl } from '@/lib/sandbox-telegram';
-import { syncTelegramWakeWebhook } from '@/lib/telegram-webhook';
-import { getInstance, publicInstance, updateInstance } from '@/lib/store';
+} from "@/lib/gateway-client";
+import { buildSandboxTelegramWebhookUrl } from "@/lib/sandbox-telegram";
+import { syncTelegramWakeWebhook } from "@/lib/telegram-webhook";
+import { getInstance, publicInstance, updateInstance } from "@/lib/store";
 
 /** New sandbox + copy workspace/keys can take a few minutes */
 export const maxDuration = 300;
@@ -18,23 +18,23 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function POST(_req: Request, ctx: Ctx) {
   const user = await getSessionUser();
   if (!user) {
-    return NextResponse.json({ error: 'Login required' }, { status: 401 });
+    return NextResponse.json({ error: "Login required" }, { status: 401 });
   }
   const { id } = await ctx.params;
   const inst = await getInstance(user.id, id);
   if (!inst) {
-    return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+    return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
-  if (inst.status === 'destroyed') {
-    return NextResponse.json({ error: 'Instance destroyed' }, { status: 410 });
+  if (inst.status === "destroyed") {
+    return NextResponse.json({ error: "Instance destroyed" }, { status: 410 });
   }
   if (!hasInstanceAccess(inst)) {
     const plan = getPlan();
     return NextResponse.json(
       {
-        error: 'Subscription expired',
+        error: "Subscription expired",
         message: `Renew for ₹${plan.priceInr} or $${plan.priceUsd}/month to move this workspace.`,
-        code: 'PAYMENT_REQUIRED',
+        code: "PAYMENT_REQUIRED",
         paidUntil: inst.paidUntil || null,
       },
       { status: 402 },
@@ -44,15 +44,17 @@ export async function POST(_req: Request, ctx: Ctx) {
   try {
     const wake = await wakeSession(inst.sessionId, {
       sandboxId: inst.sandboxId,
+      runtime: inst.runtime || "xibecode",
       restartDaemon: false,
     });
     const moved = await recreateSandboxSession(inst.sessionId, {
       sandboxId: inst.sandboxId,
+      runtime: inst.runtime || "xibecode",
     });
     if (!moved.ok || !moved.sandboxId) {
-      const msg = moved.message || 'Could not create the new sandbox';
+      const msg = moved.message || "Could not create the new sandbox";
       await updateInstance(user.id, inst.id, {
-        status: 'error',
+        status: "error",
         lastError: msg.slice(0, 500),
       }).catch(() => undefined);
       return NextResponse.json(
@@ -67,19 +69,23 @@ export async function POST(_req: Request, ctx: Ctx) {
 
     const next = await updateInstance(user.id, inst.id, {
       sandboxId: moved.sandboxId,
-      status: 'running',
+      status: "running",
       lastError: undefined,
       sandboxTelegramWebhookUrl: webhookUrl || undefined,
     });
 
-    const restart = await restartDaemon(inst.sessionId, moved.sandboxId);
+    const restart = await restartDaemon(
+      inst.sessionId,
+      moved.sandboxId,
+      inst.runtime || "xibecode",
+    );
     const tg = inst.telegramBotToken
       ? await syncTelegramWakeWebhook({
           botToken: inst.telegramBotToken,
           instanceId: inst.id,
           wakeSecret: inst.wakeSecret,
-          sandboxState: 'running',
-          mode: inst.telegramWebhookMode || 'sandbox',
+          sandboxState: "running",
+          mode: inst.telegramWebhookMode || "sandbox",
           sandboxId: moved.sandboxId,
           sandboxWebhookUrl: webhookUrl,
           telegramWebhookSecret: inst.telegramWebhookSecret,
@@ -93,9 +99,11 @@ export async function POST(_req: Request, ctx: Ctx) {
       template: moved.template,
       bytes: moved.bytes,
       logs: [
-        wake.ok === false ? `wake: ${wake.message || 'not ok'}` : 'wake: ok',
+        wake.ok === false ? `wake: ${wake.message || "not ok"}` : "wake: ok",
         ...moved.logs,
-        restart.ok ? 'daemon restarted on new sandbox' : `daemon restart: ${restart.logs.join(' ')}`,
+        restart.ok
+          ? "daemon restarted on new sandbox"
+          : `daemon restart: ${restart.logs.join(" ")}`,
         tg || undefined,
       ].filter(Boolean),
       instance: publicInstance(next || { ...inst, sandboxId: moved.sandboxId }),
@@ -103,7 +111,7 @@ export async function POST(_req: Request, ctx: Ctx) {
   } catch (e) {
     const msg = (e as Error).message.slice(0, 500);
     await updateInstance(user.id, inst.id, {
-      status: 'error',
+      status: "error",
       lastError: msg,
     }).catch(() => undefined);
     return NextResponse.json({ error: msg }, { status: 502 });

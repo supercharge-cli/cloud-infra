@@ -5,13 +5,14 @@ import {
   updateInstance,
   type User,
   type UserPollinations,
-} from '@/lib/store';
-import { PROVIDER_DEFAULTS } from '@/lib/provider-defaults';
+  type AgentRuntime,
+} from "@/lib/store";
+import { PROVIDER_DEFAULTS } from "@/lib/provider-defaults";
 import {
   restartDaemon,
   wakeSession,
   writeSandboxConfig,
-} from '@/lib/gateway-client';
+} from "@/lib/gateway-client";
 
 const STOCK = PROVIDER_DEFAULTS.pollinations;
 
@@ -20,7 +21,7 @@ export type PollenBalance = {
   paid?: number;
   quest?: number;
   budget?: number;
-  currency: 'pollen';
+  currency: "pollen";
   note?: string;
   raw: Record<string, unknown>;
 };
@@ -68,7 +69,9 @@ export type PollenPublicStatus = {
   scopeHint?: string;
 };
 
-export function publicPollinations(user: User | null | undefined): Omit<PollenPublicStatus, 'configured' | 'workspaces' | 'usage'> {
+export function publicPollinations(
+  user: User | null | undefined,
+): Omit<PollenPublicStatus, "configured" | "workspaces" | "usage"> {
   const p = user?.pollinations;
   if (!p?.accessToken) return { connected: false };
   const expired = Boolean(p.expiresAt && Date.parse(p.expiresAt) < Date.now());
@@ -84,25 +87,31 @@ export function publicPollinations(user: User | null | undefined): Omit<PollenPu
   };
 }
 
-async function pollenGet(url: string, token?: string): Promise<{ ok: boolean; status: number; data: unknown }> {
+async function pollenGet(
+  url: string,
+  token?: string,
+): Promise<{ ok: boolean; status: number; data: unknown }> {
   const res = await fetch(url, {
     headers: {
-      accept: 'application/json',
+      accept: "application/json",
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
-    cache: 'no-store',
+    cache: "no-store",
   });
   const data = await res.json().catch(() => null);
   return { ok: res.ok, status: res.status, data };
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
 }
 
 function num(v: unknown): number | undefined {
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string' && v.trim() && Number.isFinite(Number(v))) return Number(v);
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() && Number.isFinite(Number(v)))
+    return Number(v);
   return undefined;
 }
 
@@ -117,10 +126,18 @@ export function parseBalance(raw: unknown): PollenBalance {
       num(inner.pollen) ??
       num(rec.remaining) ??
       num(rec.balance),
-    paid: num(inner.paid) ?? num(inner.paid_balance) ?? num(inner.paidPollen) ?? num(rec.paid),
-    quest: num(inner.quest) ?? num(inner.quest_balance) ?? num(inner.questPollen) ?? num(rec.quest),
+    paid:
+      num(inner.paid) ??
+      num(inner.paid_balance) ??
+      num(inner.paidPollen) ??
+      num(rec.paid),
+    quest:
+      num(inner.quest) ??
+      num(inner.quest_balance) ??
+      num(inner.questPollen) ??
+      num(rec.quest),
     budget: num(inner.budget) ?? num(inner.limit) ?? num(rec.budget),
-    currency: 'pollen',
+    currency: "pollen",
     note: str(rec.message) || str(rec.note),
     raw: rec,
   };
@@ -142,7 +159,12 @@ export function parseUsageRows(raw: unknown): PollenUsageRow[] {
   return list.slice(0, 30).map((item) => {
     const r = asRecord(item) || {};
     return {
-      at: str(r.createdAt) || str(r.created_at) || str(r.timestamp) || str(r.date) || str(r.at),
+      at:
+        str(r.createdAt) ||
+        str(r.created_at) ||
+        str(r.timestamp) ||
+        str(r.date) ||
+        str(r.at),
       model: str(r.model) || str(r.modelName),
       cost: num(r.cost) || num(r.pollen) || num(r.spent) || num(r.amount),
       tokens: num(r.total_tokens) || num(r.tokens) || num(r.tokenCount),
@@ -178,18 +200,21 @@ function formatPriceLabel(p: {
   perImage?: number;
 }): string {
   if (p.perImage != null) {
-    return p.perImage === 0 ? 'free / image' : `${trimNum(p.perImage)} pollen / image`;
+    return p.perImage === 0
+      ? "free / image"
+      : `${trimNum(p.perImage)} pollen / image`;
   }
   const parts: string[] = [];
   if (p.inPerMillion != null) parts.push(`${trimNum(p.inPerMillion)} / 1M in`);
-  if (p.outPerMillion != null) parts.push(`${trimNum(p.outPerMillion)} / 1M out`);
-  return parts.length ? `${parts.join(' · ')} pollen` : 'see catalog';
+  if (p.outPerMillion != null)
+    parts.push(`${trimNum(p.outPerMillion)} / 1M out`);
+  return parts.length ? `${parts.join(" · ")} pollen` : "see catalog";
 }
 
 function trimNum(n: number): string {
-  if (n === 0) return '0';
-  if (n >= 10) return n.toFixed(2).replace(/\.00$/, '');
-  if (n >= 1) return n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+  if (n === 0) return "0";
+  if (n >= 10) return n.toFixed(2).replace(/\.00$/, "");
+  if (n >= 1) return n.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
   return n.toPrecision(3);
 }
 
@@ -215,16 +240,26 @@ export function parseModelPrices(raw: unknown): PollenModelPrice[] {
     const row: PollenModelPrice = {
       name,
       title: str(r.title) || str(r.description),
-      category: str(r.category) || (Array.isArray(r.output_modalities) ? String(r.output_modalities[0] || 'other') : 'other'),
+      category:
+        str(r.category) ||
+        (Array.isArray(r.output_modalities)
+          ? String(r.output_modalities[0] || "other")
+          : "other"),
       inPerMillion: inTok != null ? inTok * 1_000_000 : undefined,
       outPerMillion: outTok != null ? outTok * 1_000_000 : undefined,
       perImage: img,
-      label: '',
+      label: "",
     };
     row.label = formatPriceLabel(row);
     out.push(row);
   }
-  const rank: Record<string, number> = { text: 0, image: 1, audio: 2, video: 3, embedding: 4 };
+  const rank: Record<string, number> = {
+    text: 0,
+    image: 1,
+    audio: 2,
+    video: 3,
+    embedding: 4,
+  };
   out.sort((a, b) => {
     const c = (rank[a.category] ?? 9) - (rank[b.category] ?? 9);
     if (c !== 0) return c;
@@ -237,7 +272,9 @@ export function parseModelPrices(raw: unknown): PollenModelPrice[] {
 
 export async function fetchPollenCatalog(): Promise<PollenModelPrice[]> {
   try {
-    const { ok, data } = await pollenGet('https://gen.pollinations.ai/models?community=false');
+    const { ok, data } = await pollenGet(
+      "https://gen.pollinations.ai/models?community=false",
+    );
     if (!ok) return [];
     return parseModelPrices(data);
   } catch {
@@ -267,20 +304,21 @@ export async function fetchPollenProfile(token: string): Promise<{
   let scopeHint: string | undefined;
 
   const hits = await Promise.allSettled([
-    pollenGet('https://gen.pollinations.ai/account/profile', token),
-    pollenGet('https://gen.pollinations.ai/account/balance', token),
-    pollenGet('https://gen.pollinations.ai/account/usage', token),
-    pollenGet('https://gen.pollinations.ai/account/usage/daily', token),
-    pollenGet('https://enter.pollinations.ai/api/oauth/userinfo', token),
-    pollenGet('https://enter.pollinations.ai/api/device/userinfo', token),
+    pollenGet("https://gen.pollinations.ai/account/profile", token),
+    pollenGet("https://gen.pollinations.ai/account/balance", token),
+    pollenGet("https://gen.pollinations.ai/account/usage", token),
+    pollenGet("https://gen.pollinations.ai/account/usage/daily", token),
+    pollenGet("https://enter.pollinations.ai/api/oauth/userinfo", token),
+    pollenGet("https://enter.pollinations.ai/api/device/userinfo", token),
   ]);
 
   for (const hit of hits) {
-    if (hit.status !== 'fulfilled') continue;
+    if (hit.status !== "fulfilled") continue;
     const { ok, status, data } = hit.value;
     const rec = asRecord(data);
     if (status === 403) {
-      scopeHint = 'Reconnect so Vectra can read Pollen balance (account:usage).';
+      scopeHint =
+        "Reconnect so Vectra can read Pollen balance (account:usage).";
     }
     if (!ok || !rec) continue;
     username =
@@ -296,7 +334,7 @@ export async function fetchPollenProfile(token: string): Promise<{
   }
 
   const balHit = hits[1];
-  if (balHit.status === 'fulfilled' && balHit.value.ok) {
+  if (balHit.status === "fulfilled" && balHit.value.ok) {
     balance = parseBalance(balHit.value.data);
     if (balance.remaining != null) usage.remaining = balance.remaining;
     if (balance.paid != null) usage.paid = balance.paid;
@@ -304,60 +342,73 @@ export async function fetchPollenProfile(token: string): Promise<{
   }
 
   const useHit = hits[2];
-  if (useHit.status === 'fulfilled' && useHit.value.ok) {
+  if (useHit.status === "fulfilled" && useHit.value.ok) {
     recent = parseUsageRows(useHit.value.data);
   }
   const dayHit = hits[3];
-  if (dayHit.status === 'fulfilled' && dayHit.value.ok) {
+  if (dayHit.status === "fulfilled" && dayHit.value.ok) {
     daily = parseDailyRows(dayHit.value.data);
   }
 
-  return { username, name, email, picture, usage, balance, recent, daily, scopeHint };
+  return {
+    username,
+    name,
+    email,
+    picture,
+    usage,
+    balance,
+    recent,
+    daily,
+    scopeHint,
+  };
 }
 
 function str(v: unknown): string | undefined {
-  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+  return typeof v === "string" && v.trim() ? v.trim() : undefined;
 }
 
-function mergeUsage(into: Record<string, unknown>, raw: Record<string, unknown>) {
+function mergeUsage(
+  into: Record<string, unknown>,
+  raw: Record<string, unknown>,
+) {
   const skip = new Set([
-    'sub',
-    'id',
-    'preferred_username',
-    'username',
-    'login',
-    'name',
-    'email',
-    'picture',
-    'iss',
-    'aud',
-    'exp',
-    'iat',
-    'scope',
+    "sub",
+    "id",
+    "preferred_username",
+    "username",
+    "login",
+    "name",
+    "email",
+    "picture",
+    "iss",
+    "aud",
+    "exp",
+    "iat",
+    "scope",
   ]);
   const pick = [
-    'balance',
-    'pollen',
-    'credits',
-    'paid_balance',
-    'quest_balance',
-    'usage',
-    'spent',
-    'requests',
-    'total',
-    'remaining',
-    'budget',
-    'limit',
+    "balance",
+    "pollen",
+    "credits",
+    "paid_balance",
+    "quest_balance",
+    "usage",
+    "spent",
+    "requests",
+    "total",
+    "remaining",
+    "budget",
+    "limit",
   ];
   for (const key of pick) {
     if (raw[key] !== undefined) into[key] = raw[key];
   }
-  if (raw.usage && typeof raw.usage === 'object') {
+  if (raw.usage && typeof raw.usage === "object") {
     Object.assign(into, raw.usage as object);
   }
   for (const [k, v] of Object.entries(raw)) {
     if (skip.has(k) || into[k] !== undefined) continue;
-    if (typeof v === 'number' || typeof v === 'string') into[k] = v;
+    if (typeof v === "number" || typeof v === "string") into[k] = v;
   }
 }
 
@@ -369,7 +420,7 @@ export async function saveAccountPollinations(input: {
   const profile = await fetchPollenProfile(input.accessToken);
   const now = new Date();
   const expiresAt =
-    typeof input.expiresIn === 'number' && input.expiresIn > 0
+    typeof input.expiresIn === "number" && input.expiresIn > 0
       ? new Date(now.getTime() + input.expiresIn * 1000).toISOString()
       : new Date(now.getTime() + 150 * 24 * 60 * 60 * 1000).toISOString();
   const rec: UserPollinations = {
@@ -386,35 +437,55 @@ export async function saveAccountPollinations(input: {
 }
 
 export async function applyPollinationsToInstance(
-  inst: { id: string; userId: string; sessionId: string; sandboxId?: string; status: string },
+  inst: {
+    id: string;
+    userId: string;
+    sessionId: string;
+    sandboxId?: string;
+    status: string;
+    runtime?: AgentRuntime;
+  },
   accessToken: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  if (inst.status === 'destroyed') return { ok: false, error: 'destroyed' };
-  const model = STOCK?.defaultModel || 'openai';
-  const baseUrl = STOCK?.baseUrl || 'https://gen.pollinations.ai/v1';
+  if (inst.status === "destroyed") return { ok: false, error: "destroyed" };
+  const model = STOCK?.defaultModel || "openai";
+  const baseUrl = STOCK?.baseUrl || "https://gen.pollinations.ai/v1";
   const write = () =>
     writeSandboxConfig(inst.sessionId, {
       instanceId: inst.id,
-      provider: 'pollinations',
+      provider: "pollinations",
       apiKey: accessToken,
       baseUrl,
       model,
       mergeExisting: true,
       sandboxId: inst.sandboxId,
+      runtime: inst.runtime || "xibecode",
     });
   try {
     let result = await write();
     if (!result.ok && inst.sandboxId) {
-      await wakeSession(inst.sessionId, { sandboxId: inst.sandboxId, restartDaemon: false });
+      await wakeSession(inst.sessionId, {
+        sandboxId: inst.sandboxId,
+        runtime: inst.runtime || "xibecode",
+        restartDaemon: false,
+      });
       result = await write();
     }
-    if (!result.ok) return { ok: false, error: result.logs.join(' ') };
-    const restarted = await restartDaemon(inst.sessionId, inst.sandboxId);
+    if (!result.ok) return { ok: false, error: result.logs.join(" ") };
+    const restarted = await restartDaemon(
+      inst.sessionId,
+      inst.sandboxId,
+      inst.runtime || "xibecode",
+    );
     await updateInstance(inst.userId, inst.id, {
       aiConfigured: true,
-      status: restarted.ok ? 'running' : inst.status === 'paused' ? 'paused' : 'running',
+      status: restarted.ok
+        ? "running"
+        : inst.status === "paused"
+          ? "paused"
+          : "running",
       config: {
-        provider: 'pollinations',
+        provider: "pollinations",
         model,
         baseUrl,
         hasApiKey: true,
@@ -430,7 +501,9 @@ export async function applyPollinationsToAllWorkspaces(
   userId: string,
   accessToken: string,
 ): Promise<{ total: number; applied: number; errors: string[] }> {
-  const list = (await listInstancesForUser(userId)).filter((i) => i.status !== 'destroyed');
+  const list = (await listInstancesForUser(userId)).filter(
+    (i) => i.status !== "destroyed",
+  );
   const errors: string[] = [];
   let applied = 0;
   for (const inst of list) {
@@ -443,11 +516,21 @@ export async function applyPollinationsToAllWorkspaces(
 
 export async function applySavedPollinationsToNewInstance(input: {
   userId: string;
-  instance: { id: string; userId: string; sessionId: string; sandboxId?: string; status: string };
+  instance: {
+    id: string;
+    userId: string;
+    sessionId: string;
+    sandboxId?: string;
+    status: string;
+  };
 }): Promise<void> {
   const user = await findUserById(input.userId);
   const token = user?.pollinations?.accessToken;
   if (!token) return;
-  if (user.pollinations?.expiresAt && Date.parse(user.pollinations.expiresAt) < Date.now()) return;
+  if (
+    user.pollinations?.expiresAt &&
+    Date.parse(user.pollinations.expiresAt) < Date.now()
+  )
+    return;
   await applyPollinationsToInstance(input.instance, token);
 }

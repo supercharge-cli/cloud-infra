@@ -1,26 +1,51 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
-import { posix as pathPosix } from 'node:path';
-import { URL } from 'node:url';
-import { Sandbox } from 'e2b';
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
+import { randomUUID } from "node:crypto";
+import { posix as pathPosix } from "node:path";
+import { URL } from "node:url";
+import { Sandbox } from "e2b";
 
 type SandboxLike = {
   sandboxId?: string;
   sandboxDomain?: string;
   getHost?: (port: number) => string | Promise<string>;
   commands?: {
-    run: (command: string, opts?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    run: (
+      command: string,
+      opts?: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
   };
   files?: {
     read?: (path: string, opts?: Record<string, unknown>) => Promise<unknown>;
-    write?: (path: string, data: unknown, opts?: Record<string, unknown>) => Promise<unknown>;
+    write?: (
+      path: string,
+      data: unknown,
+      opts?: Record<string, unknown>,
+    ) => Promise<unknown>;
   };
   kill?: (opts?: { requestTimeoutMs?: number }) => Promise<void>;
   close?: () => Promise<void>;
   pause?: (opts?: Record<string, unknown>) => Promise<boolean>;
-  setTimeout?: (timeoutMs: number, opts?: Record<string, unknown>) => Promise<void>;
+  setTimeout?: (
+    timeoutMs: number,
+    opts?: Record<string, unknown>,
+  ) => Promise<void>;
   connect?: (opts?: Record<string, unknown>) => Promise<SandboxLike>;
   getInfo?: () => Promise<{ state?: string }>;
+};
+
+type AgentRuntime = "xibecode" | "supercharge";
+type RuntimeProfile = {
+  runtime: AgentRuntime;
+  label: string;
+  template: string;
+  daemonCommand: string;
+  pidFile: string;
+  logFile: string;
+  processMatch: string;
 };
 
 type SessionRecord = {
@@ -36,7 +61,8 @@ type SessionRecord = {
   lastCycleResetAt?: number;
   cycleResetting?: boolean;
   cwd?: string;
-  strategy: 'host_only' | 'sandbox_full';
+  strategy: "host_only" | "sandbox_full";
+  runtime: AgentRuntime;
   workspaceRoot: string;
   syncStageFile: string;
 };
@@ -67,13 +93,60 @@ type MoveRequest = {
 };
 
 const port = Number(process.env.PORT || 8787);
-const authToken = process.env.XIBECODE_GATEWAY_TOKEN?.trim() || '';
+const authToken = process.env.XIBECODE_GATEWAY_TOKEN?.trim() || "";
 /**
  * Hosting tier template: 4 vCPU / 8192 MB (see sandbox/e2b-template).
  * Without this, E2B uses the default base image (~2 vCPU) — not what we sell.
  */
-const sandboxTemplate =
-  process.env.XIBECODE_E2B_TEMPLATE?.trim() || 'xibecode-full-sandbox';
+const runtimeProfiles: Record<AgentRuntime, RuntimeProfile> = {
+  xibecode: {
+    runtime: "xibecode",
+    label: "XibeCode",
+    template:
+      process.env.XIBECODE_E2B_TEMPLATE?.trim() || "xibecode-full-sandbox",
+    daemonCommand:
+      process.env.XIBECODE_SANDBOX_DAEMON_COMMAND?.trim() ||
+      "xibecode daemon --workdir /home/user/workspace",
+    pidFile:
+      process.env.XIBECODE_SANDBOX_DAEMON_PIDFILE?.trim() ||
+      "/tmp/xibecode-daemon.pid",
+    logFile:
+      process.env.XIBECODE_SANDBOX_DAEMON_LOGFILE?.trim() ||
+      "/tmp/xibecode-daemon.log",
+    processMatch:
+      process.env.XIBECODE_SANDBOX_DAEMON_MATCH?.trim() ||
+      "node.*xibecode|xibecode/dist",
+  },
+  supercharge: {
+    runtime: "supercharge",
+    label: "Supercharge",
+    template:
+      process.env.SUPERCHARGE_E2B_TEMPLATE?.trim() ||
+      "supercharge-full-sandbox",
+    daemonCommand:
+      process.env.SUPERCHARGE_SANDBOX_DAEMON_COMMAND?.trim() ||
+      "/usr/local/bin/supercharge-superagent-server",
+    pidFile:
+      process.env.SUPERCHARGE_SANDBOX_DAEMON_PIDFILE?.trim() ||
+      "/tmp/supercharge-daemon.pid",
+    logFile:
+      process.env.SUPERCHARGE_SANDBOX_DAEMON_LOGFILE?.trim() ||
+      "/tmp/supercharge-daemon.log",
+    processMatch:
+      process.env.SUPERCHARGE_SANDBOX_DAEMON_MATCH?.trim() ||
+      "supercharge-superagent-server|superagent-server",
+  },
+};
+function normalizeRuntime(value: unknown): AgentRuntime {
+  return String(value || "")
+    .trim()
+    .toLowerCase() === "supercharge"
+    ? "supercharge"
+    : "xibecode";
+}
+function runtimeProfile(value: unknown): RuntimeProfile {
+  return runtimeProfiles[normalizeRuntime(value)];
+}
 /**
  * Inactivity window (ms) before lifecycle action.
  * Default 30m (E2B platform default is 5m). After auto-resume, E2B restarts the
@@ -94,9 +167,11 @@ const sandboxTimeoutMs = Math.max(
  */
 const maxContinuousMs = (() => {
   const raw = process.env.XIBECODE_E2B_MAX_CONTINUOUS_MS;
-  if (raw === '0' || raw === 'off' || raw === 'false') return 0;
+  if (raw === "0" || raw === "off" || raw === "false") return 0;
   const n = Number(raw || 23 * 60 * 60 * 1000);
-  return Number.isFinite(n) && n > 0 ? Math.max(60_000, n) : 23 * 60 * 60 * 1000;
+  return Number.isFinite(n) && n > 0
+    ? Math.max(60_000, n)
+    : 23 * 60 * 60 * 1000;
 })();
 /**
  * https://e2b.dev/docs/sandbox/auto-resume
@@ -105,9 +180,9 @@ const maxContinuousMs = (() => {
  * Do NOT use { action: 'pause', keepMemory: false } — that cannot auto-resume.
  */
 const lifecycleOnTimeout =
-  process.env.XIBECODE_E2B_ON_TIMEOUT?.trim().toLowerCase() === 'kill'
-    ? ('kill' as const)
-    : ('pause' as const);
+  process.env.XIBECODE_E2B_ON_TIMEOUT?.trim().toLowerCase() === "kill"
+    ? ("kill" as const)
+    : ("pause" as const);
 /**
  * https://e2b.dev/docs/sandbox/auto-resume
  * autoResume: true → paused sandbox wakes on activity:
@@ -118,31 +193,22 @@ const lifecycleOnTimeout =
  * Only valid with onTimeout: 'pause' + full memory snapshot.
  */
 const lifecycleAutoResume =
-  lifecycleOnTimeout === 'pause' &&
-  process.env.XIBECODE_E2B_AUTO_RESUME?.trim().toLowerCase() !== 'false';
+  lifecycleOnTimeout === "pause" &&
+  process.env.XIBECODE_E2B_AUTO_RESUME?.trim().toLowerCase() !== "false";
 
 /** Exact lifecycle object passed to Sandbox.create (docs shape). */
 const sandboxLifecycle =
-  lifecycleOnTimeout === 'pause'
-    ? ({ onTimeout: 'pause' as const, autoResume: lifecycleAutoResume })
-    : ({ onTimeout: 'kill' as const, autoResume: false as const });
+  lifecycleOnTimeout === "pause"
+    ? { onTimeout: "pause" as const, autoResume: lifecycleAutoResume }
+    : { onTimeout: "kill" as const, autoResume: false as const };
 // Docs use *.e2b.app (https://e2b.dev/docs/network/public-url)
-const previewDomain = process.env.XIBECODE_E2B_PREVIEW_DOMAIN?.trim() || 'e2b.app';
-const sandboxDaemonCommand =
-  process.env.XIBECODE_SANDBOX_DAEMON_COMMAND?.trim() ||
-  'xibecode daemon --workdir /home/user/workspace';
-const sandboxDaemonPidFile =
-  process.env.XIBECODE_SANDBOX_DAEMON_PIDFILE?.trim() || '/tmp/xibecode-daemon.pid';
-const sandboxDaemonLogFile =
-  process.env.XIBECODE_SANDBOX_DAEMON_LOGFILE?.trim() || '/tmp/xibecode-daemon.log';
-const sandboxDaemonMatch =
-  process.env.XIBECODE_SANDBOX_DAEMON_MATCH?.trim() || 'node.*xibecode|xibecode/dist';
-const maxExportBytes = Math.max(
-  1,
-  Number(process.env.XIBECODE_EXPORT_MAX_MB || 64),
-) * 1024 * 1024;
+const previewDomain =
+  process.env.XIBECODE_E2B_PREVIEW_DOMAIN?.trim() || "e2b.app";
+const maxExportBytes =
+  Math.max(1, Number(process.env.XIBECODE_EXPORT_MAX_MB || 64)) * 1024 * 1024;
 const sessions = new Map<string, SessionRecord>();
-const defaultWorkspaceRoot = process.env.XIBECODE_SANDBOX_WORKSPACE_ROOT?.trim() || '/home/user/workspace';
+const defaultWorkspaceRoot =
+  process.env.XIBECODE_SANDBOX_WORKSPACE_ROOT?.trim() || "/home/user/workspace";
 const cycleWaiters = new Map<string, Promise<void>>();
 
 function sleep(ms: number): Promise<void> {
@@ -158,15 +224,21 @@ function shQuote(value: string): string {
  * Workspace root is always allowed; also allow the XibeCode home + /tmp so
  * hosting can write daemon.env / profile without shell hacks.
  */
-function isAllowedSandboxAbsPath(session: SessionRecord, normalized: string): boolean {
+function isAllowedSandboxAbsPath(
+  session: SessionRecord,
+  normalized: string,
+): boolean {
   const root = session.workspaceRoot;
   if (normalized === root || normalized.startsWith(`${root}/`)) return true;
-  if (normalized === '/tmp' || normalized.startsWith('/tmp/')) return true;
+  if (normalized === "/tmp" || normalized.startsWith("/tmp/")) return true;
   // Tenant config / daemon state
-  if (normalized === '/home/user/.xibecode' || normalized.startsWith('/home/user/.xibecode/')) {
+  if (
+    normalized === "/home/user/.xibecode" ||
+    normalized.startsWith("/home/user/.xibecode/")
+  ) {
     return true;
   }
-  if (normalized === '/home/user' || normalized.startsWith('/home/user/')) {
+  if (normalized === "/home/user" || normalized.startsWith("/home/user/")) {
     // Allow other files under login home (not /home/other)
     return true;
   }
@@ -175,15 +247,20 @@ function isAllowedSandboxAbsPath(session: SessionRecord, normalized: string): bo
 
 function resolveSandboxPath(session: SessionRecord, inputPath: string): string {
   const trimmed = inputPath.trim();
-  if (!trimmed) throw new Error('Path cannot be empty');
+  if (!trimmed) throw new Error("Path cannot be empty");
   const normalized = pathPosix.normalize(trimmed);
-  if (normalized.includes('..')) {
+  if (normalized.includes("..")) {
     throw new Error(`Path traversal is not allowed: ${inputPath}`);
   }
 
   if (pathPosix.isAbsolute(normalized)) {
-    if (session.strategy === 'sandbox_full' && !isAllowedSandboxAbsPath(session, normalized)) {
-      throw new Error(`Absolute path outside sandbox workspace is not allowed: ${inputPath}`);
+    if (
+      session.strategy === "sandbox_full" &&
+      !isAllowedSandboxAbsPath(session, normalized)
+    ) {
+      throw new Error(
+        `Absolute path outside sandbox workspace is not allowed: ${inputPath}`,
+      );
     }
     return normalized;
   }
@@ -191,17 +268,21 @@ function resolveSandboxPath(session: SessionRecord, inputPath: string): string {
   return pathPosix.join(session.workspaceRoot, normalized);
 }
 
-function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  statusCode: number,
+  payload: unknown,
+): void {
   res.statusCode = statusCode;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(payload));
 }
 
 function getBearerToken(req: IncomingMessage): string {
   const header = req.headers.authorization;
-  if (!header) return '';
+  if (!header) return "";
   const match = header.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() || '';
+  return match?.[1]?.trim() || "";
 }
 
 function isAuthorized(req: IncomingMessage): boolean {
@@ -210,16 +291,19 @@ function isAuthorized(req: IncomingMessage): boolean {
 }
 
 function normalizePreviewHost(hostOrUrl: string): string {
-  const trimmed = String(hostOrUrl || '').trim();
-  if (!trimmed) return '';
+  const trimmed = String(hostOrUrl || "").trim();
+  if (!trimmed) return "";
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (trimmed.startsWith('//')) return `https:${trimmed}`;
+  if (trimmed.startsWith("//")) return `https:${trimmed}`;
   return `https://${trimmed}`;
 }
 
-async function resolvePreviewHost(session: SessionRecord, targetPort: number): Promise<string> {
+async function resolvePreviewHost(
+  session: SessionRecord,
+  targetPort: number,
+): Promise<string> {
   const getter = session.sandbox.getHost;
-  if (typeof getter === 'function') {
+  if (typeof getter === "function") {
     const resolved = await getter(targetPort);
     const normalized = normalizePreviewHost(resolved);
     if (normalized) return normalized;
@@ -233,7 +317,7 @@ async function readJson<T>(req: IncomingMessage): Promise<T> {
   for await (const chunk of req) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
   }
-  const raw = Buffer.concat(chunks).toString('utf8').trim();
+  const raw = Buffer.concat(chunks).toString("utf8").trim();
   if (!raw) return {} as T;
   return JSON.parse(raw) as T;
 }
@@ -242,7 +326,10 @@ async function readJson<T>(req: IncomingMessage): Promise<T> {
  * Before the E2B 24h continuous-run hard limit: pause (full memory+fs), then connect
  * to resume. That resets the continuous window so long agent sessions can keep going.
  */
-async function resetContinuousRunCycle(session: SessionRecord, reason: string): Promise<void> {
+async function resetContinuousRunCycle(
+  session: SessionRecord,
+  reason: string,
+): Promise<void> {
   const existing = cycleWaiters.get(session.sessionId);
   if (existing) {
     await existing;
@@ -260,7 +347,7 @@ async function resetContinuousRunCycle(session: SessionRecord, reason: string): 
     );
     try {
       // 1) Pause — preserves filesystem + memory (default keepMemory)
-      if (typeof session.sandbox.pause === 'function') {
+      if (typeof session.sandbox.pause === "function") {
         await session.sandbox.pause();
       } else {
         await Sandbox.pause(session.sandboxId);
@@ -312,7 +399,10 @@ async function resetContinuousRunCycle(session: SessionRecord, reason: string): 
  * Host must issue an SDK op (wake/exec) — OpenClaw-style channel runtime then
  * needs a restart because frozen TCP to api.telegram.org is stale after thaw.
  */
-async function reconnectSandbox(session: SessionRecord, reason: string): Promise<void> {
+async function reconnectSandbox(
+  session: SessionRecord,
+  reason: string,
+): Promise<void> {
   // connect() resumes if paused; timeoutMs is the new idle window after resume.
   // requestTimeoutMs: memory restore can exceed the default 60s handshake.
   const connected = await Sandbox.connect(session.sandboxId, {
@@ -332,7 +422,7 @@ async function reconnectSandbox(session: SessionRecord, reason: string): Promise
 /** setTimeout only works while running; paused → "Sandbox not found". */
 async function refreshSandboxTimeout(session: SessionRecord): Promise<void> {
   try {
-    if (typeof session.sandbox.setTimeout === 'function') {
+    if (typeof session.sandbox.setTimeout === "function") {
       await session.sandbox.setTimeout(sandboxTimeoutMs);
     } else {
       await Sandbox.setTimeout(session.sandboxId, sandboxTimeoutMs);
@@ -347,18 +437,18 @@ async function refreshSandboxTimeout(session: SessionRecord): Promise<void> {
 function isResumeRelatedError(msg: string): boolean {
   const m = msg.toLowerCase();
   return (
-    m.includes('paused') ||
-    m.includes('not running') ||
-    m.includes('sandbox is not') ||
-    m.includes('unavailable') ||
-    m.includes('connection') ||
-    m.includes('econnreset') ||
-    m.includes('socket') ||
-    m.includes('timeout') ||
-    m.includes('404') ||
-    m.includes('not found') ||
-    m.includes('dead') ||
-    m.includes('killed')
+    m.includes("paused") ||
+    m.includes("not running") ||
+    m.includes("sandbox is not") ||
+    m.includes("unavailable") ||
+    m.includes("connection") ||
+    m.includes("econnreset") ||
+    m.includes("socket") ||
+    m.includes("timeout") ||
+    m.includes("404") ||
+    m.includes("not found") ||
+    m.includes("dead") ||
+    m.includes("killed")
   );
 }
 
@@ -371,27 +461,33 @@ async function probeWithSdkActivity(
   timeoutMs: number,
 ): Promise<void> {
   if (!session.sandbox?.commands?.run) {
-    throw new Error('no live sandbox client (commands.run missing)');
+    throw new Error("no live sandbox client (commands.run missing)");
   }
-  await session.sandbox.commands.run('true', { timeoutMs });
+  await session.sandbox.commands.run("true", { timeoutMs });
 }
 
 async function ensureSandboxRunning(session: SessionRecord): Promise<{
   state: string;
   resumed: boolean;
 }> {
-  let state = 'unknown';
+  let state = "unknown";
   let resumed = false;
   let sandboxAutoResume = lifecycleAutoResume;
 
   try {
     const info = await Sandbox.getInfo(session.sandboxId);
-    state = String((info as { state?: string }).state || 'unknown');
-    const life = (info as { lifecycle?: { onTimeout?: string; autoResume?: boolean } }).lifecycle;
-    if (typeof life?.autoResume === 'boolean') {
+    state = String((info as { state?: string }).state || "unknown");
+    const life = (
+      info as { lifecycle?: { onTimeout?: string; autoResume?: boolean } }
+    ).lifecycle;
+    if (typeof life?.autoResume === "boolean") {
       sandboxAutoResume = life.autoResume;
     }
-    if (life?.onTimeout && life.onTimeout !== 'pause' && lifecycleOnTimeout === 'pause') {
+    if (
+      life?.onTimeout &&
+      life.onTimeout !== "pause" &&
+      lifecycleOnTimeout === "pause"
+    ) {
       console.warn(
         `[xibecode-e2b-gateway] sandbox=${session.sandboxId} lifecycle.onTimeout=${life.onTimeout} (wanted pause)`,
       );
@@ -405,31 +501,35 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
     console.warn(
       `[xibecode-e2b-gateway] getInfo failed sandbox=${session.sandboxId}: ${(err as Error).message}`,
     );
-    state = 'unknown';
+    state = "unknown";
   }
 
-  if (state === 'running') {
+  if (state === "running") {
     // Probe first (also covers mid-pause race). setTimeout only after probe succeeds.
     try {
       await probeWithSdkActivity(session, 30_000);
       await refreshSandboxTimeout(session);
       session.updatedAt = Date.now();
-      return { state: 'running', resumed: false };
+      return { state: "running", resumed: false };
     } catch (err) {
       console.warn(
         `[xibecode-e2b-gateway] running-handle stale sandbox=${session.sandboxId}: ${(err as Error).message} — reconnecting`,
       );
-      await reconnectSandbox(session, 'stale running handle');
+      await reconnectSandbox(session, "stale running handle");
       resumed = true;
       session.updatedAt = Date.now();
-      return { state: 'running', resumed };
+      return { state: "running", resumed };
     }
   }
 
   // Paused / unknown
   // 1) Official auto-resume: next SDK op wakes when autoResume=true + live client
   //    (docs: "You do not need to call Sandbox.connect() first")
-  if (state === 'paused' && sandboxAutoResume && session.sandbox?.commands?.run) {
+  if (
+    state === "paused" &&
+    sandboxAutoResume &&
+    session.sandbox?.commands?.run
+  ) {
     try {
       await probeWithSdkActivity(session, 90_000);
       await refreshSandboxTimeout(session);
@@ -438,7 +538,7 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
       console.log(
         `[xibecode-e2b-gateway] auto-resumed sandbox=${session.sandboxId} via commands.run (lifecycle.autoResume)`,
       );
-      return { state: 'running', resumed: true };
+      return { state: "running", resumed: true };
     } catch (err) {
       console.warn(
         `[xibecode-e2b-gateway] auto-resume via commands.run failed sandbox=${session.sandboxId}: ${(err as Error).message} — connect()`,
@@ -451,7 +551,7 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
   try {
     await reconnectSandbox(session, `state=${state}`);
     resumed = true;
-    state = 'running';
+    state = "running";
   } catch (err) {
     throw new Error(
       `Sandbox ${session.sandboxId} unavailable (killed or missing?). ${(err as Error).message}`,
@@ -479,6 +579,7 @@ async function createSession(input: {
   cwd?: string;
   strategy?: string;
   workspaceRoot?: string;
+  runtime?: AgentRuntime | string;
   /** Re-attach an existing E2B sandbox after gateway restart (hosting recovery). */
   sandboxId?: string;
 }): Promise<SessionRecord> {
@@ -492,13 +593,17 @@ async function createSession(input: {
   // Reconnect by sandbox id if another session row already holds it
   const wantSandbox = input.sandboxId?.trim();
   if (wantSandbox) {
-    const bySb = Array.from(sessions.values()).find((s) => s.sandboxId === wantSandbox);
+    const bySb = Array.from(sessions.values()).find(
+      (s) => s.sandboxId === wantSandbox,
+    );
     if (bySb) {
       await touchSession(bySb);
       return bySb;
     }
   }
 
+  const runtime = normalizeRuntime(input.runtime);
+  const profile = runtimeProfile(runtime);
   let sandbox: SandboxLike;
   let sandboxId: string;
 
@@ -510,14 +615,16 @@ async function createSession(input: {
       requestTimeoutMs: 120_000,
     })) as unknown as SandboxLike;
     sandboxId = sandbox.sandboxId || wantSandbox;
-    console.log(`[xibecode-e2b-gateway] reattached sandbox=${sandboxId} as session=${sessionId}`);
+    console.log(
+      `[agent-gateway] reattached runtime=${runtime} sandbox=${sandboxId} as session=${sessionId}`,
+    );
     // connect already resumes; still pin idle timeout to our configured window
   } else {
     // Exact docs shape: https://e2b.dev/docs/sandbox/auto-resume
     //   lifecycle: { onTimeout: 'pause', autoResume: true }
     // Default onTimeout is 'kill' — without lifecycle, idle sandboxes die permanently.
     sandbox = (await Sandbox.create({
-      template: sandboxTemplate,
+      template: profile.template,
       timeoutMs: sandboxTimeoutMs,
       lifecycle: sandboxLifecycle,
     })) as unknown as SandboxLike;
@@ -530,30 +637,39 @@ async function createSession(input: {
         lifecycle?: { onTimeout?: string; autoResume?: boolean };
       };
       console.log(
-        `[xibecode-e2b-gateway] created sandbox=${sandboxId} template=${sandboxTemplate}` +
-          ` state=${info.state ?? '?'} cpu=${info.cpuCount ?? '?'} memMB=${info.memoryMB ?? '?'}` +
+        `[agent-gateway] created runtime=${runtime} sandbox=${sandboxId} template=${profile.template}` +
+          ` state=${info.state ?? "?"} cpu=${info.cpuCount ?? "?"} memMB=${info.memoryMB ?? "?"}` +
           ` lifecycle.onTimeout=${info.lifecycle?.onTimeout ?? sandboxLifecycle.onTimeout}` +
           ` autoResume=${info.lifecycle?.autoResume ?? sandboxLifecycle.autoResume}`,
       );
-      if (lifecycleOnTimeout === 'pause' && info.lifecycle?.onTimeout === 'kill') {
+      if (
+        lifecycleOnTimeout === "pause" &&
+        info.lifecycle?.onTimeout === "kill"
+      ) {
         console.error(
           `[xibecode-e2b-gateway] WARNING: requested onTimeout=pause but sandbox reports kill — check E2B plan supports auto-pause`,
         );
       }
-      if (lifecycleAutoResume && info.lifecycle && info.lifecycle.autoResume !== true) {
+      if (
+        lifecycleAutoResume &&
+        info.lifecycle &&
+        info.lifecycle.autoResume !== true
+      ) {
         console.error(
           `[xibecode-e2b-gateway] WARNING: requested autoResume=true but sandbox reports ${info.lifecycle.autoResume}`,
         );
       }
     } catch {
       console.log(
-        `[xibecode-e2b-gateway] created sandbox=${sandboxId} template=${sandboxTemplate} lifecycle=${JSON.stringify(sandboxLifecycle)}`,
+        `[agent-gateway] created runtime=${runtime} sandbox=${sandboxId} template=${profile.template} lifecycle=${JSON.stringify(sandboxLifecycle)}`,
       );
     }
   }
 
-  const strategy = input.strategy?.trim() === 'sandbox_full' ? 'sandbox_full' : 'host_only';
-  const requestedWorkspaceRoot = input.workspaceRoot?.trim() || input.cwd?.trim() || defaultWorkspaceRoot;
+  const strategy =
+    input.strategy?.trim() === "sandbox_full" ? "sandbox_full" : "host_only";
+  const requestedWorkspaceRoot =
+    input.workspaceRoot?.trim() || input.cwd?.trim() || defaultWorkspaceRoot;
   const now = Date.now();
   const session: SessionRecord = {
     sessionId,
@@ -563,8 +679,9 @@ async function createSession(input: {
     updatedAt: now,
     continuousRunStartedAt: now,
     cycleCount: 0,
-    cwd: strategy === 'host_only' ? input.cwd?.trim() || undefined : undefined,
+    cwd: strategy === "host_only" ? input.cwd?.trim() || undefined : undefined,
     strategy,
+    runtime,
     workspaceRoot: requestedWorkspaceRoot,
     syncStageFile: `/tmp/xibecode-sync-${sessionId}.b64`,
   };
@@ -573,35 +690,47 @@ async function createSession(input: {
   // After connect/create the sandbox is running — pin idle TTL (docs: setTimeout after resume).
   await refreshSandboxTimeout(session);
 
-  if (strategy === 'sandbox_full') {
+  if (strategy === "sandbox_full") {
     try {
       // SDK activity (also proves auto-resume path works for new clients)
-      const mk = await sandbox.commands?.run(`mkdir -p ${shQuote(requestedWorkspaceRoot)}`, {
-        cwd: '/tmp',
-        timeoutMs: 60_000,
-      });
+      const mk = await sandbox.commands?.run(
+        `mkdir -p ${shQuote(requestedWorkspaceRoot)}`,
+        {
+          cwd: "/tmp",
+          timeoutMs: 60_000,
+        },
+      );
       if (mk && (mk as any).exitCode && (mk as any).exitCode !== 0) {
         console.warn(
-          `[xibecode-e2b-gateway] mkdir workspace failed (${(mk as any).exitCode}): ${String((mk as any).stderr ?? '')}`,
+          `[xibecode-e2b-gateway] mkdir workspace failed (${(mk as any).exitCode}): ${String((mk as any).stderr ?? "")}`,
         );
       }
     } catch (e) {
-      console.warn(`[xibecode-e2b-gateway] mkdir workspace error: ${(e as Error).message}`);
+      console.warn(
+        `[xibecode-e2b-gateway] mkdir workspace error: ${(e as Error).message}`,
+      );
     }
   }
 
   return session;
 }
 
-async function runInSession(session: SessionRecord, input: ExecRequest): Promise<Record<string, unknown>> {
+async function runInSession(
+  session: SessionRecord,
+  input: ExecRequest,
+): Promise<Record<string, unknown>> {
   await touchSession(session);
   const timeoutMs = Math.max(1, Number(input.timeout || 120)) * 1000;
-  let cwd = input.cwd || session.cwd || session.workspaceRoot || '/home/user';
-  if (session.strategy === 'sandbox_full' && cwd && !pathPosix.isAbsolute(cwd)) {
+  let cwd = input.cwd || session.cwd || session.workspaceRoot || "/home/user";
+  if (
+    session.strategy === "sandbox_full" &&
+    cwd &&
+    !pathPosix.isAbsolute(cwd)
+  ) {
     cwd = pathPosix.join(session.workspaceRoot, pathPosix.normalize(cwd));
   }
   if (
-    session.strategy === 'sandbox_full' &&
+    session.strategy === "sandbox_full" &&
     pathPosix.isAbsolute(cwd) &&
     !isAllowedSandboxAbsPath(session, pathPosix.normalize(cwd))
   ) {
@@ -609,11 +738,11 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
       success: false,
       error: true,
       message: `[invalid_argument] cwd '${cwd}' is outside sandbox workspace`,
-      stdout: '',
+      stdout: "",
       stderr: `[invalid_argument] cwd '${cwd}' is outside sandbox workspace`,
       exitCode: 2,
       timedOut: false,
-      platform: 'cloud',
+      platform: "cloud",
       sandboxId: session.sandboxId,
       strategy: session.strategy,
       workspaceRoot: session.workspaceRoot,
@@ -626,10 +755,10 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
       timeoutMs,
       stdin: input.input,
     });
-    const stdout = String((result as any)?.stdout ?? '');
-    const stderr = String((result as any)?.stderr ?? '');
+    const stdout = String((result as any)?.stdout ?? "");
+    const stderr = String((result as any)?.stderr ?? "");
     const exitCodeRaw = (result as any)?.exitCode;
-    const exitCode = typeof exitCodeRaw === 'number' ? exitCodeRaw : 0;
+    const exitCode = typeof exitCodeRaw === "number" ? exitCodeRaw : 0;
     session.updatedAt = Date.now();
     return {
       success: exitCode === 0,
@@ -637,7 +766,7 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
       stderr,
       exitCode,
       timedOut: false,
-      platform: 'cloud',
+      platform: "cloud",
       sandboxId: session.sandboxId,
       strategy: session.strategy,
       workspaceRoot: session.workspaceRoot,
@@ -648,7 +777,7 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
   try {
     return await runOnce();
   } catch (err: any) {
-    const msg = String(err?.message || err || 'command failed');
+    const msg = String(err?.message || err || "command failed");
     // Non-zero exit from the shell is not a resume problem — surface as-is
     const exitMatch = msg.match(/exit status (\d+)/i);
     if (exitMatch) {
@@ -657,11 +786,11 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
         success: false,
         error: true,
         message: msg,
-        stdout: String(err?.stdout ?? ''),
+        stdout: String(err?.stdout ?? ""),
         stderr: String(err?.stderr ?? msg),
         exitCode: Number(exitMatch[1]),
         timedOut: false,
-        platform: 'cloud',
+        platform: "cloud",
         sandboxId: session.sandboxId,
         strategy: session.strategy,
         workspaceRoot: session.workspaceRoot,
@@ -674,23 +803,23 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
         `[xibecode-e2b-gateway] exec failed (likely paused/stale) sandbox=${session.sandboxId}: ${msg} — reconnect+retry`,
       );
       try {
-        await reconnectSandbox(session, 'exec retry after failure');
+        await reconnectSandbox(session, "exec retry after failure");
         const retried = await runOnce();
         retried.resumed = true;
         return retried;
       } catch (retryErr: any) {
-        const rmsg = String(retryErr?.message || retryErr || 'retry failed');
+        const rmsg = String(retryErr?.message || retryErr || "retry failed");
         const rExit = rmsg.match(/exit status (\d+)/i);
         session.updatedAt = Date.now();
         return {
           success: false,
           error: true,
           message: rmsg,
-          stdout: String(retryErr?.stdout ?? ''),
+          stdout: String(retryErr?.stdout ?? ""),
           stderr: String(retryErr?.stderr ?? rmsg),
           exitCode: rExit ? Number(rExit[1]) : 1,
           timedOut: /timeout/i.test(rmsg),
-          platform: 'cloud',
+          platform: "cloud",
           sandboxId: session.sandboxId,
           strategy: session.strategy,
           workspaceRoot: session.workspaceRoot,
@@ -703,11 +832,11 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
       success: false,
       error: true,
       message: msg,
-      stdout: String(err?.stdout ?? ''),
+      stdout: String(err?.stdout ?? ""),
       stderr: String(err?.stderr ?? msg),
       exitCode: 1,
       timedOut: /timeout/i.test(msg),
-      platform: 'cloud',
+      platform: "cloud",
       sandboxId: session.sandboxId,
       strategy: session.strategy,
       workspaceRoot: session.workspaceRoot,
@@ -715,10 +844,13 @@ async function runInSession(session: SessionRecord, input: ExecRequest): Promise
   }
 }
 
-async function syncWorkspaceChunk(session: SessionRecord, request: SyncRequest): Promise<Record<string, unknown>> {
+async function syncWorkspaceChunk(
+  session: SessionRecord,
+  request: SyncRequest,
+): Promise<Record<string, unknown>> {
   const reset = Boolean(request.reset);
   const final = Boolean(request.final);
-  const chunkBase64 = request.chunkBase64 || '';
+  const chunkBase64 = request.chunkBase64 || "";
 
   if (request.workspaceRoot?.trim()) {
     session.workspaceRoot = request.workspaceRoot.trim();
@@ -727,7 +859,7 @@ async function syncWorkspaceChunk(session: SessionRecord, request: SyncRequest):
   if (reset) {
     await runInSession(session, {
       command: `rm -f ${shQuote(session.syncStageFile)}`,
-      cwd: '/tmp',
+      cwd: "/tmp",
       timeout: 30,
     });
   }
@@ -736,7 +868,7 @@ async function syncWorkspaceChunk(session: SessionRecord, request: SyncRequest):
     const appendCommand = `mkdir -p /tmp && printf '%s' ${shQuote(chunkBase64)} >> ${shQuote(session.syncStageFile)}`;
     const appendResult = await runInSession(session, {
       command: appendCommand,
-      cwd: '/tmp',
+      cwd: "/tmp",
       timeout: 60,
     });
     if (!appendResult.success) return appendResult;
@@ -749,7 +881,7 @@ async function syncWorkspaceChunk(session: SessionRecord, request: SyncRequest):
       `rm -f ${shQuote(session.syncStageFile)}`;
     const extractResult = await runInSession(session, {
       command: extractCommand,
-      cwd: '/tmp',
+      cwd: "/tmp",
       timeout: 300,
     });
     if (!extractResult.success) return extractResult;
@@ -787,10 +919,10 @@ async function exportWorkspaceArchiveInSession(
     `rm -f ${shQuote(archivePath)}`;
   const result = await runInSession(session, {
     command,
-    cwd: '/tmp',
+    cwd: "/tmp",
     timeout: 600,
   });
-  const stdout = String(result.stdout || '');
+  const stdout = String(result.stdout || "");
   if (!result.success) {
     const marker = stdout.match(/__XIBECODE_EXPORT_TOO_LARGE__:(\d+)/);
     if (marker) {
@@ -804,17 +936,25 @@ async function exportWorkspaceArchiveInSession(
     return {
       ok: false,
       statusCode: 400,
-      message: `Failed to export workspace: ${String(result.stderr || result.message || 'unknown error')}`,
+      message: `Failed to export workspace: ${String(result.stderr || result.message || "unknown error")}`,
     };
   }
-  const [bytesPart, encodedPart] = stdout.split('__XIBECODE_SPLIT__');
+  const [bytesPart, encodedPart] = stdout.split("__XIBECODE_SPLIT__");
   if (!encodedPart) {
-    return { ok: false, statusCode: 500, message: 'Sandbox export missing archive payload' };
+    return {
+      ok: false,
+      statusCode: 500,
+      message: "Sandbox export missing archive payload",
+    };
   }
-  const bytes = Number((bytesPart || '').trim()) || 0;
-  const archive = Buffer.from(encodedPart.trim(), 'base64');
+  const bytes = Number((bytesPart || "").trim()) || 0;
+  const archive = Buffer.from(encodedPart.trim(), "base64");
   if (!archive.length) {
-    return { ok: false, statusCode: 500, message: 'Sandbox export produced an empty archive' };
+    return {
+      ok: false,
+      statusCode: 500,
+      message: "Sandbox export produced an empty archive",
+    };
   }
   return { ok: true, bytes, archive };
 }
@@ -826,8 +966,12 @@ async function readFileInSession(
   endLine?: number,
 ): Promise<Record<string, unknown>> {
   const targetPath = resolveSandboxPath(session, filePath);
-  const start = typeof startLine === 'number' ? Math.max(1, Math.floor(startLine)) : undefined;
-  const end = typeof endLine === 'number' ? Math.max(1, Math.floor(endLine)) : undefined;
+  const start =
+    typeof startLine === "number"
+      ? Math.max(1, Math.floor(startLine))
+      : undefined;
+  const end =
+    typeof endLine === "number" ? Math.max(1, Math.floor(endLine)) : undefined;
   const contentCommand =
     start && end
       ? `sed -n '${start},${end}p' ${shQuote(targetPath)} | base64 -w0`
@@ -844,16 +988,18 @@ async function readFileInSession(
     return {
       error: true,
       success: false,
-      message: `Failed to read ${filePath}: ${String(result.stderr || result.message || 'unknown error')}`,
+      message: `Failed to read ${filePath}: ${String(result.stderr || result.message || "unknown error")}`,
     };
   }
-  const raw = String(result.stdout || '');
-  if (raw.includes('__XIBECODE_NOT_FILE__')) {
+  const raw = String(result.stdout || "");
+  if (raw.includes("__XIBECODE_NOT_FILE__")) {
     return { error: true, success: false, message: `Not a file: ${filePath}` };
   }
-  const [linesPart, encodedPart] = raw.split('__XIBECODE_SPLIT__');
-  const totalLines = Number((linesPart || '').trim()) || 0;
-  const content = Buffer.from((encodedPart || '').trim(), 'base64').toString('utf8');
+  const [linesPart, encodedPart] = raw.split("__XIBECODE_SPLIT__");
+  const totalLines = Number((linesPart || "").trim()) || 0;
+  const content = Buffer.from((encodedPart || "").trim(), "base64").toString(
+    "utf8",
+  );
   if (start && end) {
     return {
       success: true,
@@ -873,9 +1019,13 @@ async function readFileInSession(
   };
 }
 
-async function writeFileInSession(session: SessionRecord, filePath: string, content: string): Promise<Record<string, unknown>> {
+async function writeFileInSession(
+  session: SessionRecord,
+  filePath: string,
+  content: string,
+): Promise<Record<string, unknown>> {
   const targetPath = resolveSandboxPath(session, filePath);
-  const encoded = Buffer.from(content, 'utf8').toString('base64');
+  const encoded = Buffer.from(content, "utf8").toString("base64");
   const command =
     `mkdir -p ${shQuote(pathPosix.dirname(targetPath))} && ` +
     `printf '%s' ${shQuote(encoded)} | base64 -d > ${shQuote(targetPath)}`;
@@ -888,18 +1038,21 @@ async function writeFileInSession(session: SessionRecord, filePath: string, cont
     return {
       error: true,
       success: false,
-      message: `Failed to write ${filePath}: ${String(result.stderr || result.message || 'unknown error')}`,
+      message: `Failed to write ${filePath}: ${String(result.stderr || result.message || "unknown error")}`,
     };
   }
   return {
     success: true,
     path: filePath,
-    lines: content.split('\n').length,
+    lines: content.split("\n").length,
     size: content.length,
   };
 }
 
-async function deleteFileInSession(session: SessionRecord, filePath: string): Promise<Record<string, unknown>> {
+async function deleteFileInSession(
+  session: SessionRecord,
+  filePath: string,
+): Promise<Record<string, unknown>> {
   const targetPath = resolveSandboxPath(session, filePath);
   const result = await runInSession(session, {
     command: `rm -rf ${shQuote(targetPath)}`,
@@ -910,14 +1063,17 @@ async function deleteFileInSession(session: SessionRecord, filePath: string): Pr
     return {
       error: true,
       success: false,
-      message: `Failed to delete ${filePath}: ${String(result.stderr || result.message || 'unknown error')}`,
+      message: `Failed to delete ${filePath}: ${String(result.stderr || result.message || "unknown error")}`,
     };
   }
   return { success: true, path: filePath };
 }
 
-async function listDirectoryInSession(session: SessionRecord, dirPath: string): Promise<Record<string, unknown>> {
-  const targetPath = resolveSandboxPath(session, dirPath || '.');
+async function listDirectoryInSession(
+  session: SessionRecord,
+  dirPath: string,
+): Promise<Record<string, unknown>> {
+  const targetPath = resolveSandboxPath(session, dirPath || ".");
   const command =
     `if [ ! -d ${shQuote(targetPath)} ]; then echo "__XIBECODE_NOT_DIR__"; exit 3; fi; ` +
     `for item in ${shQuote(targetPath)}/*; do ` +
@@ -933,22 +1089,30 @@ async function listDirectoryInSession(session: SessionRecord, dirPath: string): 
     timeout: 60,
   });
   if (!result.success) {
-    const stderr = String(result.stderr || result.message || 'unknown error');
-    if (stderr.includes('__XIBECODE_NOT_DIR__')) {
-      return { error: true, success: false, message: `Not a directory: ${dirPath}` };
+    const stderr = String(result.stderr || result.message || "unknown error");
+    if (stderr.includes("__XIBECODE_NOT_DIR__")) {
+      return {
+        error: true,
+        success: false,
+        message: `Not a directory: ${dirPath}`,
+      };
     }
-    return { error: true, success: false, message: `Failed to list directory ${dirPath}: ${stderr}` };
+    return {
+      error: true,
+      success: false,
+      message: `Failed to list directory ${dirPath}: ${stderr}`,
+    };
   }
-  const entries = String(result.stdout || '')
-    .split('\n')
+  const entries = String(result.stdout || "")
+    .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [name, type, size] = line.split('\t');
+      const [name, type, size] = line.split("\t");
       return {
         name,
-        type: type === 'directory' ? 'directory' : 'file',
-        size: Number(size || '0') || 0,
+        type: type === "directory" ? "directory" : "file",
+        size: Number(size || "0") || 0,
       };
     });
   return {
@@ -959,14 +1123,14 @@ async function listDirectoryInSession(session: SessionRecord, dirPath: string): 
   };
 }
 
-const MIGRATE_ARCHIVE = '/tmp/vectra-migrate.tgz';
+const MIGRATE_ARCHIVE = "/tmp/vectra-migrate.tgz";
 const MIGRATE_MAX_BYTES = 200 * 1024 * 1024;
 
 function migratePackCommand(): string {
   return [
-    'set -e',
+    "set -e",
     `rm -f ${shQuote(MIGRATE_ARCHIVE)}`,
-    'mkdir -p /home/user/workspace /home/user/.xibecode',
+    "mkdir -p /home/user/workspace /home/user/.xibecode /home/user/.superagent /home/user/.supercharge",
     `tar -C /home/user -czf ${shQuote(MIGRATE_ARCHIVE)}`,
     "  --exclude='workspace/node_modules'",
     "  --exclude='workspace/**/node_modules'",
@@ -978,66 +1142,87 @@ function migratePackCommand(): string {
     "  --exclude='workspace/**/.venv'",
     "  --exclude='workspace/**/__pycache__'",
     "  --exclude='.xibecode/file-history'",
-    '  workspace .xibecode',
+    "  --exclude='.superagent/file-history'",
+    "  workspace .xibecode .superagent .supercharge",
     `wc -c < ${shQuote(MIGRATE_ARCHIVE)} | tr -d ' '`,
-  ].join(' ');
+  ].join(" ");
 }
 
-async function readSandboxBytes(sandbox: SandboxLike, absPath: string): Promise<Buffer> {
+async function readSandboxBytes(
+  sandbox: SandboxLike,
+  absPath: string,
+): Promise<Buffer> {
   if (sandbox.files?.read) {
-    const raw = await sandbox.files.read(absPath, { format: 'bytes' });
+    const raw = await sandbox.files.read(absPath, { format: "bytes" });
     if (Buffer.isBuffer(raw)) return raw;
     if (raw instanceof Uint8Array) return Buffer.from(raw);
-    if (typeof raw === 'string') return Buffer.from(raw, 'base64');
+    if (typeof raw === "string") return Buffer.from(raw, "base64");
   }
-  throw new Error('sandbox files.read is unavailable');
+  throw new Error("sandbox files.read is unavailable");
 }
 
-async function writeSandboxBytes(sandbox: SandboxLike, absPath: string, data: Buffer): Promise<void> {
+async function writeSandboxBytes(
+  sandbox: SandboxLike,
+  absPath: string,
+  data: Buffer,
+): Promise<void> {
   if (sandbox.files?.write) {
     await sandbox.files.write(absPath, data);
     return;
   }
-  throw new Error('sandbox files.write is unavailable');
+  throw new Error("sandbox files.write is unavailable");
 }
 
-async function copyArchiveChunked(oldSession: SessionRecord, newSandbox: SandboxLike): Promise<number> {
+async function copyArchiveChunked(
+  oldSession: SessionRecord,
+  newSandbox: SandboxLike,
+): Promise<number> {
   const listed = await runInSession(oldSession, {
     command: `split -b 1200000 ${shQuote(MIGRATE_ARCHIVE)} /tmp/vectra-mig-part- && ls /tmp/vectra-mig-part-* | wc -l`,
-    cwd: '/tmp',
+    cwd: "/tmp",
     timeout: 180,
   });
   if (!listed.success) {
-    throw new Error(`Could not split migrate archive: ${String(listed.stderr || listed.message || '')}`);
+    throw new Error(
+      `Could not split migrate archive: ${String(listed.stderr || listed.message || "")}`,
+    );
   }
-  const parts = Number(String(listed.stdout || '').trim()) || 0;
-  if (parts < 1) throw new Error('Migrate archive split produced no parts');
+  const parts = Number(String(listed.stdout || "").trim()) || 0;
+  if (parts < 1) throw new Error("Migrate archive split produced no parts");
   let bytes = 0;
-  await newSandbox.commands?.run(`rm -f ${shQuote(MIGRATE_ARCHIVE)} /tmp/vectra-mig-part-*`, {
-    cwd: '/tmp',
-    timeoutMs: 30_000,
-  });
+  await newSandbox.commands?.run(
+    `rm -f ${shQuote(MIGRATE_ARCHIVE)} /tmp/vectra-mig-part-*`,
+    {
+      cwd: "/tmp",
+      timeoutMs: 30_000,
+    },
+  );
   for (let i = 0; i < parts; i++) {
-    const suffix = String.fromCharCode(97 + Math.floor(i / 26)) + String.fromCharCode(97 + (i % 26));
+    const suffix =
+      String.fromCharCode(97 + Math.floor(i / 26)) +
+      String.fromCharCode(97 + (i % 26));
     // split default suffix: aa, ab, ...
     const partName = `/tmp/vectra-mig-part-${suffix}`;
     const encoded = await runInSession(oldSession, {
       command: `base64 -w0 ${shQuote(partName)}`,
-      cwd: '/tmp',
+      cwd: "/tmp",
       timeout: 120,
     });
     if (!encoded.success) {
       throw new Error(`Failed to read migrate part ${partName}`);
     }
-    const b64 = String(encoded.stdout || '').trim();
-    bytes += Buffer.from(b64, 'base64').length;
+    const b64 = String(encoded.stdout || "").trim();
+    bytes += Buffer.from(b64, "base64").length;
     const wr = await newSandbox.commands?.run(
       `printf '%s' ${shQuote(b64)} | base64 -d >> ${shQuote(MIGRATE_ARCHIVE)}`,
-      { cwd: '/tmp', timeoutMs: 120_000 },
+      { cwd: "/tmp", timeoutMs: 120_000 },
     );
-    const exitCode = typeof (wr as any)?.exitCode === 'number' ? (wr as any).exitCode : 0;
+    const exitCode =
+      typeof (wr as any)?.exitCode === "number" ? (wr as any).exitCode : 0;
     if (exitCode !== 0) {
-      throw new Error(`Failed to write migrate part ${partName} on new sandbox`);
+      throw new Error(
+        `Failed to write migrate part ${partName} on new sandbox`,
+      );
     }
   }
   return bytes;
@@ -1058,20 +1243,25 @@ async function recreateSandboxInSession(session: SessionRecord): Promise<{
   logs: string[];
 }> {
   const logs: string[] = [];
+  const profile = runtimeProfile(session.runtime);
   const oldSandboxId = session.sandboxId;
   await touchSession(session);
 
-  logs.push('packing workspace + ~/.xibecode (skip node_modules)');
+  logs.push(
+    `packing workspace + ${profile.label} runtime config (skip node_modules)`,
+  );
   const packed = await runInSession(session, {
     command: migratePackCommand(),
-    cwd: '/tmp',
+    cwd: "/tmp",
     timeout: 300,
   });
   if (!packed.success) {
-    throw new Error(`Failed to pack sandbox: ${String(packed.stderr || packed.message || '')}`);
+    throw new Error(
+      `Failed to pack sandbox: ${String(packed.stderr || packed.message || "")}`,
+    );
   }
-  const bytes = Number(String(packed.stdout || '').trim()) || 0;
-  if (bytes <= 0) throw new Error('Migrate archive is empty');
+  const bytes = Number(String(packed.stdout || "").trim()) || 0;
+  if (bytes <= 0) throw new Error("Migrate archive is empty");
   if (bytes > MIGRATE_MAX_BYTES) {
     throw new Error(
       `Migrate archive is ${Math.ceil(bytes / (1024 * 1024))}MB (max ${Math.ceil(MIGRATE_MAX_BYTES / (1024 * 1024))}MB). Remove large artifacts and retry.`,
@@ -1079,9 +1269,11 @@ async function recreateSandboxInSession(session: SessionRecord): Promise<{
   }
   logs.push(`packed ${Math.ceil(bytes / 1024)}KB`);
 
-  logs.push(`creating sandbox from template ${sandboxTemplate}`);
+  logs.push(
+    `creating ${profile.label} sandbox from template ${profile.template}`,
+  );
   const created = (await Sandbox.create({
-    template: sandboxTemplate,
+    template: profile.template,
     timeoutMs: sandboxTimeoutMs,
     lifecycle: sandboxLifecycle,
   })) as unknown as SandboxLike;
@@ -1092,31 +1284,35 @@ async function recreateSandboxInSession(session: SessionRecord): Promise<{
     try {
       const buf = await readSandboxBytes(session.sandbox, MIGRATE_ARCHIVE);
       await writeSandboxBytes(created, MIGRATE_ARCHIVE, buf);
-      logs.push('copied archive via files API');
+      logs.push("copied archive via files API");
     } catch (err) {
-      logs.push(`files API copy failed (${(err as Error).message}) — chunked fallback`);
+      logs.push(
+        `files API copy failed (${(err as Error).message}) — chunked fallback`,
+      );
       await copyArchiveChunked(session, created);
-      logs.push('copied archive in chunks');
+      logs.push("copied archive in chunks");
     }
 
     const extracted = await created.commands?.run(
       [
-        'set -e',
-        'mkdir -p /home/user/workspace /home/user/.xibecode',
+        "set -e",
+        "mkdir -p /home/user/workspace /home/user/.xibecode /home/user/.superagent /home/user/.supercharge",
         `tar -C /home/user -xzf ${shQuote(MIGRATE_ARCHIVE)}`,
-        'chown -R user:user /home/user/workspace /home/user/.xibecode 2>/dev/null || true',
+        "chown -R user:user /home/user/workspace /home/user/.xibecode /home/user/.superagent /home/user/.supercharge 2>/dev/null || true",
         `rm -f ${shQuote(MIGRATE_ARCHIVE)}`,
-        'test -d /home/user/workspace',
-        'test -d /home/user/.xibecode',
-        'echo EXTRACT_OK',
-      ].join('; '),
-      { cwd: '/tmp', timeoutMs: 300_000 },
+        "test -d /home/user/workspace",
+        "test -d /home/user/.xibecode && test -d /home/user/.superagent && test -d /home/user/.supercharge",
+        "echo EXTRACT_OK",
+      ].join("; "),
+      { cwd: "/tmp", timeoutMs: 300_000 },
     );
-    const extractOut = `${String((extracted as any)?.stdout || '')}\n${String((extracted as any)?.stderr || '')}`;
-    if (!extractOut.includes('EXTRACT_OK')) {
-      throw new Error(`Failed to extract on new sandbox: ${extractOut.slice(0, 400)}`);
+    const extractOut = `${String((extracted as any)?.stdout || "")}\n${String((extracted as any)?.stderr || "")}`;
+    if (!extractOut.includes("EXTRACT_OK")) {
+      throw new Error(
+        `Failed to extract on new sandbox: ${extractOut.slice(0, 400)}`,
+      );
     }
-    logs.push('extracted workspace + keys/chat');
+    logs.push("extracted workspace + keys/chat");
   } catch (err) {
     try {
       await created.kill?.();
@@ -1131,7 +1327,7 @@ async function recreateSandboxInSession(session: SessionRecord): Promise<{
   session.sandboxId = newSandboxId;
   session.updatedAt = Date.now();
   session.continuousRunStartedAt = Date.now();
-  logs.push('session now points at new sandbox');
+  logs.push("session now points at new sandbox");
 
   try {
     await oldSandbox.kill?.();
@@ -1145,7 +1341,7 @@ async function recreateSandboxInSession(session: SessionRecord): Promise<{
     sessionId: session.sessionId,
     oldSandboxId,
     sandboxId: newSandboxId,
-    template: sandboxTemplate,
+    template: profile.template,
     bytes,
     logs,
   };
@@ -1166,14 +1362,17 @@ async function closeSession(session: SessionRecord): Promise<void> {
 
 const server = createServer(async (req, res) => {
   try {
-    const method = req.method || 'GET';
-    const url = new URL(req.url || '/', `http://${req.headers.host || `localhost:${port}`}`);
+    const method = req.method || "GET";
+    const url = new URL(
+      req.url || "/",
+      `http://${req.headers.host || `localhost:${port}`}`,
+    );
 
     // Public health for orchestrators (Coolify, Docker HEALTHCHECK). No secrets in body.
-    if (method === 'GET' && url.pathname === '/health') {
+    if (method === "GET" && url.pathname === "/health") {
       sendJson(res, 200, {
         success: true,
-        service: 'vectra-gateway',
+        service: "vectra-gateway",
         sessions: sessions.size,
         hasE2BKey: Boolean(process.env.E2B_API_KEY),
         authRequired: Boolean(authToken),
@@ -1192,16 +1391,26 @@ const server = createServer(async (req, res) => {
     }
 
     if (!isAuthorized(req)) {
-      sendJson(res, 401, { success: false, error: true, message: 'Unauthorized' });
+      sendJson(res, 401, {
+        success: false,
+        error: true,
+        message: "Unauthorized",
+      });
       return;
     }
 
     // Live E2B state by sandbox id (works even if gateway session map is empty / sandbox paused)
-    const sandboxStateMatch = url.pathname.match(/^\/sandboxes\/([^/]+)(?:\/state)?$/);
-    if (method === 'GET' && sandboxStateMatch) {
-      const sandboxId = decodeURIComponent(sandboxStateMatch[1] || '').trim();
+    const sandboxStateMatch = url.pathname.match(
+      /^\/sandboxes\/([^/]+)(?:\/state)?$/,
+    );
+    if (method === "GET" && sandboxStateMatch) {
+      const sandboxId = decodeURIComponent(sandboxStateMatch[1] || "").trim();
       if (!sandboxId) {
-        sendJson(res, 400, { success: false, error: true, message: 'Missing sandboxId' });
+        sendJson(res, 400, {
+          success: false,
+          error: true,
+          message: "Missing sandboxId",
+        });
         return;
       }
       try {
@@ -1213,13 +1422,13 @@ const server = createServer(async (req, res) => {
           memoryMB?: number;
           lifecycle?: { onTimeout?: string; autoResume?: boolean };
         };
-        const state = String(info.state || 'unknown');
+        const state = String(info.state || "unknown");
         sendJson(res, 200, {
           success: true,
           sandboxId: info.sandboxId || sandboxId,
           state,
           // paused sandboxes remain owned/resumable — not deleted
-          resumable: state === 'paused' || state === 'running',
+          resumable: state === "paused" || state === "running",
           templateId: info.templateId,
           cpuCount: info.cpuCount,
           memoryMB: info.memoryMB,
@@ -1231,7 +1440,7 @@ const server = createServer(async (req, res) => {
         sendJson(res, 200, {
           success: true,
           sandboxId,
-          state: 'missing',
+          state: "missing",
           resumable: false,
           message: msg.slice(0, 300),
         });
@@ -1239,11 +1448,13 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (method === 'GET' && url.pathname === '/sessions') {
+    if (method === "GET" && url.pathname === "/sessions") {
       const data = Array.from(sessions.values()).map((session) => ({
         sessionId: session.sessionId,
         sandboxId: session.sandboxId,
         strategy: session.strategy,
+        runtime: session.runtime,
+        template: runtimeProfile(session.runtime).template,
         cwd: session.cwd,
         workspaceRoot: session.workspaceRoot,
         createdAt: session.createdAt,
@@ -1257,16 +1468,30 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    const bySandboxMatch = url.pathname.match(/^\/sessions\/by-sandbox\/([^/]+)$/);
-    if (method === 'GET' && bySandboxMatch) {
-      const requestedSandboxId = decodeURIComponent(bySandboxMatch[1] || '').trim();
+    const bySandboxMatch = url.pathname.match(
+      /^\/sessions\/by-sandbox\/([^/]+)$/,
+    );
+    if (method === "GET" && bySandboxMatch) {
+      const requestedSandboxId = decodeURIComponent(
+        bySandboxMatch[1] || "",
+      ).trim();
       if (!requestedSandboxId) {
-        sendJson(res, 400, { success: false, error: true, message: 'Missing sandboxId path parameter' });
+        sendJson(res, 400, {
+          success: false,
+          error: true,
+          message: "Missing sandboxId path parameter",
+        });
         return;
       }
-      const session = Array.from(sessions.values()).find((s) => s.sandboxId === requestedSandboxId);
+      const session = Array.from(sessions.values()).find(
+        (s) => s.sandboxId === requestedSandboxId,
+      );
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Sandbox not found: ${requestedSandboxId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Sandbox not found: ${requestedSandboxId}`,
+        });
         return;
       }
       session.updatedAt = Date.now();
@@ -1276,6 +1501,8 @@ const server = createServer(async (req, res) => {
         sessionId: session.sessionId,
         sandboxId: session.sandboxId,
         strategy: session.strategy,
+        runtime: session.runtime,
+        template: runtimeProfile(session.runtime).template,
         cwd: session.cwd,
         workspaceRoot: session.workspaceRoot,
         continuousRunStartedAt: session.continuousRunStartedAt,
@@ -1284,11 +1511,12 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (method === 'POST' && url.pathname === '/sessions') {
+    if (method === "POST" && url.pathname === "/sessions") {
       const body = await readJson<{
         sessionId?: string;
         cwd?: string;
         strategy?: string;
+        runtime?: AgentRuntime | string;
         workspaceRoot?: string;
         sandboxId?: string;
       }>(req);
@@ -1298,6 +1526,8 @@ const server = createServer(async (req, res) => {
         sessionId: session.sessionId,
         sandboxId: session.sandboxId,
         strategy: session.strategy,
+        runtime: session.runtime,
+        template: runtimeProfile(session.runtime).template,
         cwd: session.cwd,
         workspaceRoot: session.workspaceRoot,
         continuousRunStartedAt: session.continuousRunStartedAt,
@@ -1314,17 +1544,27 @@ const server = createServer(async (req, res) => {
 
     // Explicit wake/resume (dashboard button, ops, after idle pause)
     const wakeMatch = url.pathname.match(/^\/sessions\/([^/]+)\/wake$/);
-    if (method === 'POST' && wakeMatch) {
-      const sessionId = decodeURIComponent(wakeMatch[1] || '');
+    if (method === "POST" && wakeMatch) {
+      const sessionId = decodeURIComponent(wakeMatch[1] || "");
       let session = sessions.get(sessionId);
-      const body = await readJson<{ sandboxId?: string; restartDaemon?: boolean }>(req).catch(
-        () => ({}) as { sandboxId?: string; restartDaemon?: boolean },
+      const body = await readJson<{
+        sandboxId?: string;
+        runtime?: AgentRuntime | string;
+        restartDaemon?: boolean;
+      }>(req).catch(
+        () =>
+          ({}) as {
+            sandboxId?: string;
+            runtime?: AgentRuntime | string;
+            restartDaemon?: boolean;
+          },
       );
       if (!session && body.sandboxId) {
         session = await createSession({
           sessionId,
           sandboxId: body.sandboxId,
-          strategy: 'sandbox_full',
+          strategy: "sandbox_full",
+          runtime: body.runtime,
         });
       }
       if (!session) {
@@ -1338,58 +1578,66 @@ const server = createServer(async (req, res) => {
       try {
         const status = await ensureSandboxRunning(session);
         let daemon: { ok?: boolean; logs?: string[] } | undefined;
+        const profile = runtimeProfile(session.runtime);
+        const runtimeHome =
+          session.runtime === "supercharge"
+            ? "/home/user/.superagent"
+            : "/home/user/.xibecode";
         if (body.restartDaemon) {
           // After long pause, frozen TCP (Telegram long-poll) is stale — restart daemon.
           // Poll until process is up (resume can take a few seconds for envd/npm).
           const r = await runInSession(session, {
             command: [
-              'set +e',
-              'set -a',
-              '[ -f /home/user/.xibecode/daemon.env ] && . /home/user/.xibecode/daemon.env',
-              '[ -f /home/user/.xibecode/gateway.env ] && . /home/user/.xibecode/gateway.env',
-              'set +a',
+              "set +e",
+              "set -a",
+              `[ -f ${runtimeHome}/daemon.env ] && . ${runtimeHome}/daemon.env`,
+              `[ -f ${runtimeHome}/gateway.env ] && . ${runtimeHome}/gateway.env`,
+              "set +a",
               // Template wake HTTP (doorbell) + bot long-poll (separate)
-              'if [ -x /opt/vectra/wake-http/start.sh ]; then /opt/vectra/wake-http/start.sh || true; fi',
-              'if [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}" ]; then',
-              '  TOK="${TELEGRAM_BOT_TOKEN:-$XIBECODE_TELEGRAM_BOT_TOKEN}"',
+              "if [ -x /opt/vectra/wake-http/start.sh ]; then /opt/vectra/wake-http/start.sh || true; fi",
+              'if [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}${SUPERAGENT_TELEGRAM_BOT_TOKEN:-}" ]; then',
+              '  TOK="${TELEGRAM_BOT_TOKEN:-${XIBECODE_TELEGRAM_BOT_TOKEN:-${SUPERAGENT_TELEGRAM_BOT_TOKEN:-}}}"',
               '  curl -sS -m 10 -X POST "https://api.telegram.org/bot${TOK}/deleteWebhook" -d "drop_pending_updates=false" >/dev/null 2>&1 || true',
-              'fi',
+              "fi",
               // Stop only the configured sandbox daemon. The pidfile avoids matching
               // the restart shell itself; the optional pattern handles legacy templates.
-              `if [ -f ${shQuote(sandboxDaemonPidFile)} ]; then`,
-              `  OLD="$(cat ${shQuote(sandboxDaemonPidFile)} 2>/dev/null)"`,
+              `if [ -f ${shQuote(profile.pidFile)} ]; then`,
+              `  OLD="$(cat ${shQuote(profile.pidFile)} 2>/dev/null)"`,
               '  if [ -n "$OLD" ]; then kill "$OLD" 2>/dev/null || true; sleep 1; kill -9 "$OLD" 2>/dev/null || true; fi',
-              `  rm -f ${shQuote(sandboxDaemonPidFile)}`,
-              'fi',
-              `for pid in $(pgrep -f ${shQuote(sandboxDaemonMatch)} 2>/dev/null || true); do`,
+              `  rm -f ${shQuote(profile.pidFile)}`,
+              "fi",
+              `for pid in $(pgrep -f ${shQuote(profile.processMatch)} 2>/dev/null || true); do`,
               '  if [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ]; then',
               '    case "$(tr "\\0" " " < /proc/$pid/cmdline 2>/dev/null || true)" in',
               '      *daemon*) kill "$pid" 2>/dev/null || true ;;',
-              '    esac',
-              '  fi',
-              'done',
-              'sleep 1',
-              `nohup ${sandboxDaemonCommand} >${shQuote(sandboxDaemonLogFile)} 2>&1 &`,
-              `echo $! > ${shQuote(sandboxDaemonPidFile)}`,
-              'OK=0',
-              'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do',
-              '  sleep 1',
-              `  if [ -f ${shQuote(sandboxDaemonPidFile)} ] && kill -0 "$(cat ${shQuote(sandboxDaemonPidFile)})" 2>/dev/null; then OK=1; break; fi`,
-              `  if pgrep -af ${shQuote(sandboxDaemonMatch)} 2>/dev/null | grep -vF "pgrep" | grep -q .; then OK=1; break; fi`,
-              'done',
+              "    esac",
+              "  fi",
+              "done",
+              "sleep 1",
+              `nohup ${profile.daemonCommand} >${shQuote(profile.logFile)} 2>&1 &`,
+              `echo $! > ${shQuote(profile.pidFile)}`,
+              "OK=0",
+              "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do",
+              "  sleep 1",
+              `  if [ -f ${shQuote(profile.pidFile)} ] && kill -0 "$(cat ${shQuote(profile.pidFile)})" 2>/dev/null; then OK=1; break; fi`,
+              `  if pgrep -af ${shQuote(profile.processMatch)} 2>/dev/null | grep -vF "pgrep" | grep -q .; then OK=1; break; fi`,
+              "done",
               'if [ "$OK" = "1" ]; then echo DAEMON_OK; else echo DAEMON_FAIL; fi',
-              'WP="${VECTRA_WAKE_PORT:-8788}"',
+              'WP="${SUPERAGENT_WAKE_PORT:-${VECTRA_WAKE_PORT:-8788}}"',
               'curl -sS -m 2 "http://127.0.0.1:${WP}/health" 2>/dev/null | head -c 200 || true',
-              'echo',
+              "echo",
               'echo "--- daemon pid ---"',
-              `cat ${shQuote(sandboxDaemonPidFile)} 2>/dev/null || true`,
+              `cat ${shQuote(profile.pidFile)} 2>/dev/null || true`,
               'echo "--- daemon log (tail) ---"',
-              `tail -50 ${shQuote(sandboxDaemonLogFile)} 2>/dev/null || true`,
-            ].join('\n'),
+              `tail -50 ${shQuote(profile.logFile)} 2>/dev/null || true`,
+            ].join("\n"),
             timeout: 120,
           });
-          const out = `${r.stdout || ''}\n${r.stderr || ''}`;
-          daemon = { ok: out.includes('DAEMON_OK'), logs: [out.slice(0, 2000)] };
+          const out = `${r.stdout || ""}\n${r.stderr || ""}`;
+          daemon = {
+            ok: out.includes("DAEMON_OK"),
+            logs: [out.slice(0, 2000)],
+          };
         }
         sendJson(res, 200, {
           success: true,
@@ -1410,11 +1658,15 @@ const server = createServer(async (req, res) => {
     }
 
     const execMatch = url.pathname.match(/^\/sessions\/([^/]+)\/exec$/);
-    if (method === 'POST' && execMatch) {
-      const sessionId = decodeURIComponent(execMatch[1] || '');
+    if (method === "POST" && execMatch) {
+      const sessionId = decodeURIComponent(execMatch[1] || "");
       const body = await readJson<ExecRequest & { sandboxId?: string }>(req);
-      if (!body.command || typeof body.command !== 'string') {
-        sendJson(res, 400, { success: false, error: true, message: 'Missing required field: command' });
+      if (!body.command || typeof body.command !== "string") {
+        sendJson(res, 400, {
+          success: false,
+          error: true,
+          message: "Missing required field: command",
+        });
         return;
       }
       // Same reattach path as /wake — session map is memory-only after gateway restart
@@ -1424,7 +1676,7 @@ const server = createServer(async (req, res) => {
           session = await createSession({
             sessionId,
             sandboxId: String(body.sandboxId),
-            strategy: 'sandbox_full',
+            strategy: "sandbox_full",
           });
         } catch (e) {
           sendJson(res, 502, {
@@ -1458,11 +1710,15 @@ const server = createServer(async (req, res) => {
     }
 
     const syncMatch = url.pathname.match(/^\/sessions\/([^/]+)\/sync$/);
-    if (method === 'POST' && syncMatch) {
-      const sessionId = decodeURIComponent(syncMatch[1] || '');
+    if (method === "POST" && syncMatch) {
+      const sessionId = decodeURIComponent(syncMatch[1] || "");
       const session = sessions.get(sessionId);
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId}`,
+        });
         return;
       }
       const body = await readJson<SyncRequest>(req);
@@ -1471,17 +1727,31 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    const previewMatch = url.pathname.match(/^\/sessions\/([^/]+)\/preview-host$/);
-    if (method === 'GET' && previewMatch) {
-      const sessionId = decodeURIComponent(previewMatch[1] || '');
+    const previewMatch = url.pathname.match(
+      /^\/sessions\/([^/]+)\/preview-host$/,
+    );
+    if (method === "GET" && previewMatch) {
+      const sessionId = decodeURIComponent(previewMatch[1] || "");
       const session = sessions.get(sessionId);
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId}`,
+        });
         return;
       }
-      const requestedPort = Number(url.searchParams.get('port') || '3000');
-      if (!Number.isFinite(requestedPort) || requestedPort < 1 || requestedPort > 65535) {
-        sendJson(res, 400, { success: false, error: true, message: 'Invalid port. Use 1-65535.' });
+      const requestedPort = Number(url.searchParams.get("port") || "3000");
+      if (
+        !Number.isFinite(requestedPort) ||
+        requestedPort < 1 ||
+        requestedPort > 65535
+      ) {
+        sendJson(res, 400, {
+          success: false,
+          error: true,
+          message: "Invalid port. Use 1-65535.",
+        });
         return;
       }
       const host = await resolvePreviewHost(session, Math.floor(requestedPort));
@@ -1496,20 +1766,28 @@ const server = createServer(async (req, res) => {
     }
 
     const fileMatch = url.pathname.match(/^\/sessions\/([^/]+)\/file$/);
-    if (fileMatch && method === 'GET') {
-      const sessionId = decodeURIComponent(fileMatch[1] || '');
+    if (fileMatch && method === "GET") {
+      const sessionId = decodeURIComponent(fileMatch[1] || "");
       const session = sessions.get(sessionId);
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId}`,
+        });
         return;
       }
-      const queryPath = url.searchParams.get('path');
+      const queryPath = url.searchParams.get("path");
       if (!queryPath) {
-        sendJson(res, 400, { success: false, error: true, message: 'Missing required query parameter: path' });
+        sendJson(res, 400, {
+          success: false,
+          error: true,
+          message: "Missing required query parameter: path",
+        });
         return;
       }
-      const startLine = Number(url.searchParams.get('start_line') || '');
-      const endLine = Number(url.searchParams.get('end_line') || '');
+      const startLine = Number(url.searchParams.get("start_line") || "");
+      const endLine = Number(url.searchParams.get("end_line") || "");
       const result = await readFileInSession(
         session,
         queryPath,
@@ -1520,20 +1798,32 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (fileMatch && method === 'PUT') {
-      const sessionId = decodeURIComponent(fileMatch[1] || '');
+    if (fileMatch && method === "PUT") {
+      const sessionId = decodeURIComponent(fileMatch[1] || "");
       const session = sessions.get(sessionId);
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId}`,
+        });
         return;
       }
       const body = await readJson<FileMutationRequest>(req);
-      if (!body.path || typeof body.path !== 'string') {
-        sendJson(res, 400, { success: false, error: true, message: 'Missing required field: path' });
+      if (!body.path || typeof body.path !== "string") {
+        sendJson(res, 400, {
+          success: false,
+          error: true,
+          message: "Missing required field: path",
+        });
         return;
       }
-      if (typeof body.content !== 'string') {
-        sendJson(res, 400, { success: false, error: true, message: 'Missing required field: content' });
+      if (typeof body.content !== "string") {
+        sendJson(res, 400, {
+          success: false,
+          error: true,
+          message: "Missing required field: content",
+        });
         return;
       }
       const result = await writeFileInSession(session, body.path, body.content);
@@ -1541,16 +1831,24 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (fileMatch && method === 'DELETE') {
-      const sessionId = decodeURIComponent(fileMatch[1] || '');
+    if (fileMatch && method === "DELETE") {
+      const sessionId = decodeURIComponent(fileMatch[1] || "");
       const session = sessions.get(sessionId);
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId}`,
+        });
         return;
       }
       const body = await readJson<FileMutationRequest>(req);
-      if (!body.path || typeof body.path !== 'string') {
-        sendJson(res, 400, { success: false, error: true, message: 'Missing required field: path' });
+      if (!body.path || typeof body.path !== "string") {
+        sendJson(res, 400, {
+          success: false,
+          error: true,
+          message: "Missing required field: path",
+        });
         return;
       }
       const result = await deleteFileInSession(session, body.path);
@@ -1559,30 +1857,44 @@ const server = createServer(async (req, res) => {
     }
 
     const listMatch = url.pathname.match(/^\/sessions\/([^/]+)\/list$/);
-    if (method === 'GET' && listMatch) {
-      const sessionId = decodeURIComponent(listMatch[1] || '');
+    if (method === "GET" && listMatch) {
+      const sessionId = decodeURIComponent(listMatch[1] || "");
       const session = sessions.get(sessionId);
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId}`,
+        });
         return;
       }
-      const queryPath = url.searchParams.get('path') || '.';
+      const queryPath = url.searchParams.get("path") || ".";
       const result = await listDirectoryInSession(session, queryPath);
       sendJson(res, result.success === false ? 400 : 200, result);
       return;
     }
 
-    const directoryMatch = url.pathname.match(/^\/sessions\/([^/]+)\/directory$/);
-    if (method === 'POST' && directoryMatch) {
-      const sessionId = decodeURIComponent(directoryMatch[1] || '');
+    const directoryMatch = url.pathname.match(
+      /^\/sessions\/([^/]+)\/directory$/,
+    );
+    if (method === "POST" && directoryMatch) {
+      const sessionId = decodeURIComponent(directoryMatch[1] || "");
       const session = sessions.get(sessionId);
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId}`,
+        });
         return;
       }
       const body = await readJson<FileMutationRequest>(req);
-      if (!body.path || typeof body.path !== 'string') {
-        sendJson(res, 400, { success: false, error: true, message: 'Missing required field: path' });
+      if (!body.path || typeof body.path !== "string") {
+        sendJson(res, 400, {
+          success: false,
+          error: true,
+          message: "Missing required field: path",
+        });
         return;
       }
       const targetPath = resolveSandboxPath(session, body.path);
@@ -1591,21 +1903,38 @@ const server = createServer(async (req, res) => {
         cwd: session.workspaceRoot,
         timeout: 60,
       });
-      sendJson(res, result.success ? 200 : 400, result.success ? { success: true, path: body.path } : result);
+      sendJson(
+        res,
+        result.success ? 200 : 400,
+        result.success ? { success: true, path: body.path } : result,
+      );
       return;
     }
 
     const moveMatch = url.pathname.match(/^\/sessions\/([^/]+)\/move$/);
-    if (method === 'POST' && moveMatch) {
-      const sessionId = decodeURIComponent(moveMatch[1] || '');
+    if (method === "POST" && moveMatch) {
+      const sessionId = decodeURIComponent(moveMatch[1] || "");
       const session = sessions.get(sessionId);
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId}`,
+        });
         return;
       }
       const body = await readJson<MoveRequest>(req);
-      if (!body.source || typeof body.source !== 'string' || !body.destination || typeof body.destination !== 'string') {
-        sendJson(res, 400, { success: false, error: true, message: 'Missing required fields: source, destination' });
+      if (
+        !body.source ||
+        typeof body.source !== "string" ||
+        !body.destination ||
+        typeof body.destination !== "string"
+      ) {
+        sendJson(res, 400, {
+          success: false,
+          error: true,
+          message: "Missing required fields: source, destination",
+        });
         return;
       }
       const source = resolveSandboxPath(session, body.source);
@@ -1618,17 +1947,27 @@ const server = createServer(async (req, res) => {
       sendJson(
         res,
         result.success ? 200 : 400,
-        result.success ? { success: true, source: body.source, destination: body.destination } : result,
+        result.success
+          ? {
+              success: true,
+              source: body.source,
+              destination: body.destination,
+            }
+          : result,
       );
       return;
     }
 
     const exportMatch = url.pathname.match(/^\/sessions\/([^/]+)\/export$/);
-    if (method === 'GET' && exportMatch) {
-      const sessionId = decodeURIComponent(exportMatch[1] || '');
+    if (method === "GET" && exportMatch) {
+      const sessionId = decodeURIComponent(exportMatch[1] || "");
       const session = sessions.get(sessionId);
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId}`,
+        });
         return;
       }
       const exported = await exportWorkspaceArchiveInSession(session);
@@ -1644,28 +1983,45 @@ const server = createServer(async (req, res) => {
         return;
       }
       res.statusCode = 200;
-      res.setHeader('Content-Type', 'application/gzip');
-      res.setHeader('Content-Length', String(exported.archive.length));
+      res.setHeader("Content-Type", "application/gzip");
+      res.setHeader("Content-Length", String(exported.archive.length));
+      const runtimeLabel =
+        session.runtime === "supercharge" ? "supercharge" : "xibecode";
       res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="xibecode-sandbox-${session.sandboxId}.tar.gz"`,
+        "Content-Disposition",
+        `attachment; filename="${runtimeLabel}-sandbox-${session.sandboxId}.tar.gz"`,
       );
-      res.setHeader('X-XibeCode-Sandbox-Id', session.sandboxId);
-      res.setHeader('X-XibeCode-Workspace-Root', session.workspaceRoot);
+      res.setHeader("X-Agent-Runtime", session.runtime);
+      res.setHeader("X-XibeCode-Sandbox-Id", session.sandboxId);
+      res.setHeader("X-XibeCode-Workspace-Root", session.workspaceRoot);
       res.end(exported.archive);
       return;
     }
 
     const recreateMatch = url.pathname.match(/^\/sessions\/([^/]+)\/recreate$/);
-    if (method === 'POST' && recreateMatch) {
-      const sessionId = decodeURIComponent(recreateMatch[1] || '');
-      const body = await readJson<{ sandboxId?: string }>(req).catch(() => ({}) as { sandboxId?: string });
+    if (method === "POST" && recreateMatch) {
+      const sessionId = decodeURIComponent(recreateMatch[1] || "");
+      const body = await readJson<{
+        sandboxId?: string;
+        runtime?: AgentRuntime | string;
+      }>(req).catch(
+        () => ({}) as { sandboxId?: string; runtime?: AgentRuntime | string },
+      );
       let session = sessions.get(sessionId);
       if (!session && body.sandboxId) {
-        session = await createSession({ sessionId, sandboxId: body.sandboxId, strategy: 'sandbox_full' });
+        session = await createSession({
+          sessionId,
+          sandboxId: body.sandboxId,
+          strategy: "sandbox_full",
+          runtime: body.runtime,
+        });
       }
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId}`,
+        });
         return;
       }
       try {
@@ -1675,7 +2031,7 @@ const server = createServer(async (req, res) => {
         sendJson(res, 500, {
           success: false,
           error: true,
-          message: (err as Error).message || 'Recreate failed',
+          message: (err as Error).message || "Recreate failed",
           sessionId,
           sandboxId: session.sandboxId,
         });
@@ -1684,11 +2040,15 @@ const server = createServer(async (req, res) => {
     }
 
     const sessionMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
-    if (method === 'DELETE' && sessionMatch) {
-      const sessionId = decodeURIComponent(sessionMatch[1] || '');
+    if (method === "DELETE" && sessionMatch) {
+      const sessionId = decodeURIComponent(sessionMatch[1] || "");
       const session = sessions.get(sessionId);
       if (!session) {
-        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId}` });
+        sendJson(res, 404, {
+          success: false,
+          error: true,
+          message: `Session not found: ${sessionId}`,
+        });
         return;
       }
       await closeSession(session);
@@ -1697,12 +2057,16 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    sendJson(res, 404, { success: false, error: true, message: `Not found: ${method} ${url.pathname}` });
+    sendJson(res, 404, {
+      success: false,
+      error: true,
+      message: `Not found: ${method} ${url.pathname}`,
+    });
   } catch (error: any) {
     sendJson(res, 500, {
       success: false,
       error: true,
-      message: error?.message || 'Internal server error',
+      message: error?.message || "Internal server error",
     });
   }
 });
@@ -1717,7 +2081,7 @@ if (maxContinuousMs > 0) {
     for (const session of sessions.values()) {
       const elapsed = Date.now() - session.continuousRunStartedAt;
       if (elapsed < maxContinuousMs) continue;
-      void resetContinuousRunCycle(session, 'background-tick').catch((err) => {
+      void resetContinuousRunCycle(session, "background-tick").catch((err) => {
         console.error(
           `[xibecode-e2b-gateway] background cycle failed session=${session.sessionId}:`,
           (err as Error)?.message || err,
@@ -1727,15 +2091,17 @@ if (maxContinuousMs > 0) {
   }, tickMs).unref?.();
 }
 
-server.listen(port, '0.0.0.0', () => {
+server.listen(port, "0.0.0.0", () => {
   console.log(`[xibecode-e2b-gateway] listening on http://0.0.0.0:${port}`);
   console.log(
     `[xibecode-e2b-gateway] lifecycle onTimeout=${lifecycleOnTimeout} autoResume=${lifecycleAutoResume} inactivityMs=${sandboxTimeoutMs} maxContinuousMs=${maxContinuousMs}`,
   );
   if (!process.env.E2B_API_KEY) {
-    console.warn('[xibecode-e2b-gateway] Warning: E2B_API_KEY is not set yet.');
+    console.warn("[xibecode-e2b-gateway] Warning: E2B_API_KEY is not set yet.");
   }
   if (!authToken) {
-    console.warn('[xibecode-e2b-gateway] Warning: XIBECODE_GATEWAY_TOKEN is empty; auth is disabled.');
+    console.warn(
+      "[xibecode-e2b-gateway] Warning: XIBECODE_GATEWAY_TOKEN is empty; auth is disabled.",
+    );
   }
 });

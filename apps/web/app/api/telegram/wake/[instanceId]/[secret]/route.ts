@@ -1,6 +1,6 @@
-import { after, NextResponse } from 'next/server';
-import { wakeSession } from '@/lib/gateway-client';
-import { getInstanceByWake, updateInstance } from '@/lib/store';
+import { after, NextResponse } from "next/server";
+import { wakeSession } from "@/lib/gateway-client";
+import { getInstanceByWake, updateInstance } from "@/lib/store";
 import {
   acquireWakeLock,
   isDuplicateUpdate,
@@ -10,17 +10,17 @@ import {
   releaseWakeLock,
   shouldNotifyFail,
   shouldNotifyOk,
-} from '@/lib/telegram-wake-guard';
+} from "@/lib/telegram-wake-guard";
 import {
   deleteTelegramWebhook,
   sendTelegramMessage,
   syncTelegramWakeWebhook,
-} from '@/lib/telegram-webhook';
+} from "@/lib/telegram-webhook";
 
 type Ctx = { params: Promise<{ instanceId: string; secret: string }> };
 
 export const maxDuration = 120;
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 type TelegramUpdate = {
   update_id?: number;
@@ -49,7 +49,7 @@ export async function POST(req: Request, ctx: Ctx) {
   const { instanceId, secret } = await ctx.params;
   const inst = await getInstanceByWake(instanceId, secret);
   if (!inst) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   let update: TelegramUpdate = {};
@@ -60,13 +60,18 @@ export async function POST(req: Request, ctx: Ctx) {
   }
 
   const updateId = update.update_id;
-  const text = update.message?.text?.trim() || update.callback_query?.data || '';
+  const text =
+    update.message?.text?.trim() || update.callback_query?.data || "";
   const chatId =
     update.message?.chat?.id ?? update.callback_query?.message?.chat?.id;
 
   // Empty probe (no update) — just confirm the endpoint is live
   if (updateId == null && !text && chatId == null) {
-    return NextResponse.json({ ok: true, service: 'vectra-telegram-wake', instanceId });
+    return NextResponse.json({
+      ok: true,
+      service: "vectra-telegram-wake",
+      instanceId,
+    });
   }
 
   // Telegram redelivery of an update we already accepted
@@ -92,7 +97,7 @@ export async function POST(req: Request, ctx: Ctx) {
         botToken: inst.telegramBotToken,
         instanceId: inst.id,
         wakeSecret: inst.wakeSecret || secret,
-        sandboxState: 'paused',
+        sandboxState: "paused",
       });
       logs.push(arm || `re-arm skipped (${reason})`);
     };
@@ -100,6 +105,7 @@ export async function POST(req: Request, ctx: Ctx) {
     try {
       const result = await wakeSession(inst.sessionId, {
         sandboxId: inst.sandboxId,
+        runtime: inst.runtime || "xibecode",
         restartDaemon: true,
       });
       logs.push(
@@ -110,10 +116,14 @@ export async function POST(req: Request, ctx: Ctx) {
       const fullyUp = result.ok && result.daemonOk !== false;
 
       await updateInstance(inst.userId, inst.id, {
-        status: fullyUp ? 'running' : result.ok ? 'running' : 'error',
+        status: fullyUp ? "running" : result.ok ? "running" : "error",
         lastError: fullyUp
           ? undefined
-          : (result.message || result.logs.join('\n') || 'wake incomplete').slice(0, 500),
+          : (
+              result.message ||
+              result.logs.join("\n") ||
+              "wake incomplete"
+            ).slice(0, 500),
       });
 
       if (inst.telegramBotToken) {
@@ -122,8 +132,8 @@ export async function POST(req: Request, ctx: Ctx) {
           const cleared = await deleteTelegramWebhook(inst.telegramBotToken);
           logs.push(
             cleared.ok
-              ? 'host webhook cleared — daemon owns Telegram while running'
-              : `deleteWebhook failed: ${cleared.description || 'unknown'}`,
+              ? "host webhook cleared — daemon owns Telegram while running"
+              : `deleteWebhook failed: ${cleared.description || "unknown"}`,
           );
 
           // Give long-poll a moment after deleteWebhook before telling the user
@@ -133,44 +143,52 @@ export async function POST(req: Request, ctx: Ctx) {
             await sendTelegramMessage(
               inst.telegramBotToken,
               chatId,
-              'Sandbox is awake — please send your message again (the first DM only woke the machine).',
+              "Sandbox is awake — please send your message again (the first DM only woke the machine).",
             );
             await markOkNotified(inst.id);
-            logs.push('notified user to resend (webhook consumed first update)');
+            logs.push(
+              "notified user to resend (webhook consumed first update)",
+            );
           }
         } else {
           // Sandbox may be up but daemon dead, or wake failed — keep host webhook armed
-          await rearm(result.ok ? 'daemon not ready' : 'wake failed');
+          await rearm(result.ok ? "daemon not ready" : "wake failed");
           if (chatId != null && (await shouldNotifyFail(inst.id))) {
             await sendTelegramMessage(
               inst.telegramBotToken,
               chatId,
-              'Could not fully wake the coding bot. Try again in a moment, or use Wake / resume on the dashboard.',
+              "Could not fully wake the coding bot. Try again in a moment, or use Wake / resume on the dashboard.",
             );
             await markFailNotified(inst.id);
-            logs.push('failure notified (rate-limited)');
+            logs.push("failure notified (rate-limited)");
           } else {
-            logs.push('failure notify suppressed (cooldown)');
+            logs.push("failure notify suppressed (cooldown)");
           }
         }
       }
 
       if (text) {
-        logs.push(`telegram message received (${text.length} chars) — sandbox wake attempted`);
+        logs.push(
+          `telegram message received (${text.length} chars) — sandbox wake attempted`,
+        );
       }
-      console.log('[telegram-wake]', inst.id, logs.join(' | ').slice(0, 2000));
+      console.log("[telegram-wake]", inst.id, logs.join(" | ").slice(0, 2000));
     } catch (e) {
-      console.error('[telegram-wake]', e);
+      console.error("[telegram-wake]", e);
       await updateInstance(inst.userId, inst.id, {
-        status: 'error',
+        status: "error",
         lastError: (e as Error).message.slice(0, 500),
       }).catch(() => undefined);
-      await rearm('exception');
-      if (inst.telegramBotToken && chatId != null && (await shouldNotifyFail(inst.id))) {
+      await rearm("exception");
+      if (
+        inst.telegramBotToken &&
+        chatId != null &&
+        (await shouldNotifyFail(inst.id))
+      ) {
         await sendTelegramMessage(
           inst.telegramBotToken,
           chatId,
-          'Wake failed — try again shortly or use Wake / resume on the dashboard.',
+          "Wake failed — try again shortly or use Wake / resume on the dashboard.",
         );
         await markFailNotified(inst.id);
       }
@@ -190,6 +208,10 @@ export async function POST(req: Request, ctx: Ctx) {
 export async function GET(_req: Request, ctx: Ctx) {
   const { instanceId, secret } = await ctx.params;
   const inst = await getInstanceByWake(instanceId, secret);
-  if (!inst) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  return NextResponse.json({ ok: true, service: 'vectra-telegram-wake', instanceId });
+  if (!inst) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json({
+    ok: true,
+    service: "vectra-telegram-wake",
+    instanceId,
+  });
 }

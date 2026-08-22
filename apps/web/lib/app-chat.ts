@@ -1,35 +1,42 @@
-import { NextResponse } from 'next/server';
-import { getSessionUser } from '@/lib/auth';
-import { getPlan, hasInstanceAccess } from '@/lib/billing';
+import { NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth";
+import { getPlan, hasInstanceAccess } from "@/lib/billing";
 import {
   appInboxFetch,
   bootstrapAppInbox,
   wakeSession,
-} from '@/lib/gateway-client';
-import { getInstance, type Instance } from '@/lib/store';
+} from "@/lib/gateway-client";
+import { getInstance, type Instance } from "@/lib/store";
 
-export async function requireChatInstance(id: string): Promise<
-  | { ok: true; inst: Instance }
-  | { ok: false; response: NextResponse }
+export async function requireChatInstance(
+  id: string,
+): Promise<
+  { ok: true; inst: Instance } | { ok: false; response: NextResponse }
 > {
   const user = await getSessionUser();
   if (!user) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Login required' }, { status: 401 }),
+      response: NextResponse.json({ error: "Login required" }, { status: 401 }),
     };
   }
   const inst = await getInstance(user.id, id);
   if (!inst) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Instance not found' }, { status: 404 }),
+      response: NextResponse.json(
+        { error: "Instance not found" },
+        { status: 404 },
+      ),
     };
   }
-  if (inst.status === 'destroyed') {
+  if (inst.status === "destroyed") {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Instance destroyed' }, { status: 410 }),
+      response: NextResponse.json(
+        { error: "Instance destroyed" },
+        { status: 410 },
+      ),
     };
   }
   if (!hasInstanceAccess(inst)) {
@@ -38,9 +45,9 @@ export async function requireChatInstance(id: string): Promise<
       ok: false,
       response: NextResponse.json(
         {
-          error: 'Subscription expired',
+          error: "Subscription expired",
           message: `Renew for ₹${plan.priceInr} or $${plan.priceUsd}/month to chat.`,
-          code: 'PAYMENT_REQUIRED',
+          code: "PAYMENT_REQUIRED",
           paidUntil: inst.paidUntil || null,
         },
         { status: 402 },
@@ -54,9 +61,9 @@ async function inboxHealthy(inst: Instance): Promise<boolean> {
   try {
     const health = await appInboxFetch(
       inst.sessionId,
-      '/health',
+      "/health",
       { signal: AbortSignal.timeout(5_000) },
-      { sandboxId: inst.sandboxId },
+      { sandboxId: inst.sandboxId, runtime: inst.runtime || "xibecode" },
     );
     return health.ok;
   } catch {
@@ -83,9 +90,15 @@ export async function ensureInbox(inst: Instance): Promise<void> {
   try {
     if (await inboxHealthy(inst)) return;
 
-    await bootstrapAppInbox(inst.sessionId, inst.sandboxId, inst.id).catch(() => undefined);
+    await bootstrapAppInbox(
+      inst.sessionId,
+      inst.sandboxId,
+      inst.id,
+      inst.runtime || "xibecode",
+    ).catch(() => undefined);
     await wakeSession(inst.sessionId, {
       sandboxId: inst.sandboxId,
+      runtime: inst.runtime || "xibecode",
       restartDaemon: true,
     });
 
@@ -95,7 +108,7 @@ export async function ensureInbox(inst: Instance): Promise<void> {
     }
 
     throw new Error(
-      'App inbox not reachable on :8790 after wake. Open Control → Update CLI (need xibecode 1.17.5+) then try chat again.',
+      "App inbox not reachable on :8790 after wake. Open Control → Update CLI (need xibecode 1.17.5+) then try chat again.",
     );
   } finally {
     release();
@@ -109,5 +122,8 @@ export async function proxyInbox(
   init: RequestInit = {},
 ): Promise<Response> {
   await ensureInbox(inst);
-  return appInboxFetch(inst.sessionId, path, init, { sandboxId: inst.sandboxId });
+  return appInboxFetch(inst.sessionId, path, init, {
+    sandboxId: inst.sandboxId,
+    runtime: inst.runtime || "xibecode",
+  });
 }

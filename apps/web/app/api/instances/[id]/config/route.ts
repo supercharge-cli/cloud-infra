@@ -1,22 +1,19 @@
-import { NextResponse } from 'next/server';
-import { getSessionUser } from '@/lib/auth';
+import { NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth";
 import {
   getSandboxPreviewHost,
   readSandboxConfig,
   restartDaemon,
   writeSandboxConfig,
-} from '@/lib/gateway-client';
+} from "@/lib/gateway-client";
 import {
   buildSandboxTelegramWebhookUrl,
   newTelegramWebhookSecret,
   SANDBOX_TG_WEBHOOK_PORT,
-} from '@/lib/sandbox-telegram';
-import { parseSavedProviders } from '@/lib/saved-providers';
-import { ensureWakeSecret, getInstance, updateInstance } from '@/lib/store';
-import {
-  publicBaseUrl,
-  wakeWebhookUrl,
-} from '@/lib/telegram-webhook';
+} from "@/lib/sandbox-telegram";
+import { parseSavedProviders } from "@/lib/saved-providers";
+import { ensureWakeSecret, getInstance, updateInstance } from "@/lib/store";
+import { publicBaseUrl, wakeWebhookUrl } from "@/lib/telegram-webhook";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -24,16 +21,20 @@ export async function GET(_req: Request, ctx: Ctx) {
   const started = performance.now();
   const user = await getSessionUser();
   if (!user) {
-    return NextResponse.json({ error: 'Login required' }, { status: 401 });
+    return NextResponse.json({ error: "Login required" }, { status: 401 });
   }
   const { id } = await ctx.params;
   const inst = await getInstance(user.id, id);
   if (!inst) {
-    return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+    return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
   try {
-    const sandbox = await readSandboxConfig(inst.sessionId, inst.sandboxId);
-    console.info('[timing] instance config', {
+    const sandbox = await readSandboxConfig(
+      inst.sessionId,
+      inst.sandboxId,
+      inst.runtime || "xibecode",
+    );
+    console.info("[timing] instance config", {
       instanceId: id,
       ms: Math.round(performance.now() - started),
     });
@@ -41,13 +42,16 @@ export async function GET(_req: Request, ctx: Ctx) {
     return NextResponse.json({
       instanceId: inst.id,
       name: inst.name,
+      runtime: inst.runtime || "xibecode",
       stored: inst.config || {},
       sandbox,
       wake: {
         secretSet: Boolean(wakeSecret),
         publicBaseUrl: publicBaseUrl() || null,
         hostWebhookUrl: wakeWebhookUrl(inst.id, wakeSecret),
-        mode: inst.telegramWebhookMode || (inst.sandboxTelegramWebhookUrl ? 'sandbox' : 'host'),
+        mode:
+          inst.telegramWebhookMode ||
+          (inst.sandboxTelegramWebhookUrl ? "sandbox" : "host"),
         sandboxWebhookUrl: inst.sandboxTelegramWebhookUrl || null,
       },
     });
@@ -59,12 +63,12 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function PUT(req: Request, ctx: Ctx) {
   const user = await getSessionUser();
   if (!user) {
-    return NextResponse.json({ error: 'Login required' }, { status: 401 });
+    return NextResponse.json({ error: "Login required" }, { status: 401 });
   }
   const { id } = await ctx.params;
   const inst = await getInstance(user.id, id);
   if (!inst) {
-    return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+    return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
 
   const body = (await req.json()) as {
@@ -89,21 +93,25 @@ export async function PUT(req: Request, ctx: Ctx) {
   };
 
   try {
-    const token = (body.telegramBotToken || '').trim() || inst.telegramBotToken || '';
+    const token =
+      (body.telegramBotToken || "").trim() || inst.telegramBotToken || "";
     const hasTg =
-      Boolean((body.telegramBotToken || '').trim()) ||
+      Boolean((body.telegramBotToken || "").trim()) ||
       Boolean(inst.telegramBotToken) ||
       Boolean(inst.config?.hasTelegramToken);
 
     // Sandbox webhook (E2B auto-resume) when we have telegram + sandboxId
-    let sandboxWebhookUrl = inst.sandboxTelegramWebhookUrl || '';
-    let tgWebhookSecret = inst.telegramWebhookSecret || '';
-    let webhookMode: 'sandbox' | 'host' = inst.telegramWebhookMode || 'host';
+    let sandboxWebhookUrl = inst.sandboxTelegramWebhookUrl || "";
+    let tgWebhookSecret = inst.telegramWebhookSecret || "";
+    let webhookMode: "sandbox" | "host" = inst.telegramWebhookMode || "host";
 
     if (hasTg && inst.sandboxId) {
-      webhookMode = 'sandbox';
+      webhookMode = "sandbox";
       if (!tgWebhookSecret) tgWebhookSecret = newTelegramWebhookSecret();
-      const host = await getSandboxPreviewHost(inst.sessionId, SANDBOX_TG_WEBHOOK_PORT);
+      const host = await getSandboxPreviewHost(
+        inst.sessionId,
+        SANDBOX_TG_WEBHOOK_PORT,
+      );
       sandboxWebhookUrl = buildSandboxTelegramWebhookUrl(
         inst.sandboxId,
         host,
@@ -113,6 +121,7 @@ export async function PUT(req: Request, ctx: Ctx) {
 
     const result = await writeSandboxConfig(inst.sessionId, {
       instanceId: inst.id,
+      runtime: inst.runtime || "xibecode",
       provider: body.provider,
       apiKey: body.apiKey,
       baseUrl: body.baseUrl,
@@ -127,14 +136,19 @@ export async function PUT(req: Request, ctx: Ctx) {
       mergeExisting: true,
       allowAllUsers: body.allowAllUsers,
       sandboxId: inst.sandboxId,
-      telegramWebhookUrl: webhookMode === 'sandbox' ? sandboxWebhookUrl : undefined,
-      telegramWebhookSecret: webhookMode === 'sandbox' ? tgWebhookSecret : undefined,
+      telegramWebhookUrl:
+        webhookMode === "sandbox" ? sandboxWebhookUrl : undefined,
+      telegramWebhookSecret:
+        webhookMode === "sandbox" ? tgWebhookSecret : undefined,
       telegramWebhookPort:
-        webhookMode === 'sandbox' ? SANDBOX_TG_WEBHOOK_PORT : undefined,
+        webhookMode === "sandbox" ? SANDBOX_TG_WEBHOOK_PORT : undefined,
     });
     if (!result.ok) {
       return NextResponse.json(
-        { error: result.logs.join(' ') || 'Config write failed', logs: result.logs },
+        {
+          error: result.logs.join(" ") || "Config write failed",
+          logs: result.logs,
+        },
         { status: 400 },
       );
     }
@@ -146,16 +160,22 @@ export async function PUT(req: Request, ctx: Ctx) {
     const shouldRestart = body.restart !== false;
     let restartOk = true;
     if (shouldRestart) {
-      const r = await restartDaemon(inst.sessionId, inst.sandboxId);
+      const r = await restartDaemon(
+        inst.sessionId,
+        inst.sandboxId,
+        inst.runtime || "xibecode",
+      );
       logs = [...logs, ...r.logs];
       restartOk = r.ok;
     }
 
     const wakeSecret = inst.wakeSecret || (await ensureWakeSecret(user.id, id));
     const anyChannel =
-      result.meta.hasTelegramToken || result.meta.hasDiscordToken || result.meta.hasSlackToken;
+      result.meta.hasTelegramToken ||
+      result.meta.hasDiscordToken ||
+      result.meta.hasSlackToken;
 
-    if (webhookMode === 'sandbox' && token && sandboxWebhookUrl) {
+    if (webhookMode === "sandbox" && token && sandboxWebhookUrl) {
       // While *running*, bot long-polls (deleteWebhook already done in restartDaemon).
       // Do NOT setWebhook here — that steals getUpdates. Host arms the template
       // public URL automatically when the sandbox pauses (lifecycle + cron).
@@ -163,18 +183,18 @@ export async function PUT(req: Request, ctx: Ctx) {
         `Telegram auto-wake ready (no user action): when paused, webhook → ${sandboxWebhookUrl}`,
       );
       logs.push(
-        'Users only paste the bot token once. Hosting sets Telegram webhook on pause; E2B auto-resumes on the next DM.',
+        "Users only paste the bot token once. Hosting sets Telegram webhook on pause; E2B auto-resumes on the next DM.",
       );
     } else if (token || result.meta.hasTelegramToken) {
       logs.push(
-        'Telegram: long-poll while running; host wake webhook arms automatically when paused.',
+        "Telegram: long-poll while running; host wake webhook arms automatically when paused.",
       );
       const url = wakeWebhookUrl(inst.id, wakeSecret);
       if (url) logs.push(`Host wake URL ready: ${url}`);
     }
     if (result.meta.hasDiscordToken || result.meta.hasSlackToken) {
       logs.push(
-        'Discord/Slack: after idle pause, use Wake / resume on the dashboard (no host webhook for those channels).',
+        "Discord/Slack: after idle pause, use Wake / resume on the dashboard (no host webhook for those channels).",
       );
     }
 
@@ -183,13 +203,16 @@ export async function PUT(req: Request, ctx: Ctx) {
       ...(token ? { telegramBotToken: token } : {}),
       wakeSecret,
       telegramWebhookMode: webhookMode,
-      ...(sandboxWebhookUrl ? { sandboxTelegramWebhookUrl: sandboxWebhookUrl } : {}),
+      ...(sandboxWebhookUrl
+        ? { sandboxTelegramWebhookUrl: sandboxWebhookUrl }
+        : {}),
       ...(tgWebhookSecret ? { telegramWebhookSecret: tgWebhookSecret } : {}),
       aiConfigured: true,
       telegramConfigured: anyChannel,
-      status: restartOk ? 'running' : 'error',
-      lastError: restartOk ? undefined : logs.join('\n').slice(0, 500),
+      status: restartOk ? "running" : "error",
+      lastError: restartOk ? undefined : logs.join("\n").slice(0, 500),
       config: {
+        runtime: inst.runtime || "xibecode",
         provider: result.meta.provider,
         model: result.meta.model,
         baseUrl: result.meta.baseUrl,
@@ -204,19 +227,24 @@ export async function PUT(req: Request, ctx: Ctx) {
       ok: restartOk,
       logs,
       instance: instance
-        ? { ...instance, telegramBotToken: instance.telegramBotToken ? '[stored]' : undefined }
+        ? {
+            ...instance,
+            telegramBotToken: instance.telegramBotToken
+              ? "[stored]"
+              : undefined,
+          }
         : null,
       sandbox: result.meta,
       telegramWebhookMode: webhookMode,
       sandboxTelegramWebhookUrl: sandboxWebhookUrl || null,
       wakeWebhookUrl:
-        webhookMode === 'host' && (token || result.meta.hasTelegramToken)
+        webhookMode === "host" && (token || result.meta.hasTelegramToken)
           ? wakeWebhookUrl(inst.id, wakeSecret)
           : null,
     });
   } catch (e) {
     await updateInstance(user.id, inst.id, {
-      status: 'error',
+      status: "error",
       lastError: (e as Error).message.slice(0, 500),
     });
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });

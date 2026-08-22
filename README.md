@@ -22,23 +22,23 @@ cloud-infra/
 4. Install / build: uses `apps/web/vercel.json` (`npm ci` + `npm run build`).
 5. Env vars from `apps/web/.env.example`:
 
-| Variable | Notes |
-| --- | --- |
-| `MONGODB_URI` | Atlas connection string |
-| `MONGODB_DB` | `vectra_cloud` |
-| `AUTH_SECRET` | long random string |
-| `XIBECODE_SANDBOX_GATEWAY_URL` | public HTTPS gateway URL |
-| `XIBECODE_GATEWAY_TOKEN` | same secret as gateway |
-| `PUBLIC_BASE_URL` | public site origin (Telegram wake) |
-| `POLLINATIONS_APP_KEY` | Pollinations BYOP App Key (`pk_…`) — server only |
-| `CRON_SECRET` | auth for `/api/cron/arm-telegram-wake` (required on Vercel) |
-| `E2B_LIFECYCLE_WEBHOOK_SECRET` | optional but recommended; E2B lifecycle → arm TG wake on pause |
-| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | server keys |
-| `NEXT_PUBLIC_RAZORPAY_KEY_ID` | client key |
-| `RAZORPAY_WEBHOOK_SECRET` | Razorpay dashboard webhook secret |
-| `BILLING_PRICE_INR` | e.g. `399` (rupees) |
-| `BILLING_PRICE_USD` | e.g. `4.59` (dollars) |
-| `BILLING_PERIOD_DAYS` | e.g. `30` |
+| Variable                                  | Notes                                                          |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| `MONGODB_URI`                             | Atlas connection string                                        |
+| `MONGODB_DB`                              | `vectra_cloud`                                                 |
+| `AUTH_SECRET`                             | long random string                                             |
+| `XIBECODE_SANDBOX_GATEWAY_URL`            | public HTTPS gateway URL                                       |
+| `XIBECODE_GATEWAY_TOKEN`                  | same secret as gateway                                         |
+| `PUBLIC_BASE_URL`                         | public site origin (Telegram wake)                             |
+| `POLLINATIONS_APP_KEY`                    | Pollinations BYOP App Key (`pk_…`) — server only               |
+| `CRON_SECRET`                             | auth for `/api/cron/arm-telegram-wake` (required on Vercel)    |
+| `E2B_LIFECYCLE_WEBHOOK_SECRET`            | optional but recommended; E2B lifecycle → arm TG wake on pause |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | server keys                                                    |
+| `NEXT_PUBLIC_RAZORPAY_KEY_ID`             | client key                                                     |
+| `RAZORPAY_WEBHOOK_SECRET`                 | Razorpay dashboard webhook secret                              |
+| `BILLING_PRICE_INR`                       | e.g. `399` (rupees)                                            |
+| `BILLING_PRICE_USD`                       | e.g. `4.59` (dollars)                                          |
+| `BILLING_PERIOD_DAYS`                     | e.g. `30`                                                      |
 
 Production example:
 
@@ -61,8 +61,8 @@ Follows [E2B auto-resume](https://e2b.dev/docs/sandbox/auto-resume):
 ```ts
 Sandbox.create({
   timeoutMs: 15 * 60 * 1000, // default idle; override XIBECODE_E2B_SANDBOX_TIMEOUT_MS
-  lifecycle: { onTimeout: 'pause', autoResume: true }, // full memory snapshot
-})
+  lifecycle: { onTimeout: "pause", autoResume: true }, // full memory snapshot
+});
 ```
 
 Activity that wakes a paused sandbox ([docs](https://e2b.dev/docs/sandbox/auto-resume)):
@@ -70,11 +70,13 @@ gateway SDK ops (`commands.run`, files) **or HTTP traffic to a service inside th
 ([public URL](https://e2b.dev/docs/network/public-url)).
 
 **Preferred Telegram path (custom template wake HTTP, not the bot):**
+
 ```
 Telegram setWebhook → https://8788-{sandboxId}.e2b.app/telegram
 DM → E2B auto-resumes paused VM → /opt/vectra/wake-http (template)
     → restarts xibecode daemon long-poll (bot code unchanged)
 ```
+
 Bake wake-http into `xibecode-full-sandbox` (`sandbox/e2b-template/wake-http`).
 Dashboard save sets the webhook URL when Telegram is configured.
 
@@ -95,12 +97,12 @@ Dashboard save sets the webhook URL when Telegram is configured.
 
 **Service root / Docker context:** `apps/gateway`
 
-| Setting | Value |
-| --- | --- |
+| Setting    | Value                                              |
+| ---------- | -------------------------------------------------- |
 | Dockerfile | `apps/gateway/Dockerfile` (context `apps/gateway`) |
-| Port | `8787` or platform `PORT` |
-| Health | `GET /health` |
-| Config | `apps/gateway/railway.toml` |
+| Port       | `8787` or platform `PORT`                          |
+| Health     | `GET /health`                                      |
+| Config     | `apps/gateway/railway.toml`                        |
 
 Env from `apps/gateway/.env.example` (provider API key, template, lifecycle, gateway token).
 
@@ -112,20 +114,27 @@ After the gateway has a public URL, put it in Vercel as `XIBECODE_SANDBOX_GATEWA
 
 ### CLI updates on existing sandboxes
 
-New sandboxes get the runtime pinned in the E2B template (`XIBECODE_E2B_TEMPLATE`,
-e.g. `xibecode-full-sandbox`). **Rebuilding/republishing that template** is still how you
-raise the baseline for *new* instances.
+New sandboxes get the selected runtime pinned to the matching E2B template alias
+(`XIBECODE_E2B_TEMPLATE` or `SUPERCHARGE_E2B_TEMPLATE`). **Rebuilding/republishing the
+selected template** is still how you raise the baseline for _new_ instances.
 
-### Second Rust-agent template
+### Two selectable sandbox runtimes
 
-The Rust-first agent repository contains a second template at `sandbox/e2b-agent-template`. It reuses the existing interactive image baseline—Chromium with `agent-browser`, Node.js, Bun, Python/uv, Git/GitHub CLI, search utilities, process tools, and the workspace—but starts `xai-grok-superagent-server` as the primary daemon. It exposes the app-compatible daemon on port `8790`, the E2B wake/file-share service on `8788`, and the local browser stream on `9223`. Build the Rust binaries with `./sandbox/prepare-e2b-agent-assets.sh`, publish the template, and set the gateway’s `XIBECODE_E2B_TEMPLATE` to its new alias.
+New instances can use either the existing **XibeCode** image or the **Supercharge** image. The dashboard selection is persisted per instance and drives E2B template provisioning, gateway reattachment, wake/resume, daemon restart, workspace and file-sharing requests, and sandbox recreation. Existing database rows without a runtime remain backward-compatible and default to XibeCode. The gateway template aliases are configured independently:
 
-The gateway restart route remains backward-compatible. For the Rust-agent template, set `XIBECODE_SANDBOX_DAEMON_COMMAND=xai-grok-superagent-server`, `XIBECODE_SANDBOX_DAEMON_PIDFILE=/tmp/superagent-daemon.pid`, `XIBECODE_SANDBOX_DAEMON_LOGFILE=/tmp/superagent-daemon.log`, and `XIBECODE_SANDBOX_DAEMON_MATCH=xai-grok-superagent-server`. The web and mobile Computer pane already proxy `/v1/computer/browser`; the Rust daemon now emits the same view-only SSE frame contract used by the existing app.
+| Runtime     | Environment variable       | Default alias              | Daemon                                         |
+| ----------- | -------------------------- | -------------------------- | ---------------------------------------------- |
+| XibeCode    | `XIBECODE_E2B_TEMPLATE`    | `xibecode-full-sandbox`    | Existing XibeCode daemon                       |
+| Supercharge | `SUPERCHARGE_E2B_TEMPLATE` | `supercharge-full-sandbox` | `/usr/local/bin/supercharge-superagent-server` |
+
+The Supercharge image is intentionally built and published by the repository owner’s local E2B workflow. This repository contains the application selection/configuration code and the exact [Supercharge E2B template contract](docs/supercharge-e2b-template.md), not a published image or embedded credentials. The image must expose the app-compatible daemon on `0.0.0.0:8790`, the wake/file-share service on `8788`, and the visible browser stream on `9223`. It must include `supercharge`, `sc`, Chromium, `agent-browser`, terminal/workspace tools, and the static `supercharge-superagent-server` binary.
+
+Supercharge provider setup remains a runtime operation through the Vectra `/setup` and instance configuration flows. Provider keys, custom OpenAI-compatible URLs, Telegram/Discord/Slack tokens, and the Vectra app secret are written into the selected sandbox overlay only; none are baked into the image. The web and mobile Computer pane continue to use the app-compatible browser routes, while workspace upload/download/share and public media routes preserve the selected runtime during wake and reattachment.
 
 For **existing** instances, the dashboard offers an **opt-in** upgrade when npm has a
 newer `xibecode` than `xibecode -v` inside the sandbox:
 
-1. Open the instance → banner *Update available: X.Y.Z (you have A.B.C)*.
+1. Open the instance → banner _Update available: X.Y.Z (you have A.B.C)_.
 2. **Update & restart** wakes the sandbox if paused, then installs **latest** global CLI:
    - Prefer **`sudo -n npm install -g xibecode@latest`** (template global prefix is often root-owned).
    - Fallbacks: interactive `sudo npm …`, then plain `npm install -g …`.
@@ -135,25 +144,30 @@ newer `xibecode` than `xibecode -v` inside the sandbox:
 
 APIs:
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| `GET` | `/api/instances/:id/cli-version` | Host npm registry + in-sandbox `xibecode -v` |
-| `POST` | `/api/instances/:id/cli-update` | Wake → install → restart daemon (`maxDuration` 300s) |
-| `GET` | `/api/instances/:id/logs?source=all\|daemon\|agent\|system` | Diagnostic log pull (wakes if paused) |
+| Method | Path                                                        | Notes                                                |
+| ------ | ----------------------------------------------------------- | ---------------------------------------------------- |
+| `GET`  | `/api/instances/:id/cli-version`                            | Host npm registry + in-sandbox `xibecode -v`         |
+| `POST` | `/api/instances/:id/cli-update`                             | Wake → install → restart daemon (`maxDuration` 300s) |
+| `GET`  | `/api/instances/:id/logs?source=all\|daemon\|agent\|system` | Diagnostic log pull (wakes if paused)                |
 
 ### Gateway lifecycle env (summary)
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `XIBECODE_E2B_TEMPLATE` | `xibecode-full-sandbox` | Published template id/alias |
-| `XIBECODE_E2B_ON_TIMEOUT` | `pause` | `pause` (snapshot) or `kill` |
-| `XIBECODE_E2B_AUTO_RESUME` | `true` | Wake on SDK/HTTP when paused |
-| `XIBECODE_E2B_SANDBOX_TIMEOUT_MS` | `900000` (15m) | Idle before lifecycle pause |
-| `XIBECODE_E2B_MAX_CONTINUOUS_MS` | `82800000` (~23h) | Pause/resume before E2B 24h hard limit; `0` = off |
-| `XIBECODE_SANDBOX_DAEMON_COMMAND` | `xibecode daemon --workdir /home/user/workspace` | Command used by the restart route inside a sandbox |
-| `XIBECODE_SANDBOX_DAEMON_PIDFILE` | `/tmp/xibecode-daemon.pid` | PID file used for safe daemon restarts |
-| `XIBECODE_SANDBOX_DAEMON_LOGFILE` | `/tmp/xibecode-daemon.log` | Log file tailed after restart |
-| `XIBECODE_SANDBOX_DAEMON_MATCH` | `node.*xibecode|xibecode/dist` | Optional process match for legacy fallback cleanup |
+| Variable                             | Default                                          | Purpose                                           |
+| ------------------------------------ | ------------------------------------------------ | ------------------------------------------------- |
+| `XIBECODE_E2B_TEMPLATE`              | `xibecode-full-sandbox`                          | Published XibeCode template id/alias              |
+| `SUPERCHARGE_E2B_TEMPLATE`           | `supercharge-full-sandbox`                       | Published Supercharge template id/alias           |
+| `XIBECODE_E2B_ON_TIMEOUT`            | `pause`                                          | `pause` (snapshot) or `kill`                      |
+| `XIBECODE_E2B_AUTO_RESUME`           | `true`                                           | Wake on SDK/HTTP when paused                      |
+| `XIBECODE_E2B_SANDBOX_TIMEOUT_MS`    | `900000` (15m)                                   | Idle before lifecycle pause                       |
+| `XIBECODE_E2B_MAX_CONTINUOUS_MS`     | `82800000` (~23h)                                | Pause/resume before E2B 24h hard limit; `0` = off |
+| `XIBECODE_SANDBOX_DAEMON_COMMAND`    | `xibecode daemon --workdir /home/user/workspace` | XibeCode restart command                          |
+| `XIBECODE_SANDBOX_DAEMON_PIDFILE`    | `/tmp/xibecode-daemon.pid`                       | XibeCode pidfile                                  |
+| `XIBECODE_SANDBOX_DAEMON_LOGFILE`    | `/tmp/xibecode-daemon.log`                       | XibeCode log file                                 |
+| `XIBECODE_SANDBOX_DAEMON_MATCH`      | `node.*xibecode                                  | xibecode/dist`                                    | XibeCode process cleanup match    |
+| `SUPERCHARGE_SANDBOX_DAEMON_COMMAND` | `/usr/local/bin/supercharge-superagent-server`   | Supercharge restart command                       |
+| `SUPERCHARGE_SANDBOX_DAEMON_PIDFILE` | `/tmp/supercharge-daemon.pid`                    | Supercharge pidfile                               |
+| `SUPERCHARGE_SANDBOX_DAEMON_LOGFILE` | `/tmp/supercharge-daemon.log`                    | Supercharge log file                              |
+| `SUPERCHARGE_SANDBOX_DAEMON_MATCH`   | `supercharge-superagent-server                   | superagent-server`                                | Supercharge process cleanup match |
 
 ## Local dev
 

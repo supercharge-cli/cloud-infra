@@ -3,20 +3,20 @@
  * API keys for the cloud provider stay on the gateway, not in the browser.
  */
 
-import { stockBaseUrl } from './provider-defaults';
+import { stockBaseUrl } from "./provider-defaults";
 import {
   envKeysForProvider,
   parseSavedProviders,
   slotFromActive,
   upsertSavedProvider,
   type SavedProvider,
-} from './saved-providers';
+} from "./saved-providers";
 
 function gatewayBase(): string {
   let base =
     process.env.XIBECODE_SANDBOX_GATEWAY_URL?.trim() ||
     process.env.XIBECODE_E2B_GATEWAY_URL?.trim() ||
-    'http://127.0.0.1:8787';
+    "http://127.0.0.1:8787";
   // strip wrapping quotes from Vercel env paste mistakes
   if (
     (base.startsWith('"') && base.endsWith('"')) ||
@@ -25,16 +25,16 @@ function gatewayBase(): string {
     base = base.slice(1, -1).trim();
   }
   if (/^XIBECODE_.*URL\s*=/i.test(base)) {
-    base = base.replace(/^[A-Z_]+\s*=\s*/i, '').trim();
+    base = base.replace(/^[A-Z_]+\s*=\s*/i, "").trim();
   }
-  return base.replace(/\/$/, '');
+  return base.replace(/\/$/, "");
 }
 
 function gatewayToken(): string {
   let t =
     process.env.XIBECODE_GATEWAY_TOKEN?.trim() ||
     process.env.XIBECODE_SANDBOX_AUTH_TOKEN?.trim() ||
-    '';
+    "";
   if (
     (t.startsWith('"') && t.endsWith('"')) ||
     (t.startsWith("'") && t.endsWith("'"))
@@ -45,16 +45,20 @@ function gatewayToken(): string {
 }
 
 /** Human-readable reason when gateway returns HTML / Cloudflare / wrong host. */
-export function explainGatewayFailure(status: number, body: string, url: string): string {
-  const snippet = (body || '').slice(0, 280).replace(/\s+/g, ' ');
+export function explainGatewayFailure(
+  status: number,
+  body: string,
+  url: string,
+): string {
+  const snippet = (body || "").slice(0, 280).replace(/\s+/g, " ");
   const lower = snippet.toLowerCase();
 
   if (
-    lower.includes('just a moment') ||
-    lower.includes('cf-browser-verification') ||
-    lower.includes('cloudflare') ||
-    lower.includes('attention required') ||
-    lower.includes('_cf_chl')
+    lower.includes("just a moment") ||
+    lower.includes("cf-browser-verification") ||
+    lower.includes("cloudflare") ||
+    lower.includes("attention required") ||
+    lower.includes("_cf_chl")
   ) {
     return (
       `Gateway blocked by Cloudflare bot check (HTTP ${status}) at ${url}. ` +
@@ -65,7 +69,7 @@ export function explainGatewayFailure(status: number, body: string, url: string)
     );
   }
 
-  if (lower.includes('<!doctype html') || lower.includes('<html')) {
+  if (lower.includes("<!doctype html") || lower.includes("<html")) {
     return (
       `Gateway returned HTML instead of JSON (HTTP ${status}) from ${url}. ` +
       `Check XIBECODE_SANDBOX_GATEWAY_URL points at the gateway service (ends without a path), ` +
@@ -74,9 +78,9 @@ export function explainGatewayFailure(status: number, body: string, url: string)
   }
 
   if (
-    url.includes('127.0.0.1') ||
-    url.includes('localhost') ||
-    url.includes('0.0.0.0')
+    url.includes("127.0.0.1") ||
+    url.includes("localhost") ||
+    url.includes("0.0.0.0")
   ) {
     return (
       `Gateway URL is localhost (${url}) — that only works on your machine, not on Vercel. ` +
@@ -88,37 +92,40 @@ export function explainGatewayFailure(status: number, body: string, url: string)
     return (
       `Gateway auth failed (HTTP ${status}) at ${url}. ` +
       `XIBECODE_GATEWAY_TOKEN on Vercel must match the token on the gateway (XIBECODE_GATEWAY_TOKEN). ` +
-      `Body: ${snippet || '(empty)'}`
+      `Body: ${snippet || "(empty)"}`
     );
   }
 
-  return `Gateway request failed (HTTP ${status}) ${url}: ${snippet || '(empty body)'}`;
+  return `Gateway request failed (HTTP ${status}) ${url}: ${snippet || "(empty body)"}`;
 }
 
 function assertGatewayUrlUsable(): void {
   const base = gatewayBase();
   if (
-    process.env.VERCEL === '1' &&
-    (base.includes('127.0.0.1') || base.includes('localhost'))
+    process.env.VERCEL === "1" &&
+    (base.includes("127.0.0.1") || base.includes("localhost"))
   ) {
     throw new Error(
-      'XIBECODE_SANDBOX_GATEWAY_URL is localhost on Vercel. Set it to your public Railway/Coolify gateway URL (Production env) and redeploy.',
+      "XIBECODE_SANDBOX_GATEWAY_URL is localhost on Vercel. Set it to your public Railway/Coolify gateway URL (Production env) and redeploy.",
     );
   }
 }
 
-async function gwFetch(path: string, init: RequestInit = {}): Promise<Response> {
+async function gwFetch(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
   assertGatewayUrlUsable();
   const headers = new Headers(init.headers);
-  headers.set('content-type', 'application/json');
-  headers.set('accept', 'application/json');
+  headers.set("content-type", "application/json");
+  headers.set("accept", "application/json");
   // Identify as server client (helps some proxies; does not bypass Cloudflare challenge)
-  headers.set('user-agent', 'VectraCloud-Web/1.0 (+server)');
+  headers.set("user-agent", "VectraCloud-Web/1.0 (+server)");
   const token = gatewayToken();
-  if (token) headers.set('authorization', `Bearer ${token}`);
+  if (token) headers.set("authorization", `Bearer ${token}`);
   const url = `${gatewayBase()}${path}`;
   try {
-    return await fetch(url, { ...init, headers, redirect: 'manual' });
+    return await fetch(url, { ...init, headers, redirect: "manual" });
   } catch (e) {
     const msg = (e as Error).message || String(e);
     throw new Error(
@@ -127,24 +134,30 @@ async function gwFetch(path: string, init: RequestInit = {}): Promise<Response> 
   }
 }
 
+export type AgentRuntime = "xibecode" | "supercharge";
+
 export type GatewaySession = {
   sessionId: string;
   sandboxId?: string;
   strategy?: string;
+  runtime?: AgentRuntime;
+  template?: string;
   workspaceRoot?: string;
 };
 
 export async function createGatewaySession(opts?: {
   sessionId?: string;
   sandboxId?: string;
-  strategy?: 'sandbox_full' | 'host_only';
+  strategy?: "sandbox_full" | "host_only";
+  runtime?: AgentRuntime;
 }): Promise<GatewaySession> {
-  const res = await gwFetch('/sessions', {
-    method: 'POST',
+  const res = await gwFetch("/sessions", {
+    method: "POST",
     body: JSON.stringify({
       sessionId: opts?.sessionId,
       sandboxId: opts?.sandboxId,
-      strategy: opts?.strategy || 'sandbox_full',
+      strategy: opts?.strategy || "sandbox_full",
+      runtime: opts?.runtime || "xibecode",
     }),
   });
   const text = await res.text();
@@ -157,7 +170,11 @@ export async function createGatewaySession(opts?: {
     return JSON.parse(text) as GatewaySession;
   } catch {
     throw new Error(
-      explainGatewayFailure(res.status || 200, text, `${gatewayBase()}/sessions`),
+      explainGatewayFailure(
+        res.status || 200,
+        text,
+        `${gatewayBase()}/sessions`,
+      ),
     );
   }
 }
@@ -166,17 +183,19 @@ export async function createGatewaySession(opts?: {
 export async function ensureGatewaySession(
   sessionId: string,
   sandboxId?: string,
+  runtime?: AgentRuntime,
 ): Promise<void> {
   await createGatewaySession({
     sessionId,
     sandboxId,
-    strategy: 'sandbox_full',
+    strategy: "sandbox_full",
+    runtime,
   });
 }
 
 export async function recreateSandboxSession(
   sessionId: string,
-  opts?: { sandboxId?: string },
+  opts?: { sandboxId?: string; runtime?: AgentRuntime },
 ): Promise<{
   ok: boolean;
   sessionId: string;
@@ -187,10 +206,16 @@ export async function recreateSandboxSession(
   logs: string[];
   message?: string;
 }> {
-  const res = await gwFetch(`/sessions/${encodeURIComponent(sessionId)}/recreate`, {
-    method: 'POST',
-    body: JSON.stringify({ sandboxId: opts?.sandboxId }),
-  });
+  const res = await gwFetch(
+    `/sessions/${encodeURIComponent(sessionId)}/recreate`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        sandboxId: opts?.sandboxId,
+        runtime: opts?.runtime,
+      }),
+    },
+  );
   const text = await res.text();
   let data: Record<string, unknown> = {};
   try {
@@ -203,29 +228,33 @@ export async function recreateSandboxSession(
     return {
       ok: false,
       sessionId,
-      sandboxId: String(data.sandboxId || opts?.sandboxId || ''),
+      sandboxId: String(data.sandboxId || opts?.sandboxId || ""),
       logs,
-      message: String(data.message || explainGatewayFailure(res.status, text, 'recreate')),
+      message: String(
+        data.message || explainGatewayFailure(res.status, text, "recreate"),
+      ),
     };
   }
   return {
     ok: true,
     sessionId: String(data.sessionId || sessionId),
     oldSandboxId: data.oldSandboxId ? String(data.oldSandboxId) : undefined,
-    sandboxId: String(data.sandboxId || ''),
+    sandboxId: String(data.sandboxId || ""),
     template: data.template ? String(data.template) : undefined,
-    bytes: typeof data.bytes === 'number' ? data.bytes : undefined,
+    bytes: typeof data.bytes === "number" ? data.bytes : undefined,
     logs,
   };
 }
 
 export async function destroyGatewaySession(sessionId: string): Promise<void> {
   const res = await gwFetch(`/sessions/${encodeURIComponent(sessionId)}`, {
-    method: 'DELETE',
+    method: "DELETE",
   });
   if (!res.ok && res.status !== 404) {
     const text = await res.text();
-    throw new Error(`Gateway destroy failed (${res.status}): ${text.slice(0, 400)}`);
+    throw new Error(
+      `Gateway destroy failed (${res.status}): ${text.slice(0, 400)}`,
+    );
   }
 }
 
@@ -241,13 +270,18 @@ export type ExecResult = {
 export async function execInSession(
   sessionId: string,
   command: string,
-  opts?: { timeout?: number; cwd?: string; sandboxId?: string },
+  opts?: {
+    timeout?: number;
+    cwd?: string;
+    sandboxId?: string;
+    runtime?: AgentRuntime;
+  },
 ): Promise<ExecResult> {
   // Always pass sandboxId so gateway can reattach after restart / pause
   // (same contract as /wake — fixes "command doesn't resume, telegram does").
   if (opts?.sandboxId) {
     try {
-      await ensureGatewaySession(sessionId, opts.sandboxId);
+      await ensureGatewaySession(sessionId, opts.sandboxId, opts.runtime);
     } catch {
       /* exec body still carries sandboxId for server-side reattach */
     }
@@ -255,7 +289,7 @@ export async function execInSession(
 
   const doExec = async () =>
     gwFetch(`/sessions/${encodeURIComponent(sessionId)}/exec`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify({
         command,
         timeout: opts?.timeout ?? 120,
@@ -268,10 +302,11 @@ export async function execInSession(
   // Session lost / reattach race → ensure + retry once
   if ((res.status === 404 || res.status === 502) && opts?.sandboxId) {
     try {
-      await ensureGatewaySession(sessionId, opts.sandboxId);
+      await ensureGatewaySession(sessionId, opts.sandboxId, opts.runtime);
       // Explicit wake/reconnect path (connect + optional no daemon restart)
       await wakeSession(sessionId, {
         sandboxId: opts.sandboxId,
+        runtime: opts.runtime,
         restartDaemon: false,
       }).catch(() => undefined);
       res = await doExec();
@@ -289,14 +324,20 @@ export async function execInSession(
   try {
     data = JSON.parse(text) as ExecResult;
   } catch {
-    data = { message: explainGatewayFailure(res.status, text, `${gatewayBase()}/sessions/.../exec`) };
+    data = {
+      message: explainGatewayFailure(
+        res.status,
+        text,
+        `${gatewayBase()}/sessions/.../exec`,
+      ),
+    };
   }
   if (!res.ok) {
     return {
       success: false,
       error: true,
-      exitCode: typeof data.exitCode === 'number' ? data.exitCode : 1,
-      stdout: data.stdout || '',
+      exitCode: typeof data.exitCode === "number" ? data.exitCode : 1,
+      stdout: data.stdout || "",
       stderr: data.stderr || data.message || text.slice(0, 400),
       message: data.message || `HTTP ${res.status}`,
     };
@@ -309,21 +350,26 @@ async function writeFileInSession(
   path: string,
   content: string,
   sandboxId?: string,
+  runtime?: AgentRuntime,
 ): Promise<{ success?: boolean; message?: string }> {
   const doPut = () =>
     gwFetch(`/sessions/${encodeURIComponent(sessionId)}/file`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify({ path, content }),
     });
   let res = await doPut();
   if (res.status === 404 && sandboxId) {
-    await ensureGatewaySession(sessionId, sandboxId);
+    await ensureGatewaySession(sessionId, sandboxId, runtime);
     res = await doPut();
   }
   const text = await res.text();
   let data: { success?: boolean; message?: string; error?: boolean } = {};
   try {
-    data = JSON.parse(text) as { success?: boolean; message?: string; error?: boolean };
+    data = JSON.parse(text) as {
+      success?: boolean;
+      message?: string;
+      error?: boolean;
+    };
   } catch {
     data = { success: false, message: text.slice(0, 200) };
   }
@@ -340,20 +386,25 @@ async function readFileInSession(
   sessionId: string,
   path: string,
   sandboxId?: string,
+  runtime?: AgentRuntime,
 ): Promise<{ success?: boolean; content?: string; message?: string }> {
   const q = new URLSearchParams({ path });
   const doGet = () =>
     gwFetch(`/sessions/${encodeURIComponent(sessionId)}/file?${q.toString()}`, {
-      method: 'GET',
+      method: "GET",
     });
   let res = await doGet();
   if (res.status === 404 && sandboxId) {
-    await ensureGatewaySession(sessionId, sandboxId);
+    await ensureGatewaySession(sessionId, sandboxId, runtime);
     res = await doGet();
   }
   const text = await res.text();
   try {
-    return JSON.parse(text) as { success?: boolean; content?: string; message?: string };
+    return JSON.parse(text) as {
+      success?: boolean;
+      content?: string;
+      message?: string;
+    };
   } catch {
     return { success: res.ok, content: text, message: text.slice(0, 200) };
   }
@@ -363,26 +414,26 @@ export function redactSecrets(text: string, secrets: string[] = []): string {
   let out = text;
   for (const s of secrets) {
     if (s && s.length >= 8) {
-      const visible = s.slice(0, 4) + '…' + s.slice(-4);
+      const visible = s.slice(0, 4) + "…" + s.slice(-4);
       out = out.split(s).join(visible);
     }
   }
-  out = out.replace(/\brk_[a-f0-9]{20,}\b/gi, 'rk_…[redacted]');
-  out = out.replace(/\bsk-[A-Za-z0-9_\-]{10,}\b/g, 'sk-…[redacted]');
-  out = out.replace(/\b\d{6,}:[A-Za-z0-9_\-]{20,}\b/g, 'telegram:…[redacted]');
-  out = out.replace(/\bxoxb-[A-Za-z0-9\-]+/g, 'xoxb-…[redacted]');
-  out = out.replace(/\bxapp-[A-Za-z0-9\-]+/g, 'xapp-…[redacted]');
+  out = out.replace(/\brk_[a-f0-9]{20,}\b/gi, "rk_…[redacted]");
+  out = out.replace(/\bsk-[A-Za-z0-9_\-]{10,}\b/g, "sk-…[redacted]");
+  out = out.replace(/\b\d{6,}:[A-Za-z0-9_\-]{20,}\b/g, "telegram:…[redacted]");
+  out = out.replace(/\bxoxb-[A-Za-z0-9\-]+/g, "xoxb-…[redacted]");
+  out = out.replace(/\bxapp-[A-Za-z0-9\-]+/g, "xapp-…[redacted]");
   return out;
 }
 
 function parseEnvFile(raw: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const line of raw.split('\n')) {
+  for (const line of raw.split("\n")) {
     const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
+    if (!t || t.startsWith("#")) continue;
     // support optional "export KEY=val"
-    const body = t.startsWith('export ') ? t.slice(7).trim() : t;
-    const i = body.indexOf('=');
+    const body = t.startsWith("export ") ? t.slice(7).trim() : t;
+    const i = body.indexOf("=");
     if (i < 0) continue;
     const key = body.slice(0, i).trim();
     let val = body.slice(i + 1).trim();
@@ -401,38 +452,38 @@ function parseEnvFile(raw: string): Record<string, string> {
 /** First non-empty trimmed string. */
 function pick(...vals: Array<string | undefined | null>): string {
   for (const v of vals) {
-    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (typeof v === "string" && v.trim()) return v.trim();
   }
-  return '';
+  return "";
 }
 
 /** Common provider API key env names (profile.apiKey still preferred). */
 const API_KEY_ENV_NAMES = [
-  'XIBECODE_API_KEY',
-  'OPENAI_API_KEY',
-  'ANTHROPIC_API_KEY',
-  'ROUTINGRUN_API_KEY',
-  'OPENROUTER_API_KEY',
-  'NOUS_API_KEY',
-  'HERMES_API_KEY',
-  'ZENLLM_API_KEY',
-  'DEEPSEEK_API_KEY',
-  'GOOGLE_API_KEY',
-  'GEMINI_API_KEY',
-  'XAI_API_KEY',
-  'GROQ_API_KEY',
-  'MISTRAL_API_KEY',
-  'TOGETHER_API_KEY',
-  'FIREWORKS_API_KEY',
-  'PERPLEXITY_API_KEY',
-  'COHERE_API_KEY',
-  'MOONSHOT_API_KEY',
-  'KIMI_API_KEY',
-  'MINIMAX_API_KEY',
-  'HF_TOKEN',
-  'AZURE_FOUNDRY_API_KEY',
-  'LM_API_KEY',
-  'OLLAMA_API_KEY',
+  "XIBECODE_API_KEY",
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "ROUTINGRUN_API_KEY",
+  "OPENROUTER_API_KEY",
+  "NOUS_API_KEY",
+  "HERMES_API_KEY",
+  "ZENLLM_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "GOOGLE_API_KEY",
+  "GEMINI_API_KEY",
+  "XAI_API_KEY",
+  "GROQ_API_KEY",
+  "MISTRAL_API_KEY",
+  "TOGETHER_API_KEY",
+  "FIREWORKS_API_KEY",
+  "PERPLEXITY_API_KEY",
+  "COHERE_API_KEY",
+  "MOONSHOT_API_KEY",
+  "KIMI_API_KEY",
+  "MINIMAX_API_KEY",
+  "HF_TOKEN",
+  "AZURE_FOUNDRY_API_KEY",
+  "LM_API_KEY",
+  "OLLAMA_API_KEY",
 ] as const;
 
 function apiKeyFromEnv(env: Record<string, string>): string {
@@ -443,9 +494,9 @@ function apiKeyFromEnv(env: Record<string, string>): string {
   // any *API_KEY leftover (provider-specific)
   for (const [k, v] of Object.entries(env)) {
     if (!v?.trim()) continue;
-    if (/_API_KEY$/i.test(k) || k === 'HF_TOKEN') return v.trim();
+    if (/_API_KEY$/i.test(k) || k === "HF_TOKEN") return v.trim();
   }
-  return '';
+  return "";
 }
 
 export type SavedProviderView = {
@@ -458,6 +509,7 @@ export type SavedProviderView = {
 };
 
 export type SandboxConfigView = {
+  runtime?: AgentRuntime;
   provider?: string;
   model?: string;
   baseUrl?: string;
@@ -480,12 +532,13 @@ export type SandboxConfigView = {
 };
 
 function hint(secret: string | undefined): string | undefined {
-  if (!secret || secret.length < 8) return secret ? '••••' : undefined;
+  if (!secret || secret.length < 8) return secret ? "••••" : undefined;
   return `${secret.slice(0, 4)}…${secret.slice(-4)}`;
 }
 
 function emptyConfigView(): SandboxConfigView {
   return {
+    runtime: "xibecode",
     hasApiKey: false,
     hasTelegramToken: false,
     hasDiscordToken: false,
@@ -508,8 +561,8 @@ function toSavedView(slot: SavedProvider): SavedProviderView {
 
 function parseProfileJson(raw: string): Record<string, unknown> {
   try {
-    const data = JSON.parse(raw || '{}') as unknown;
-    if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const data = JSON.parse(raw || "{}") as unknown;
+    if (data && typeof data === "object" && !Array.isArray(data)) {
       return data as Record<string, unknown>;
     }
   } catch {
@@ -520,7 +573,11 @@ function parseProfileJson(raw: string): Record<string, unknown> {
 
 function strField(obj: Record<string, unknown>, key: string): string {
   const v = obj[key];
-  return typeof v === 'string' ? v.trim() : v != null && typeof v !== 'object' ? String(v).trim() : '';
+  return typeof v === "string"
+    ? v.trim()
+    : v != null && typeof v !== "object"
+      ? String(v).trim()
+      : "";
 }
 
 function viewFromSources(
@@ -528,43 +585,56 @@ function viewFromSources(
   profile: Record<string, unknown>,
 ): SandboxConfigView {
   // Prefer profile (what xibecode CLI/Telegram setup writes) then daemon/gateway env.
-  const apiKey = pick(strField(profile, 'apiKey'), apiKeyFromEnv(env));
+  const apiKey = pick(strField(profile, "apiKey"), apiKeyFromEnv(env));
   const tg = pick(
     env.TELEGRAM_BOT_TOKEN,
     env.XIBECODE_TELEGRAM_BOT_TOKEN,
-    strField(profile, 'telegramBotToken'),
+    strField(profile, "telegramBotToken"),
   );
   const dc = pick(
     env.DISCORD_BOT_TOKEN,
     env.XIBECODE_DISCORD_BOT_TOKEN,
-    strField(profile, 'discordBotToken'),
+    strField(profile, "discordBotToken"),
   );
   const slackBot = pick(
     env.SLACK_BOT_TOKEN,
     env.XIBECODE_SLACK_BOT_TOKEN,
-    strField(profile, 'slackBotToken'),
+    strField(profile, "slackBotToken"),
   );
   const slackApp = pick(
     env.SLACK_APP_TOKEN,
     env.XIBECODE_SLACK_APP_TOKEN,
-    strField(profile, 'slackAppToken'),
+    strField(profile, "slackAppToken"),
   );
-  const model = pick(strField(profile, 'model'), env.XIBECODE_MODEL);
+  const model = pick(
+    strField(profile, "model"),
+    env.SUPERAGENT_MODEL,
+    env.XIBECODE_MODEL,
+  );
   const baseUrl = pick(
-    strField(profile, 'baseUrl'),
+    strField(profile, "baseUrl"),
+    env.SUPERAGENT_PROVIDER_BASE_URL,
+    env.SUPERAGENT_BASE_URL,
     env.XIBECODE_BASE_URL,
     env.OPENAI_BASE_URL,
     env.ANTHROPIC_BASE_URL,
   );
+  const runtime: AgentRuntime =
+    strField(profile, "runtime").toLowerCase() === "supercharge" ||
+    env.SUPERCHARGE_RUNTIME === "supercharge" ||
+    env.SUPERAGENT_RUNTIME === "supercharge"
+      ? "supercharge"
+      : "xibecode";
   const provider = pick(
-    strField(profile, 'provider'),
+    strField(profile, "provider"),
+    env.SUPERAGENT_PROVIDER,
     env.XIBECODE_PROVIDER,
-    env.ANTHROPIC_API_KEY ? 'anthropic' : '',
-    'openai',
+    env.ANTHROPIC_API_KEY ? "anthropic" : "",
+    "openai",
   );
   const slackOk = Boolean(slackBot && slackApp);
   const current = slotFromActive({
-    provider: provider || 'openai',
+    provider: provider || "openai",
     apiKey,
     baseUrl,
     model,
@@ -572,17 +642,18 @@ function viewFromSources(
   const saved = upsertSavedProvider(
     parseSavedProviders(profile.savedProviders),
     current || {
-      id: provider || 'openai',
-      provider: provider || 'openai',
+      id: provider || "openai",
+      provider: provider || "openai",
       apiKey: apiKey || undefined,
       baseUrl: baseUrl || undefined,
       model: model || undefined,
     },
   );
   return {
-    provider: provider || 'openai',
-    model: model || '',
-    baseUrl: baseUrl || '',
+    runtime,
+    provider: provider || "openai",
+    model: model || "",
+    baseUrl: baseUrl || "",
     hasApiKey: Boolean(apiKey),
     hasTelegramToken: Boolean(tg),
     hasDiscordToken: Boolean(dc),
@@ -592,7 +663,7 @@ function viewFromSources(
     discordBotToken: dc || undefined,
     slackBotToken: slackBot || undefined,
     slackAppToken: slackApp || undefined,
-    allowAllUsers: env.GATEWAY_ALLOW_ALL_USERS === 'true',
+    allowAllUsers: env.GATEWAY_ALLOW_ALL_USERS === "true",
     apiKeyHint: hint(apiKey),
     telegramHint: hint(tg),
     discordHint: hint(dc),
@@ -605,18 +676,31 @@ function viewFromSources(
 export async function readSandboxConfig(
   sessionId: string,
   sandboxId?: string,
+  runtime?: AgentRuntime,
 ): Promise<SandboxConfigView> {
   try {
     // One shell dump is more reliable than separate file reads (and picks up
     // profile-*.json + both env files that Telegram / CLI setup may write).
+    const preferredConfigHome =
+      runtime === "supercharge"
+        ? "/home/user/.superagent"
+        : "/home/user/.xibecode";
+    const secondaryConfigHome =
+      runtime === "supercharge"
+        ? "/home/user/.xibecode"
+        : "/home/user/.superagent";
     const dump = await execInSession(
       sessionId,
       `python3 - <<'PY'
 import json, os
 from pathlib import Path
-home = Path(os.path.expanduser("~/.xibecode"))
-if not home.is_dir():
-    home = Path("/home/user/.xibecode")
+candidates = [
+    Path(os.path.expanduser("~/${preferredConfigHome.split("/").pop()}")),
+    Path(os.path.expanduser("~/${secondaryConfigHome.split("/").pop()}")),
+    Path("${preferredConfigHome}"),
+    Path("${secondaryConfigHome}"),
+]
+home = next((p for p in candidates if p.is_dir() and any((p / n).is_file() for n in ("daemon.env", "gateway.env", "profile-default.json", "config.json"))), candidates[0])
 env = {}
 for name in ("daemon.env", "gateway.env"):
     p = home / name
@@ -675,7 +759,7 @@ for p in sorted(home.glob("profile-*.json")):
         pass
 print(json.dumps({"env": env, "profile": profile}, ensure_ascii=False))
 PY`,
-      { timeout: 45, sandboxId },
+      { timeout: 45, sandboxId, runtime },
     );
 
     if (dump.stdout?.trim()) {
@@ -691,26 +775,33 @@ PY`,
     }
 
     // Fallback: direct file reads (older gateway / python missing)
+    const configHome =
+      runtime === "supercharge"
+        ? "/home/user/.superagent"
+        : "/home/user/.xibecode";
     const envFile = await readFileInSession(
       sessionId,
-      '/home/user/.xibecode/daemon.env',
+      `${configHome}/daemon.env`,
       sandboxId,
+      runtime,
     );
     const gatewayEnvFile = await readFileInSession(
       sessionId,
-      '/home/user/.xibecode/gateway.env',
+      `${configHome}/gateway.env`,
       sandboxId,
+      runtime,
     );
     const profileFile = await readFileInSession(
       sessionId,
-      '/home/user/.xibecode/profile-default.json',
+      `${configHome}/profile-default.json`,
       sandboxId,
+      runtime,
     );
     const env = {
-      ...parseEnvFile(gatewayEnvFile.content || ''),
-      ...parseEnvFile(envFile.content || ''),
+      ...parseEnvFile(gatewayEnvFile.content || ""),
+      ...parseEnvFile(envFile.content || ""),
     };
-    const profile = parseProfileJson(profileFile.content || '');
+    const profile = parseProfileJson(profileFile.content || "");
     return viewFromSources(env, profile);
   } catch {
     return emptyConfigView();
@@ -744,6 +835,7 @@ export type ConfigInput = {
   telegramWebhookUrl?: string;
   telegramWebhookSecret?: string;
   telegramWebhookPort?: number;
+  runtime?: AgentRuntime;
 };
 
 /** Write AI + chat-channel config into the sandbox (no daemon start). */
@@ -755,53 +847,67 @@ export async function writeSandboxConfig(
   const secrets: string[] = [];
   const redact = (s: string) => redactSecrets(s, secrets);
   const sandboxId = input.sandboxId;
+  const runtime: AgentRuntime = input.runtime || "xibecode";
+  const runtimeHome =
+    runtime === "supercharge"
+      ? "/home/user/.superagent"
+      : "/home/user/.xibecode";
 
-  let existing = await readSandboxConfig(sessionId, sandboxId);
+  let existing = await readSandboxConfig(sessionId, sandboxId, runtime);
 
   // Full profile for merge (preserve unrelated conf keys like plugins, theme, etc.)
   let prevProfile: Record<string, unknown> = {};
   try {
     const pf = await readFileInSession(
       sessionId,
-      '/home/user/.xibecode/profile-default.json',
+      `${runtimeHome}/profile-default.json`,
       sandboxId,
+      runtime,
     );
-    prevProfile = parseProfileJson(pf.content || '');
+    prevProfile = parseProfileJson(pf.content || "");
   } catch {
     /* first write */
   }
 
+  const runtimeEnvBodyPrefix =
+    runtime === "supercharge" ? "SUPERAGENT" : "XIBECODE";
   const provider =
-    (input.provider || existing.provider || 'pollinations').replace(/[^a-z0-9_-]/gi, '') ||
-    'pollinations';
-  const model = (input.model ?? existing.model ?? '').trim();
-  const baseUrl = (input.baseUrl ?? existing.baseUrl ?? '').trim();
+    (input.provider || existing.provider || "pollinations").replace(
+      /[^a-z0-9_-]/gi,
+      "",
+    ) || "pollinations";
+  const model = (input.model ?? existing.model ?? "").trim();
+  const baseUrl = (input.baseUrl ?? existing.baseUrl ?? "").trim();
 
   const merge = input.mergeExisting !== false;
   const apiKey =
-    (input.apiKey || '').trim() || (merge ? existing.apiKey || '' : '');
+    (input.apiKey || "").trim() || (merge ? existing.apiKey || "" : "");
   const telegramBotToken =
-    (input.telegramBotToken || '').trim() ||
-    (merge ? existing.telegramBotToken || '' : '');
+    (input.telegramBotToken || "").trim() ||
+    (merge ? existing.telegramBotToken || "" : "");
   const discordBotToken =
-    (input.discordBotToken || '').trim() ||
-    (merge ? existing.discordBotToken || '' : '');
+    (input.discordBotToken || "").trim() ||
+    (merge ? existing.discordBotToken || "" : "");
   const slackBotToken =
-    (input.slackBotToken || '').trim() || (merge ? existing.slackBotToken || '' : '');
+    (input.slackBotToken || "").trim() ||
+    (merge ? existing.slackBotToken || "" : "");
   const slackAppToken =
-    (input.slackAppToken || '').trim() || (merge ? existing.slackAppToken || '' : '');
+    (input.slackAppToken || "").trim() ||
+    (merge ? existing.slackAppToken || "" : "");
 
   if (!apiKey) {
     return {
       ok: false,
-      logs: ['API key is required (enter a new key or set one first).'],
+      logs: ["API key is required (enter a new key or set one first)."],
       meta: existing,
     };
   }
   if (Boolean(slackBotToken) !== Boolean(slackAppToken)) {
     return {
       ok: false,
-      logs: ['Slack needs both SLACK_BOT_TOKEN (xoxb-…) and SLACK_APP_TOKEN (xapp-…).'],
+      logs: [
+        "Slack needs both SLACK_BOT_TOKEN (xoxb-…) and SLACK_APP_TOKEN (xapp-…).",
+      ],
       meta: existing,
     };
   }
@@ -816,200 +922,216 @@ export async function writeSandboxConfig(
     if (slot.apiKey) secrets.push(slot.apiKey);
   }
 
-  secrets.push(apiKey, telegramBotToken, discordBotToken, slackBotToken, slackAppToken);
+  secrets.push(
+    apiKey,
+    telegramBotToken,
+    discordBotToken,
+    slackBotToken,
+    slackAppToken,
+  );
 
   const inboxSecret =
     process.env.XIBECODE_APP_INBOX_SECRET?.trim() ||
     process.env.XIBECODE_GATEWAY_TOKEN?.trim() ||
-    '';
+    "";
   if (inboxSecret) secrets.push(inboxSecret);
 
   // Prefer pairing (secure) unless tenant opts into open access.
   // If the form omits the flag, keep previous value; brand-new installs default to pairing.
   const openAccess =
-    typeof input.allowAllUsers === 'boolean'
+    typeof input.allowAllUsers === "boolean"
       ? input.allowAllUsers
       : Boolean(existing.allowAllUsers);
 
-  const channels: string[] = ['app'];
-  if (telegramBotToken) channels.push('telegram');
-  if (discordBotToken) channels.push('discord');
-  if (slackBotToken) channels.push('slack');
+  const channels: string[] = ["app"];
+  if (telegramBotToken) channels.push("telegram");
+  if (discordBotToken) channels.push("discord");
+  if (slackBotToken) channels.push("slack");
 
   // Template wake HTTP (E2B doorbell on public URL) — separate from the bot long-poll
-  const tgWebhookUrl = (input.telegramWebhookUrl || '').trim();
-  const tgWebhookSecret = (input.telegramWebhookSecret || '').trim();
+  const tgWebhookUrl = (input.telegramWebhookUrl || "").trim();
+  const tgWebhookSecret = (input.telegramWebhookSecret || "").trim();
   const tgWebhookPort = Math.floor(
     Number(input.telegramWebhookPort) || (tgWebhookUrl ? 8788 : 0),
   );
   const sandboxWakeHttp =
     Boolean(telegramBotToken) && Boolean(tgWebhookUrl) && tgWebhookPort > 0;
-  const rustAgentTemplate = (process.env.XIBECODE_E2B_TEMPLATE || '')
-    .trim()
-    .toLowerCase()
-    .includes('superagent');
-  const providerKeyEnv = envKeysForProvider(provider)[0] || 'OPENAI_API_KEY';
-  const rustProviderBaseUrl = baseUrl || stockBaseUrl(provider);
-  const rustProviderFormat = provider === 'anthropic' ? 'anthropic' : 'openai';
-  const rustEnvBody = rustAgentTemplate
-    ? [
-        `SUPERAGENT_PROVIDER=${provider}`,
-        inboxSecret ? `SUPERAGENT_API_TOKEN=${inboxSecret}` : '',
-        model ? `SUPERAGENT_MODEL=${model}` : '',
-        rustProviderBaseUrl ? `SUPERAGENT_PROVIDER_BASE_URL=${rustProviderBaseUrl}` : '',
-        `SUPERAGENT_PROVIDER_FORMAT=${rustProviderFormat}`,
-        `SUPERAGENT_PROVIDER_API_KEY_ENV=${providerKeyEnv}`,
-        `SUPERAGENT_PROVIDER_CONFIG_PATH=/var/lib/superagent/provider-config.toml`,
-        `SUPERAGENT_AGENT_BINARY=/usr/local/bin/superagent-provider-bridge`,
-        `SUPERAGENT_DAEMON_COMMAND=/usr/local/bin/superagent-server`,
-        `SUPERAGENT_DAEMON_WORKDIR=/home/user/workspace`,
-        inboxSecret ? `SUPERAGENT_APP_INBOX_SECRET=${inboxSecret}` : '',
-        inboxSecret ? `SUPERAGENT_GATEWAY_TOKEN=${inboxSecret}` : '',
-        `SUPERAGENT_APP_INBOX_PORT=8790`,
-        `AGENT_BROWSER_STREAM_PORT=9223`,
-        `AGENT_BROWSER_STREAM_QUALITY=40`,
-        `AGENT_BROWSER_STREAM_MAX_WIDTH=960`,
-        `AGENT_BROWSER_STREAM_MAX_HEIGHT=540`,
-        input.instanceId ? `SUPERAGENT_INSTANCE_ID=${input.instanceId}` : '',
-        input.instanceId
-          ? `SUPERAGENT_PUBLIC_MEDIA_BASE=${(
-              process.env.PUBLIC_BASE_URL?.trim() ||
-              process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-              'https://infra.xibeai.in'
-            ).replace(/\/$/, '')}/api/public/media/${encodeURIComponent(input.instanceId)}`
-          : '',
-        sandboxWakeHttp ? `SUPERAGENT_WAKE_PORT=${tgWebhookPort}` : '',
-        sandboxWakeHttp ? `SUPERAGENT_TG_WEBHOOK_URL=${tgWebhookUrl}` : '',
-        sandboxWakeHttp && tgWebhookSecret
-          ? `SUPERAGENT_TELEGRAM_WEBHOOK_SECRET=${tgWebhookSecret}`
-          : '',
-      ]
-        .filter((line) => line !== '')
-        .join('\n') + '\n'
-    : '';
-
+  const providerKeyEnv = envKeysForProvider(provider)[0] || "OPENAI_API_KEY";
+  const providerBaseUrl = baseUrl || stockBaseUrl(provider);
+  const providerFormat = provider === "anthropic" ? "anthropic" : "openai";
+  const mediaBase = input.instanceId
+    ? `${(
+        process.env.PUBLIC_BASE_URL?.trim() ||
+        process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+        "https://infra.xibeai.in"
+      ).replace(
+        /\/$/,
+        "",
+      )}/api/public/media/${encodeURIComponent(input.instanceId)}`
+    : "";
+  const channelEnv = [
+    telegramBotToken ? `TELEGRAM_BOT_TOKEN=${telegramBotToken}` : "",
+    discordBotToken ? `DISCORD_BOT_TOKEN=${discordBotToken}` : "",
+    slackBotToken ? `SLACK_BOT_TOKEN=${slackBotToken}` : "",
+    slackAppToken ? `SLACK_APP_TOKEN=${slackAppToken}` : "",
+    openAccess
+      ? `GATEWAY_ALLOW_ALL_USERS=true`
+      : `GATEWAY_ALLOW_ALL_USERS=false`,
+    ...savedProviders.flatMap((slot) =>
+      slot.apiKey
+        ? envKeysForProvider(slot.provider).map(
+            (key) => `${key}=${slot.apiKey}`,
+          )
+        : [],
+    ),
+    ...envKeysForProvider(provider).map((key) => `${key}=${apiKey}`),
+    provider === "anthropic" ? `ANTHROPIC_API_KEY=${apiKey}` : "",
+    provider === "openai" || !envKeysForProvider(provider).length
+      ? `OPENAI_API_KEY=${apiKey}`
+      : "",
+  ];
+  const runtimeEnv =
+    runtime === "supercharge"
+      ? [
+          `SUPERAGENT_PROVIDER=${provider}`,
+          `SUPERAGENT_AGENT_BINARY=/usr/local/bin/supercharge`,
+          inboxSecret ? `SUPERAGENT_API_TOKEN=${inboxSecret}` : "",
+          inboxSecret ? `SUPERAGENT_APP_INBOX_SECRET=${inboxSecret}` : "",
+          model ? `SUPERAGENT_MODEL=${model}` : "",
+          providerBaseUrl
+            ? `SUPERAGENT_PROVIDER_BASE_URL=${providerBaseUrl}`
+            : "",
+          `SUPERAGENT_PROVIDER_FORMAT=${providerFormat}`,
+          `SUPERAGENT_PROVIDER_API_KEY_ENV=${providerKeyEnv}`,
+          `SUPERAGENT_PROVIDER_CONFIG_PATH=/home/user/.supercharge/provider-config.toml`,
+          `SUPERAGENT_BIND=0.0.0.0:8790`,
+          `SUPERAGENT_DAEMON_WORKDIR=/home/user/workspace`,
+          `SUPERAGENT_SHARE_WORKSPACE_ROOT=/home/user/workspace`,
+          `SUPERAGENT_MEDIA_ROOT=/home/user/workspace/.superagent-media`,
+          `SUPERAGENT_BROWSER_CONTROL_ENABLED=true`,
+          `SUPERAGENT_WAKE_PORT=8788`,
+          `SUPERAGENT_APP_INBOX_PORT=8790`,
+          `AGENT_BROWSER_STREAM_PORT=9223`,
+          `AGENT_BROWSER_STREAM_QUALITY=40`,
+          `AGENT_BROWSER_STREAM_MAX_WIDTH=960`,
+          `AGENT_BROWSER_STREAM_MAX_HEIGHT=540`,
+          input.instanceId ? `SUPERAGENT_INSTANCE_ID=${input.instanceId}` : "",
+          mediaBase ? `SUPERAGENT_PUBLIC_MEDIA_BASE=${mediaBase}` : "",
+          sandboxWakeHttp ? `SUPERAGENT_TG_WEBHOOK_URL=${tgWebhookUrl}` : "",
+          sandboxWakeHttp && tgWebhookSecret
+            ? `SUPERAGENT_TELEGRAM_WEBHOOK_SECRET=${tgWebhookSecret}`
+            : "",
+        ]
+      : [
+          `XIBECODE_API_KEY=${apiKey}`,
+          `XIBECODE_PROVIDER=${provider}`,
+          model ? `XIBECODE_MODEL=${model}` : "",
+          baseUrl ? `XIBECODE_BASE_URL=${baseUrl}` : "",
+          baseUrl && provider !== "anthropic"
+            ? `OPENAI_BASE_URL=${baseUrl}`
+            : "",
+          `XIBECODE_DAEMON_WORKDIR=/home/user/workspace`,
+          inboxSecret ? `XIBECODE_APP_INBOX_SECRET=${inboxSecret}` : "",
+          inboxSecret ? `XIBECODE_GATEWAY_TOKEN=${inboxSecret}` : "",
+          `XIBECODE_APP_INBOX_PORT=8790`,
+          `AGENT_BROWSER_STREAM_PORT=9223`,
+          `AGENT_BROWSER_STREAM_QUALITY=40`,
+          `AGENT_BROWSER_STREAM_MAX_WIDTH=960`,
+          `AGENT_BROWSER_STREAM_MAX_HEIGHT=540`,
+          input.instanceId ? `XIBECODE_INSTANCE_ID=${input.instanceId}` : "",
+          mediaBase ? `XIBECODE_PUBLIC_MEDIA_BASE=${mediaBase}` : "",
+        ];
   const envBody =
     [
-      telegramBotToken ? `TELEGRAM_BOT_TOKEN=${telegramBotToken}` : '',
-      telegramBotToken ? `XIBECODE_TELEGRAM_BOT_TOKEN=${telegramBotToken}` : '',
-      discordBotToken ? `DISCORD_BOT_TOKEN=${discordBotToken}` : '',
-      discordBotToken ? `XIBECODE_DISCORD_BOT_TOKEN=${discordBotToken}` : '',
-      slackBotToken ? `SLACK_BOT_TOKEN=${slackBotToken}` : '',
-      slackBotToken ? `XIBECODE_SLACK_BOT_TOKEN=${slackBotToken}` : '',
-      slackAppToken ? `SLACK_APP_TOKEN=${slackAppToken}` : '',
-      slackAppToken ? `XIBECODE_SLACK_APP_TOKEN=${slackAppToken}` : '',
-      openAccess ? `GATEWAY_ALLOW_ALL_USERS=true` : `GATEWAY_ALLOW_ALL_USERS=false`,
-      `XIBECODE_API_KEY=${apiKey}`,
-      `XIBECODE_PROVIDER=${provider}`,
-      ...savedProviders.flatMap((slot) =>
-        slot.apiKey
-          ? envKeysForProvider(slot.provider).map((k) => `${k}=${slot.apiKey}`)
-          : [],
-      ),
-      // Active key still lands on the generic env names older CLI reads.
-      provider === 'anthropic' ? `ANTHROPIC_API_KEY=${apiKey}` : '',
-      provider === 'openai' || !envKeysForProvider(provider).length
-        ? `OPENAI_API_KEY=${apiKey}`
-        : '',
-      model ? `XIBECODE_MODEL=${model}` : '',
-      baseUrl ? `XIBECODE_BASE_URL=${baseUrl}` : '',
-      baseUrl && provider !== 'anthropic' ? `OPENAI_BASE_URL=${baseUrl}` : '',
-      `XIBECODE_DAEMON_WORKDIR=/home/user/workspace`,
-      inboxSecret ? `XIBECODE_APP_INBOX_SECRET=${inboxSecret}` : '',
-      inboxSecret ? `XIBECODE_GATEWAY_TOKEN=${inboxSecret}` : '',
-      `XIBECODE_APP_INBOX_PORT=8790`,
-      `AGENT_BROWSER_STREAM_PORT=9223`,
-      `AGENT_BROWSER_STREAM_QUALITY=40`,
-      `AGENT_BROWSER_STREAM_MAX_WIDTH=960`,
-      `AGENT_BROWSER_STREAM_MAX_HEIGHT=540`,
-      input.instanceId
-        ? `XIBECODE_INSTANCE_ID=${input.instanceId}`
-        : '',
-      input.instanceId
-        ? `XIBECODE_PUBLIC_MEDIA_BASE=${(
-            process.env.PUBLIC_BASE_URL?.trim() ||
-            process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-            'https://infra.xibeai.in'
-          ).replace(/\/$/, '')}/api/public/media/${encodeURIComponent(input.instanceId)}`
-        : '',
-      // Template wake HTTP only (does NOT enable bot webhook mode)
-      sandboxWakeHttp ? `VECTRA_WAKE_PORT=${tgWebhookPort}` : '',
-      sandboxWakeHttp ? `VECTRA_TG_WEBHOOK_URL=${tgWebhookUrl}` : '',
-      sandboxWakeHttp ? `TELEGRAM_WEBHOOK_URL=${tgWebhookUrl}` : '',
+      ...channelEnv,
+      ...runtimeEnv,
+      // Template wake HTTP only (does NOT enable bot webhook mode).
+      sandboxWakeHttp ? `VECTRA_WAKE_PORT=${tgWebhookPort}` : "",
+      sandboxWakeHttp ? `VECTRA_TG_WEBHOOK_URL=${tgWebhookUrl}` : "",
+      sandboxWakeHttp ? `TELEGRAM_WEBHOOK_URL=${tgWebhookUrl}` : "",
       sandboxWakeHttp && tgWebhookSecret
         ? `TELEGRAM_WEBHOOK_SECRET=${tgWebhookSecret}`
-        : '',
+        : "",
     ]
-      .filter((line) => line !== '')
-      .join('\n') + '\n';
+      .filter((line) => line !== "")
+      .join("\n") + "\n";
 
   // Merge into existing conf profile so we don't wipe unrelated settings.
   const mergedProfile = {
     ...prevProfile,
     provider,
     ...(model ? { model } : {}),
-    ...(baseUrl ? { baseUrl } : prevProfile.baseUrl ? { baseUrl: prevProfile.baseUrl } : {}),
+    ...(baseUrl
+      ? { baseUrl }
+      : prevProfile.baseUrl
+        ? { baseUrl: prevProfile.baseUrl }
+        : {}),
     apiKey,
+    runtime,
     savedProviders,
   };
   const profileJson = JSON.stringify(mergedProfile, null, 2);
+  const tomlQuote = (value: string) => JSON.stringify(value);
+  const providerToml = [
+    `[model.${tomlQuote(provider)}]`,
+    `model = ${tomlQuote(model || provider)}`,
+    `name = ${tomlQuote(provider)}`,
+    `description = ${tomlQuote(`${provider} provider profile`)}`,
+    `base_url = ${tomlQuote(providerBaseUrl)}`,
+    `api_base_url = ${tomlQuote(providerBaseUrl)}`,
+    `env_key = ${tomlQuote(providerKeyEnv)}`,
+    `api_backend = ${tomlQuote(providerFormat === "anthropic" ? "messages" : "chat_completions")}`,
+    `agent_type = ${tomlQuote("supercharge-core")}`,
+    "context_window = 128000",
+    "",
+  ].join("\n");
 
-  await execInSession(sessionId, 'mkdir -p /home/user/.xibecode', {
+  await execInSession(sessionId, `mkdir -p ${runtimeHome}`, {
     timeout: 30,
     sandboxId,
+    runtime,
   });
+  const runtimeEnvBody = envBody;
   const w1 = await writeFileInSession(
     sessionId,
-    '/home/user/.xibecode/daemon.env',
-    envBody,
+    `${runtimeHome}/daemon.env`,
+    runtimeEnvBody,
     sandboxId,
+    runtime,
   );
   const w2 = await writeFileInSession(
     sessionId,
-    '/home/user/.xibecode/gateway.env',
-    envBody,
+    `${runtimeHome}/gateway.env`,
+    runtimeEnvBody,
     sandboxId,
+    runtime,
   );
-    const w3 = await writeFileInSession(
+  const w3 = await writeFileInSession(
     sessionId,
-    '/home/user/.xibecode/profile-default.json',
+    `${runtimeHome}/profile-default.json`,
     profileJson,
     sandboxId,
+    runtime,
   );
-  const w4 = rustAgentTemplate
-    ? await execInSession(sessionId, 'mkdir -p /home/user/.superagent', {
-        timeout: 30,
-        sandboxId,
-      })
-    : { success: true };
-  const w5 = rustAgentTemplate
-    ? await writeFileInSession(
-        sessionId,
-        '/home/user/.superagent/daemon.env',
-        rustEnvBody,
-        sandboxId,
-      )
-    : { success: true };
-  const w6 = rustAgentTemplate
-    ? await writeFileInSession(
-        sessionId,
-        '/home/user/.superagent/gateway.env',
-        rustEnvBody,
-        sandboxId,
-      )
-    : { success: true };
+  const w4 =
+    runtime === "supercharge"
+      ? await writeFileInSession(
+          sessionId,
+          "/home/user/.supercharge/provider-config.toml",
+          providerToml,
+          sandboxId,
+          runtime,
+        )
+      : { success: true, message: "not needed" };
   if (
     w1.success === false ||
     w2.success === false ||
     w3.success === false ||
-    w4.success === false ||
-    w5.success === false ||
-    w6.success === false
+    w4.success === false
   ) {
-
     logs.push(
       redact(
-        `WRITE FAILED: daemon.env=${w1.message || w1.success} gateway.env=${w2.message || w2.success} profile=${w3.message || w3.success}`,
+        `WRITE FAILED: daemon.env=${w1.message || w1.success} gateway.env=${w2.message || w2.success} profile=${w3.message || w3.success} providerToml=${w4.message || w4.success}`,
       ),
     );
     return { ok: false, logs, meta: existing };
@@ -1017,23 +1139,24 @@ export async function writeSandboxConfig(
 
   await execInSession(
     sessionId,
-    'chmod 600 /home/user/.xibecode/daemon.env /home/user/.xibecode/gateway.env /home/user/.xibecode/profile-default.json /home/user/.superagent/daemon.env /home/user/.superagent/gateway.env 2>/dev/null; true',
-    { timeout: 30, sandboxId },
+    `chmod 600 ${runtimeHome}/daemon.env ${runtimeHome}/gateway.env ${runtimeHome}/profile-default.json /home/user/.supercharge/provider-config.toml 2>/dev/null; true`,
+    { timeout: 30, sandboxId, runtime },
   );
 
   // Verify what actually landed
   const verify = await execInSession(
     sessionId,
-    'grep -E "^(XIBECODE_MODEL|XIBECODE_BASE_URL|GATEWAY_ALLOW_ALL|TELEGRAM_|DISCORD_|SLACK_)" /home/user/.xibecode/daemon.env | sed -E "s/(TOKEN|KEY)=.*/\\1=…/"; python3 -c "import json;d=json.load(open(\'/home/user/.xibecode/profile-default.json\'));print(\'profile model=\',d.get(\'model\'),\'provider=\',d.get(\'provider\'))"',
-    { timeout: 30, sandboxId },
+    `grep -E "^(${runtimeEnvBodyPrefix}_MODEL|${runtimeEnvBodyPrefix}_BASE_URL|SUPERAGENT_PROVIDER_|GATEWAY_ALLOW_ALL|TELEGRAM_|DISCORD_|SLACK_)" ${runtimeHome}/daemon.env | sed -E "s/(TOKEN|KEY)=.*/\\1=…/"; python3 -c "import json;d=json.load(open('${runtimeHome}/profile-default.json'));print('profile model=',d.get('model'),'provider=',d.get('provider'))"; if [ "${runtime}" = "supercharge" ]; then test -s /home/user/.supercharge/provider-config.toml && echo 'supercharge provider TOML=present'; fi`,
+    { timeout: 30, sandboxId, runtime },
   );
   logs.push(
     redact(
-      `config saved OK · channels=${channels.join('+') || 'none'} · pairing=${openAccess ? 'OFF (open access)' : 'ON (approve in dashboard)'} · templateWake=${sandboxWakeHttp ? tgWebhookUrl : 'off'} · provider=${provider} model=${model || '(none)'} baseUrl=${baseUrl || '(none)'}\n${verify.stdout || ''}`,
+      `config saved OK · channels=${channels.join("+") || "none"} · pairing=${openAccess ? "OFF (open access)" : "ON (approve in dashboard)"} · templateWake=${sandboxWakeHttp ? tgWebhookUrl : "off"} · provider=${provider} model=${model || "(none)"} baseUrl=${baseUrl || "(none)"}\n${verify.stdout || ""}`,
     ),
   );
 
   existing = {
+    runtime,
     provider,
     model,
     baseUrl,
@@ -1057,21 +1180,34 @@ export async function writeSandboxConfig(
 }
 
 export type PairingView = {
-  pending: Array<{ code: string; platform: string; userId: string; chatId: string; expiresAt: number }>;
-  approved: Array<{ platform: string; userId: string; chatId?: string; approvedAt: number }>;
+  pending: Array<{
+    code: string;
+    platform: string;
+    userId: string;
+    chatId: string;
+    expiresAt: number;
+  }>;
+  approved: Array<{
+    platform: string;
+    userId: string;
+    chatId?: string;
+    approvedAt: number;
+  }>;
 };
 
 export async function listPairings(
   sessionId: string,
   sandboxId?: string,
+  runtime: AgentRuntime = "xibecode",
 ): Promise<PairingView> {
+  const pairingRoot = runtime === "supercharge" ? ".superagent" : ".xibecode";
   const r = await execInSession(
     sessionId,
     `python3 - <<'PY'
 import json, os
 paths=[
-  os.path.expanduser("~/.xibecode/daemon/pairing.json"),
-  os.path.expanduser("~/.xibecode/gateway/pairing.json"),
+  os.path.expanduser("~/${pairingRoot}/daemon/pairing.json"),
+  os.path.expanduser("~/${pairingRoot}/gateway/pairing.json"),
 ]
 for p in paths:
   if os.path.isfile(p):
@@ -1079,10 +1215,10 @@ for p in paths:
     raise SystemExit(0)
 print(json.dumps({"pending":[],"approved":[]}))
 PY`,
-    { timeout: 30, sandboxId },
+    { timeout: 30, sandboxId, runtime },
   );
   try {
-    return JSON.parse((r.stdout || '').trim() || '{}') as PairingView;
+    return JSON.parse((r.stdout || "").trim() || "{}") as PairingView;
   } catch {
     return { pending: [], approved: [] };
   }
@@ -1091,25 +1227,28 @@ PY`,
 export async function approvePairingCode(
   sessionId: string,
   code: string,
-  platform = 'telegram',
+  platform = "telegram",
   sandboxId?: string,
+  runtime: AgentRuntime = "xibecode",
 ): Promise<{ ok: boolean; logs: string[] }> {
-  const safe = code.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-  if (!safe) return { ok: false, logs: ['Invalid pairing code'] };
-  const plat = platform.replace(/[^a-z]/g, '') || 'telegram';
+  const safe = code.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  if (!safe) return { ok: false, logs: ["Invalid pairing code"] };
+  const plat = platform.replace(/[^a-z]/g, "") || "telegram";
   const r = await execInSession(
     sessionId,
-    `xibecode pair approve ${plat} ${safe} 2>&1; echo EXIT:$?`,
-    { timeout: 60, sandboxId },
+    runtime === "supercharge"
+      ? `supercharge pair approve ${plat} ${safe} 2>&1; echo EXIT:$?`
+      : `xibecode pair approve ${plat} ${safe} 2>&1; echo EXIT:$?`,
+    { timeout: 60, sandboxId, runtime },
   );
-  const out = `${r.stdout || ''}\n${r.stderr || ''}`;
-  const ok = /approved|ok|success/i.test(out) || out.includes('EXIT:0');
+  const out = `${r.stdout || ""}\n${r.stderr || ""}`;
+  const ok = /approved|ok|success/i.test(out) || out.includes("EXIT:0");
   return { ok, logs: [out.slice(0, 800)] };
 }
 
 /** Parse `xibecode -v` / package version from shell output. */
 export function parseXibecodeVersion(text: string): string | null {
-  const m = String(text || '').match(/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/);
+  const m = String(text || "").match(/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/);
   return m ? m[1] : null;
 }
 
@@ -1117,6 +1256,7 @@ export function parseXibecodeVersion(text: string): string | null {
 export async function getCliVersionInfo(
   sessionId: string,
   sandboxId?: string,
+  runtime: AgentRuntime = "xibecode",
 ): Promise<{
   current: string | null;
   latest: string | null;
@@ -1129,26 +1269,35 @@ export async function getCliVersionInfo(
   const r = await execInSession(
     sessionId,
     [
-      'set +e',
-      'echo "--- xibecode -v ---"',
-      'xibecode -v 2>&1 || xibecode --version 2>&1 || true',
+      "set +e",
+      runtime === "supercharge"
+        ? 'echo "--- supercharge --version ---"'
+        : 'echo "--- xibecode -v ---"',
+      runtime === "supercharge"
+        ? "supercharge --version 2>&1 || sc --version 2>&1 || true"
+        : "xibecode -v 2>&1 || xibecode --version 2>&1 || true",
       'echo "--- which ---"',
-      'which xibecode 2>/dev/null || true',
-      'echo VERSION_DONE',
-    ].join('\n'),
-    { timeout: 60, sandboxId },
+      runtime === "supercharge"
+        ? "which supercharge 2>/dev/null || which sc 2>/dev/null || true"
+        : "which xibecode 2>/dev/null || true",
+      "echo VERSION_DONE",
+    ].join("\n"),
+    { timeout: 60, sandboxId, runtime },
   );
-  const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+  const out = `${r.stdout || ""}\n${r.stderr || ""}`;
   logs.push(redactSecrets(out.slice(0, 1200)));
   current = parseXibecodeVersion(out);
+  if (runtime === "supercharge") {
+    return { current, latest: null, updateAvailable: false, logs };
+  }
 
   let latest: string | null = null;
   try {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 5000);
-    const res = await fetch('https://registry.npmjs.org/xibecode/latest', {
+    const res = await fetch("https://registry.npmjs.org/xibecode/latest", {
       signal: ac.signal,
-      headers: { Accept: 'application/json' },
+      headers: { Accept: "application/json" },
     });
     clearTimeout(t);
     if (res.ok) {
@@ -1156,7 +1305,7 @@ export async function getCliVersionInfo(
       if (data.version) latest = String(data.version).trim();
     }
   } catch {
-    logs.push('npm registry latest: unreachable (host)');
+    logs.push("npm registry latest: unreachable (host)");
   }
 
   // Optional: try sandbox-side check if host registry failed
@@ -1164,9 +1313,9 @@ export async function getCliVersionInfo(
     const r2 = await execInSession(
       sessionId,
       `xibecode update --check --json 2>/dev/null || true`,
-      { timeout: 30, sandboxId },
+      { timeout: 30, sandboxId, runtime },
     );
-    const j = `${r2.stdout || ''}`;
+    const j = `${r2.stdout || ""}`;
     try {
       const parsed = JSON.parse(j) as { latest?: string; current?: string };
       if (parsed.latest) latest = String(parsed.latest);
@@ -1177,9 +1326,7 @@ export async function getCliVersionInfo(
   }
 
   const updateAvailable = Boolean(
-    current &&
-      latest &&
-      compareSemverCore(latest, current) > 0,
+    current && latest && compareSemverCore(latest, current) > 0,
   );
 
   return { current, latest, updateAvailable, logs };
@@ -1187,8 +1334,14 @@ export async function getCliVersionInfo(
 
 /** Semver core compare (positive if a > b). */
 export function compareSemverCore(a: string, b: string): number {
-  const coreA = a.split('-')[0].split('.').map((n) => parseInt(n, 10) || 0);
-  const coreB = b.split('-')[0].split('.').map((n) => parseInt(n, 10) || 0);
+  const coreA = a
+    .split("-")[0]
+    .split(".")
+    .map((n) => parseInt(n, 10) || 0);
+  const coreB = b
+    .split("-")[0]
+    .split(".")
+    .map((n) => parseInt(n, 10) || 0);
   for (let i = 0; i < 3; i++) {
     const x = coreA[i] ?? 0;
     const y = coreB[i] ?? 0;
@@ -1202,7 +1355,7 @@ export function compareSemverCore(a: string, b: string): number {
  */
 export async function updateCliInSandbox(
   sessionId: string,
-  opts?: { sandboxId?: string; version?: string },
+  opts?: { sandboxId?: string; runtime?: AgentRuntime; version?: string },
 ): Promise<{
   ok: boolean;
   from: string | null;
@@ -1211,37 +1364,52 @@ export async function updateCliInSandbox(
   logs: string[];
 }> {
   const sandboxId = opts?.sandboxId;
+  const runtime = opts?.runtime || "xibecode";
   const logs: string[] = [];
 
-  const shell = [
-    'set +e',
-    'echo "--- pre version ---"',
-    'xibecode -v 2>&1 || true',
-    'echo "--- install ---"',
-    // Global package is root-owned in the template — always prefer passwordless sudo.
-    'sudo -n npm install -g xibecode@latest --no-fund --no-audit 2>&1 || sudo npm install -g xibecode@latest --no-fund --no-audit 2>&1 || npm install -g xibecode@latest --no-fund --no-audit 2>&1',
-    'echo "--- post version ---"',
-    'xibecode -v 2>&1 || true',
-    'echo UPDATE_DONE',
-  ].join('\n');
+  const shell =
+    runtime === "supercharge"
+      ? [
+          "set +e",
+          'echo "--- supercharge version ---"',
+          "supercharge --version 2>&1 || sc --version 2>&1 || true",
+          "echo UPDATE_DONE",
+        ].join("\n")
+      : [
+          "set +e",
+          'echo "--- pre version ---"',
+          "xibecode -v 2>&1 || true",
+          'echo "--- install ---"',
+          // Global package is root-owned in the template — always prefer passwordless sudo.
+          "sudo -n npm install -g xibecode@latest --no-fund --no-audit 2>&1 || sudo npm install -g xibecode@latest --no-fund --no-audit 2>&1 || npm install -g xibecode@latest --no-fund --no-audit 2>&1",
+          'echo "--- post version ---"',
+          "xibecode -v 2>&1 || true",
+          "echo UPDATE_DONE",
+        ].join("\n");
 
   const r = await execInSession(sessionId, shell, {
     timeout: 300,
     sandboxId,
-    cwd: '/home/user',
+    runtime,
+    cwd: "/home/user",
   });
-  const out = `${r.stdout || ''}\n${r.stderr || ''}\n${r.message || ''}`;
+  const out = `${r.stdout || ""}\n${r.stderr || ""}\n${r.message || ""}`;
   logs.push(redactSecrets(out.slice(0, 5000)));
 
-  const from = parseXibecodeVersion(out.split('--- pre version ---')[1] || '');
-  const verified = parseXibecodeVersion(out.split('--- post version ---').pop() || '');
+  const from = parseXibecodeVersion(out.split("--- pre version ---")[1] || "");
+  const verified = parseXibecodeVersion(
+    out.split("--- post version ---").pop() || "",
+  );
 
-  logs.push('--- restart daemon ---');
-  const restart = await restartDaemon(sessionId, sandboxId);
+  logs.push("--- restart daemon ---");
+  const restart = await restartDaemon(sessionId, sandboxId, runtime);
   logs.push(...restart.logs);
 
   return {
-    ok: Boolean(verified && out.includes('UPDATE_DONE') && restart.ok),
+    ok: Boolean(
+      (runtime === "supercharge" ? out.includes("UPDATE_DONE") : verified) &&
+      restart.ok,
+    ),
     from,
     to: verified,
     verified,
@@ -1253,78 +1421,112 @@ export async function updateCliInSandbox(
 export async function restartDaemon(
   sessionId: string,
   sandboxId?: string,
+  runtime: AgentRuntime = "xibecode",
 ): Promise<{ ok: boolean; logs: string[] }> {
+  const runtimeHome =
+    runtime === "supercharge"
+      ? "/home/user/.superagent"
+      : "/home/user/.xibecode";
+  const daemonPidFile =
+    runtime === "supercharge"
+      ? "/tmp/supercharge-daemon.pid"
+      : "/tmp/xibecode-daemon.pid";
+  const daemonLogFile =
+    runtime === "supercharge"
+      ? "/tmp/supercharge-daemon.log"
+      : "/tmp/xibecode-daemon.log";
+  const daemonCommand =
+    runtime === "supercharge"
+      ? process.env.SUPERCHARGE_SANDBOX_DAEMON_COMMAND?.trim() ||
+        "/usr/local/bin/supercharge-superagent-server"
+      : process.env.XIBECODE_SANDBOX_DAEMON_COMMAND?.trim() ||
+        "xibecode daemon --workdir /home/user/workspace";
+  const daemonMatch =
+    runtime === "supercharge"
+      ? process.env.SUPERCHARGE_SANDBOX_DAEMON_MATCH?.trim() ||
+        "supercharge-superagent-server|superagent-server"
+      : process.env.XIBECODE_SANDBOX_DAEMON_MATCH?.trim() ||
+        "node.*xibecode|xibecode/dist";
+  const daemonLabel = runtime === "supercharge" ? "supercharge" : "xibecode";
   // Bot stays long-poll. Template wake HTTP (:8788) is a separate process for E2B
   // auto-resume when Telegram (or host) hits the sandbox public URL.
   const setupCmd = [
-    'set +e',
-    'set -a',
-    '[ -f /home/user/.xibecode/daemon.env ] && . /home/user/.xibecode/daemon.env',
-    '[ -f /home/user/.xibecode/gateway.env ] && . /home/user/.xibecode/gateway.env',
-    'set +a',
+    "set +e",
+    "set -a",
+    `[ -f ${runtimeHome}/daemon.env ] && . ${runtimeHome}/daemon.env`,
+    `[ -f ${runtimeHome}/gateway.env ] && . ${runtimeHome}/gateway.env`,
+    "set +a",
     // Start template wake doorbell first (must be running before pause snapshot)
-    'if [ -x /opt/vectra/wake-http/start.sh ]; then',
-    '  /opt/vectra/wake-http/start.sh || true',
+    "if [ -x /opt/vectra/wake-http/start.sh ]; then",
+    "  /opt/vectra/wake-http/start.sh || true",
     '  echo "template wake-http: started (or already up)"',
-    'else',
+    "else",
     '  echo "template wake-http: missing /opt/vectra/wake-http (rebuild E2B template)"',
-    'fi',
+    "fi",
     // Bot long-poll: clear webhook so getUpdates works while running
     'if [ -n "${TELEGRAM_BOT_TOKEN:-}${XIBECODE_TELEGRAM_BOT_TOKEN:-}" ]; then',
     '  TOK="${TELEGRAM_BOT_TOKEN:-$XIBECODE_TELEGRAM_BOT_TOKEN}"',
     '  curl -sS -m 10 -X POST "https://api.telegram.org/bot${TOK}/deleteWebhook" -d "drop_pending_updates=false" >/dev/null 2>&1 || true',
     '  echo "telegram bot: long-poll (webhook cleared while running)"',
-    'fi',
+    "fi",
     // NEVER pkill -f "xibecode daemon" here: the exec shell cmdline contains that
     // string, so pkill kills *this* restart script (signal: terminated / exit 1).
-    'if [ -f /tmp/xibecode-daemon.pid ]; then',
-    '  OLD="$(cat /tmp/xibecode-daemon.pid 2>/dev/null)"',
+    `if [ -f ${daemonPidFile} ]; then`,
+    `  OLD="$(cat ${daemonPidFile} 2>/dev/null)"`,
     '  if [ -n "$OLD" ]; then kill "$OLD" 2>/dev/null || true; sleep 1; kill -9 "$OLD" 2>/dev/null || true; fi',
-    '  rm -f /tmp/xibecode-daemon.pid',
-    'fi',
+    `  rm -f ${daemonPidFile}`,
+
+    "fi",
     // Kill only real daemon node processes; exclude our shell ($$) and pgrep itself
-    'for pid in $(pgrep -f "node.*xibecode|xibecode/dist" 2>/dev/null || true); do',
+    `for pid in $(pgrep -f "${daemonMatch}" 2>/dev/null || true); do`,
     '  if [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ]; then',
     '    case "$(tr "\\0" " " < /proc/$pid/cmdline 2>/dev/null || true)" in',
     '      *daemon*) kill "$pid" 2>/dev/null || true ;;',
-    '    esac',
-    '  fi',
-    'done',
-    'sleep 1',
-    'nohup xibecode daemon --workdir /home/user/workspace >/tmp/xibecode-daemon.log 2>&1 &',
-    'echo $! > /tmp/xibecode-daemon.pid',
-    'OK=0',
-    'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do',
-    '  sleep 1',
-    '  if [ -f /tmp/xibecode-daemon.pid ] && kill -0 "$(cat /tmp/xibecode-daemon.pid)" 2>/dev/null; then OK=1; break; fi',
-    '  # Prefer pidfile; also accept a live node process that looks like the CLI',
-    '  if pgrep -af "node" 2>/dev/null | grep -F "xibecode" | grep -vF "pgrep" | grep -q .; then OK=1; break; fi',
-    'done',
-    'if [ "$OK" = "1" ]; then echo "xibecode daemon: running"; else echo "xibecode daemon: not found"; fi',
+    "    esac",
+    "  fi",
+    "done",
+    "sleep 1",
+    `nohup ${daemonCommand} >${daemonLogFile} 2>&1 &`,
+    `echo $! > ${daemonPidFile}`,
+
+    "OK=0",
+    "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do",
+    "  sleep 1",
+    `  if [ -f ${daemonPidFile} ] && kill -0 "$(cat ${daemonPidFile})" 2>/dev/null; then OK=1; break; fi`,
+    "  # Prefer pidfile; also accept a live node process that looks like the CLI",
+    `  if pgrep -af "${daemonMatch}" 2>/dev/null | grep -vF "pgrep" | grep -q .; then OK=1; break; fi`,
+    "done",
+    `if [ "$OK" = "1" ]; then echo "${daemonLabel} daemon: running"; else echo "${daemonLabel} daemon: not found"; fi`,
     'WP="${VECTRA_WAKE_PORT:-8788}"',
     'if curl -sS -m 2 "http://127.0.0.1:${WP}/health" 2>/dev/null | grep -q ok; then echo "template wake-http: listening :${WP}"; fi',
     'echo "--- daemon pid ---"',
-    'cat /tmp/xibecode-daemon.pid 2>/dev/null || true',
+    `cat ${daemonPidFile} 2>/dev/null || true`,
     'echo "--- daemon log ---"',
-    'tail -80 /tmp/xibecode-daemon.log 2>/dev/null || true',
+    `tail -80 ${daemonLogFile} 2>/dev/null || true`,
     'echo "--- processes ---"',
-    'ps -o pid,user,comm -C node 2>/dev/null | head -15 || true',
-    'echo RESTART_DONE',
-  ].join('\n');
+    "ps -o pid,user,comm -C node 2>/dev/null | head -15 || true",
+    "echo RESTART_DONE",
+  ].join("\n");
 
-  const r = await execInSession(sessionId, setupCmd, { timeout: 180, sandboxId });
-  const out = `${r.stdout || ''}\n${r.stderr || ''}\n${r.message || ''}`;
+  const r = await execInSession(sessionId, setupCmd, {
+    timeout: 180,
+    sandboxId,
+  });
+  const out = `${r.stdout || ""}\n${r.stderr || ""}\n${r.message || ""}`;
   const logs = [
     redactSecrets(
-      `restart exit=${r.exitCode ?? '?'} ${out.slice(0, 2500)}`,
+      `restart runtime=${runtime} exit=${r.exitCode ?? "?"} ${out.slice(0, 2500)}`,
     ),
   ];
   const ok =
-    out.includes('xibecode daemon: running') ||
-    out.includes('RESTART_DONE') ||
+    out.includes(`${daemonLabel} daemon: running`) ||
+    out.includes("RESTART_DONE") ||
     /telegram enabled|discord enabled|slack enabled/i.test(out);
   // Prefer explicit process check; RESTART_DONE alone can mean shell finished after a dead spawn
-  if (out.includes('xibecode daemon: not found') && !out.includes('xibecode daemon: running')) {
+  if (
+    out.includes(`${daemonLabel} daemon: not found`) &&
+    !out.includes(`${daemonLabel} daemon: running`)
+  ) {
     return { ok: false, logs };
   }
   return { ok, logs };
@@ -1342,6 +1544,7 @@ export async function setupAiAndTelegram(
     discordBotToken?: string;
     slackBotToken?: string;
     slackAppToken?: string;
+    runtime?: AgentRuntime;
     sandboxId?: string;
     telegramWebhookUrl?: string;
     telegramWebhookSecret?: string;
@@ -1350,10 +1553,15 @@ export async function setupAiAndTelegram(
 ): Promise<{ ok: boolean; logs: string[] }> {
   const w = await writeSandboxConfig(sessionId, {
     ...input,
+    runtime: input.runtime || "xibecode",
     mergeExisting: false,
   });
   if (!w.ok) return { ok: false, logs: w.logs };
-  const r = await restartDaemon(sessionId, input.sandboxId);
+  const r = await restartDaemon(
+    sessionId,
+    input.sandboxId,
+    input.runtime || "xibecode",
+  );
   return { ok: w.ok && r.ok, logs: [...w.logs, ...r.logs] };
 }
 
@@ -1366,15 +1574,18 @@ export async function gatewaySessionFetch(
   sessionId: string,
   path: string,
   init: RequestInit = {},
-  opts?: { sandboxId?: string },
+  opts?: { sandboxId?: string; runtime?: AgentRuntime },
 ): Promise<Response> {
   if (opts?.sandboxId) {
-    await ensureGatewaySession(sessionId, opts.sandboxId).catch(() => undefined);
+    await ensureGatewaySession(sessionId, opts.sandboxId, opts.runtime).catch(
+      () => undefined,
+    );
   }
-  const doFetch = () => gwFetch(`/sessions/${encodeURIComponent(sessionId)}${path}`, init);
+  const doFetch = () =>
+    gwFetch(`/sessions/${encodeURIComponent(sessionId)}${path}`, init);
   let res = await doFetch();
   if ((res.status === 404 || res.status === 502) && opts?.sandboxId) {
-    await ensureGatewaySession(sessionId, opts.sandboxId);
+    await ensureGatewaySession(sessionId, opts.sandboxId, opts.runtime);
     res = await doFetch();
   }
   return res;
@@ -1391,7 +1602,7 @@ export async function getSandboxPreviewHost(
     );
     if (!res.ok) return null;
     const data = (await res.json()) as { host?: string };
-    return (data.host || '').trim() || null;
+    return (data.host || "").trim() || null;
   } catch {
     return null;
   }
@@ -1399,7 +1610,7 @@ export async function getSandboxPreviewHost(
 
 export type SandboxLiveState = {
   sandboxId: string;
-  state: 'running' | 'paused' | 'missing' | 'unknown' | string;
+  state: "running" | "paused" | "missing" | "unknown" | string;
   resumable: boolean;
   message?: string;
   lifecycle?: { onTimeout?: string; autoResume?: boolean };
@@ -1411,83 +1622,112 @@ export type SandboxLiveState = {
  */
 export async function readSandboxLogs(
   sessionId: string,
-  opts?: { sandboxId?: string; lines?: number; source?: 'all' | 'daemon' | 'agent' | 'system' },
+  opts?: {
+    sandboxId?: string;
+    runtime?: AgentRuntime;
+    lines?: number;
+    source?: "all" | "daemon" | "agent" | "system";
+  },
 ): Promise<{ ok: boolean; text: string; logs: string[]; source: string }> {
   const lines = Math.min(2000, Math.max(50, Math.round(opts?.lines ?? 200)));
-  const source = opts?.source || 'all';
+  const source = opts?.source || "all";
   const sandboxId = opts?.sandboxId;
+  const runtime = opts?.runtime || "xibecode";
+  const runtimeHome =
+    runtime === "supercharge"
+      ? "/home/user/.superagent"
+      : "/home/user/.xibecode";
+  const runtimeLabel = runtime === "supercharge" ? "supercharge" : "xibecode";
+  const runtimeBinary =
+    runtime === "supercharge" ? "supercharge --version" : "xibecode -v";
+  const runtimePidFile =
+    runtime === "supercharge"
+      ? "/tmp/supercharge-daemon.pid"
+      : "/tmp/xibecode-daemon.pid";
+  const runtimeLogFile =
+    runtime === "supercharge"
+      ? "/tmp/supercharge-daemon.log"
+      : "/tmp/xibecode-daemon.log";
 
   // Tail multiple known log locations (hosting nohup + daemon home + agent).
   const shell = [
-    'set +e',
+    "set +e",
     `N=${lines}`,
     'echo "=== meta ==="',
     'date -u +"utc=%Y-%m-%dT%H:%M:%SZ"',
-    'hostname 2>/dev/null || true',
-    'xibecode -v 2>&1 || xibecode --version 2>&1 || echo "xibecode: not found"',
+    "hostname 2>/dev/null || true",
+    `${runtimeBinary} 2>&1 || echo "${runtimeLabel}: not found"`,
     'echo "=== processes ==="',
-    'pgrep -af "xibecode|node" 2>/dev/null | head -25 || true',
-    'if [ -f /tmp/xibecode-daemon.pid ]; then echo "pidfile=$(cat /tmp/xibecode-daemon.pid 2>/dev/null)"; fi',
-    source === 'system' || source === 'all'
+    runtime === "supercharge"
+      ? 'pgrep -af "supercharge-superagent-server|superagent-server|node" 2>/dev/null | head -25 || true'
+      : 'pgrep -af "xibecode|node" 2>/dev/null | head -25 || true',
+    `if [ -f ${runtimePidFile} ]; then echo "pidfile=$(cat ${runtimePidFile} 2>/dev/null)"; fi`,
+    source === "system" || source === "all"
       ? [
-          'echo "=== /tmp/xibecode-daemon.log (nohup) ==="',
-          'if [ -f /tmp/xibecode-daemon.log ]; then tail -n "$N" /tmp/xibecode-daemon.log; else echo "(missing)"; fi',
-        ].join('\n')
-      : '',
-    source === 'daemon' || source === 'all'
+          `echo "=== ${runtimeLogFile} (nohup) ==="`,
+          `if [ -f ${runtimeLogFile} ]; then tail -n "$N" ${runtimeLogFile}; else echo "(missing)"; fi`,
+        ].join("\n")
+      : "",
+    source === "daemon" || source === "all"
       ? [
-          'echo "=== ~/.xibecode/daemon/logs/daemon.log ==="',
-          'for p in "$HOME/.xibecode/daemon/logs/daemon.log" /home/user/.xibecode/daemon/logs/daemon.log \\',
-          '  "$HOME/.xibecode/daemon/logs/daemon-verbose.log" /home/user/.xibecode/daemon/logs/daemon-verbose.log; do',
+          `echo "=== ${runtimeHome}/daemon/logs/daemon.log ==="`,
+          `for p in "$HOME/${runtimeHome.split("/").pop()}/daemon/logs/daemon.log" ${runtimeHome}/daemon/logs/daemon.log \\`,
+          `  "$HOME/${runtimeHome.split("/").pop()}/daemon/logs/daemon-verbose.log" ${runtimeHome}/daemon/logs/daemon-verbose.log; do`,
           '  if [ -f "$p" ]; then echo "--- $p ---"; tail -n "$N" "$p"; fi',
-          'done',
-          'ls -la "$HOME/.xibecode/daemon/logs" /home/user/.xibecode/daemon/logs 2>/dev/null | head -40 || true',
-        ].join('\n')
-      : '',
-    source === 'agent' || source === 'all'
+          "done",
+          `ls -la "$HOME/${runtimeHome.split("/").pop()}/daemon/logs" ${runtimeHome}/daemon/logs 2>/dev/null | head -40 || true`,
+        ].join("\n")
+      : "",
+    source === "agent" || source === "all"
       ? [
           'echo "=== agent / session logs ==="',
-          'for p in "$HOME/.xibecode/logs" /home/user/.xibecode/logs; do',
+          `for p in "$HOME/${runtimeHome.split("/").pop()}/logs" ${runtimeHome}/logs; do`,
           '  if [ -d "$p" ]; then',
           '    ls -lt "$p" 2>/dev/null | head -15',
           '    find "$p" -type f -name "*.log" 2>/dev/null | head -8 | while read -r f; do',
           '      echo "--- $f ---"; tail -n "$N" "$f"',
-          '    done',
-          '  fi',
-          'done',
-          '# profile-scoped daemon logs',
-          'find "$HOME/.xibecode/daemon/logs" /home/user/.xibecode/daemon/logs -type f -name "daemon-*.log" 2>/dev/null | head -6 | while read -r f; do',
+          "    done",
+          "  fi",
+          "done",
+          "# profile-scoped daemon logs",
+          `find "$HOME/${runtimeHome.split("/").pop()}/daemon/logs" ${runtimeHome}/daemon/logs -type f -name "daemon-*.log" 2>/dev/null | head -6 | while read -r f; do`,
           '  echo "--- $f ---"; tail -n "$N" "$f"',
-          'done',
-        ].join('\n')
-      : '',
+          "done",
+        ].join("\n")
+      : "",
     'echo "=== LOGS_DONE ==="',
   ]
     .filter(Boolean)
-    .join('\n');
+    .join("\n");
 
   const r = await execInSession(sessionId, shell, {
     timeout: 90,
     sandboxId,
+    runtime,
   });
-  const raw = `${r.stdout || ''}\n${r.stderr || ''}\n${r.message || ''}`.trim();
+  const raw = `${r.stdout || ""}\n${r.stderr || ""}\n${r.message || ""}`.trim();
   const text = redactSecrets(raw).slice(0, 120_000);
-  const ok = r.success !== false && !r.error && text.includes('LOGS_DONE');
+  const ok = r.success !== false && !r.error && text.includes("LOGS_DONE");
   return {
     ok: ok || Boolean(text.length > 20),
     text,
-    logs: [text || r.message || 'no log output'],
+    logs: [text || r.message || "no log output"],
     source,
   };
 }
 
 /** Query live sandbox state (paused still exists and is resumable). */
-export async function getSandboxState(sandboxId: string): Promise<SandboxLiveState> {
+export async function getSandboxState(
+  sandboxId: string,
+): Promise<SandboxLiveState> {
   const res = await gwFetch(`/sandboxes/${encodeURIComponent(sandboxId)}`, {
     signal: AbortSignal.timeout(8_000),
   });
   const text = await res.text();
-  let data: Partial<SandboxLiveState> & { success?: boolean; message?: string } = {};
+  let data: Partial<SandboxLiveState> & {
+    success?: boolean;
+    message?: string;
+  } = {};
   try {
     data = JSON.parse(text) as typeof data;
   } catch {
@@ -1495,8 +1735,8 @@ export async function getSandboxState(sandboxId: string): Promise<SandboxLiveSta
   }
   return {
     sandboxId,
-    state: String(data.state || 'unknown'),
-    resumable: data.resumable !== false && data.state !== 'missing',
+    state: String(data.state || "unknown"),
+    resumable: data.resumable !== false && data.state !== "missing",
     message: data.message,
     lifecycle: data.lifecycle,
   };
@@ -1505,7 +1745,11 @@ export async function getSandboxState(sandboxId: string): Promise<SandboxLiveSta
 /** Resume a paused sandbox (and optionally restart xibecode daemon for Telegram). */
 export async function wakeSession(
   sessionId: string,
-  opts?: { sandboxId?: string; restartDaemon?: boolean },
+  opts?: {
+    sandboxId?: string;
+    runtime?: AgentRuntime;
+    restartDaemon?: boolean;
+  },
 ): Promise<{
   ok: boolean;
   state?: string;
@@ -1520,8 +1764,8 @@ export async function wakeSession(
   // Session map is memory-only — reattach before wake after gateway restart.
   if (opts?.sandboxId) {
     try {
-      await ensureGatewaySession(sessionId, opts.sandboxId);
-      logs.push('gateway session ensured');
+      await ensureGatewaySession(sessionId, opts.sandboxId, opts.runtime);
+      logs.push("gateway session ensured");
     } catch (e) {
       logs.push(`ensure session: ${(e as Error).message}`);
       // /wake still carries sandboxId for server-side reattach
@@ -1530,9 +1774,10 @@ export async function wakeSession(
 
   const doWake = () =>
     gwFetch(`/sessions/${encodeURIComponent(sessionId)}/wake`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify({
         sandboxId: opts?.sandboxId,
+        runtime: opts?.runtime,
         restartDaemon,
       }),
     });
@@ -1541,9 +1786,9 @@ export async function wakeSession(
   // Lost session / cold gateway → ensure + retry once
   if ((res.status === 404 || res.status === 502) && opts?.sandboxId) {
     try {
-      await ensureGatewaySession(sessionId, opts.sandboxId);
+      await ensureGatewaySession(sessionId, opts.sandboxId, opts.runtime);
       res = await doWake();
-      logs.push('wake retried after reattach');
+      logs.push("wake retried after reattach");
     } catch (e) {
       return {
         ok: false,
@@ -1583,12 +1828,14 @@ export async function wakeSession(
   // Sandbox is up; daemon restart is best-effort but surface failure to callers.
   const daemonOk = restartDaemon ? data.daemon?.ok !== false : true;
   if (restartDaemon && data.daemon && data.daemon.ok === false) {
-    logs.push('daemon restart reported DAEMON_FAIL — host webhook should stay armed');
+    logs.push(
+      "daemon restart reported DAEMON_FAIL — host webhook should stay armed",
+    );
   }
 
   return {
     ok: true,
-    state: data.state || 'running',
+    state: data.state || "running",
     resumed: data.resumed,
     daemonOk,
     logs,
@@ -1601,7 +1848,7 @@ function appInboxSecret(): string {
   return (
     process.env.XIBECODE_APP_INBOX_SECRET?.trim() ||
     process.env.XIBECODE_GATEWAY_TOKEN?.trim() ||
-    ''
+    ""
   );
 }
 
@@ -1610,49 +1857,70 @@ export async function bootstrapAppInbox(
   sessionId: string,
   sandboxId?: string,
   instanceId?: string,
+  runtime: AgentRuntime = "xibecode",
 ): Promise<void> {
   const secret = appInboxSecret();
   if (!secret) return;
   const site = (
     process.env.PUBLIC_BASE_URL?.trim() ||
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    'https://infra.xibeai.in'
-  ).replace(/\/$/, '');
-  const mediaBase =
-    instanceId ? `${site}/api/public/media/${encodeURIComponent(instanceId)}` : '';
+    "https://infra.xibeai.in"
+  ).replace(/\/$/, "");
+  const mediaBase = instanceId
+    ? `${site}/api/public/media/${encodeURIComponent(instanceId)}`
+    : "";
+  const runtimeHome =
+    runtime === "supercharge"
+      ? "/home/user/.superagent"
+      : "/home/user/.xibecode";
+  const keys =
+    runtime === "supercharge"
+      ? {
+          SUPERAGENT_AGENT_BINARY: "/usr/local/bin/supercharge",
+          SUPERAGENT_API_TOKEN: secret,
+          SUPERAGENT_APP_INBOX_SECRET: secret,
+          SUPERAGENT_APP_INBOX_PORT: "8790",
+          SUPERAGENT_BIND: "0.0.0.0:8790",
+          SUPERAGENT_DAEMON_WORKDIR: "/home/user/workspace",
+          SUPERAGENT_SHARE_WORKSPACE_ROOT: "/home/user/workspace",
+          SUPERAGENT_MEDIA_ROOT: "/home/user/workspace/.superagent-media",
+          SUPERAGENT_BROWSER_CONTROL_ENABLED: "true",
+          SUPERAGENT_WAKE_PORT: "8788",
+          AGENT_BROWSER_STREAM_PORT: "9223",
+          AGENT_BROWSER_STREAM_QUALITY: "40",
+          AGENT_BROWSER_STREAM_MAX_WIDTH: "960",
+          AGENT_BROWSER_STREAM_MAX_HEIGHT: "540",
+          ...(mediaBase ? { SUPERAGENT_PUBLIC_MEDIA_BASE: mediaBase } : {}),
+          ...(instanceId ? { SUPERAGENT_INSTANCE_ID: instanceId } : {}),
+        }
+      : {
+          XIBECODE_APP_INBOX_SECRET: secret,
+          XIBECODE_GATEWAY_TOKEN: secret,
+          XIBECODE_APP_INBOX_PORT: "8790",
+          XIBECODE_DAEMON_WORKDIR: "/home/user/workspace",
+          AGENT_BROWSER_STREAM_PORT: "9223",
+          AGENT_BROWSER_STREAM_QUALITY: "40",
+          AGENT_BROWSER_STREAM_MAX_WIDTH: "960",
+          AGENT_BROWSER_STREAM_MAX_HEIGHT: "540",
+          ...(mediaBase ? { XIBECODE_PUBLIC_MEDIA_BASE: mediaBase } : {}),
+          ...(instanceId ? { XIBECODE_INSTANCE_ID: instanceId } : {}),
+        };
   const py = `
 import pathlib
-keys = {
-  "XIBECODE_APP_INBOX_SECRET": ${JSON.stringify(secret)},
-  "XIBECODE_GATEWAY_TOKEN": ${JSON.stringify(secret)},
-  "XIBECODE_APP_INBOX_PORT": "8790",
-  "XIBECODE_DAEMON_WORKDIR": "/home/user/workspace",
-  "AGENT_BROWSER_STREAM_PORT": "9223",
-  "AGENT_BROWSER_STREAM_QUALITY": "40",
-  "AGENT_BROWSER_STREAM_MAX_WIDTH": "960",
-  "AGENT_BROWSER_STREAM_MAX_HEIGHT": "540",
-  "SUPERAGENT_API_TOKEN": ${JSON.stringify(secret)},
-  "SUPERAGENT_APP_INBOX_SECRET": ${JSON.stringify(secret)},
-  "SUPERAGENT_GATEWAY_TOKEN": ${JSON.stringify(secret)},
-  "SUPERAGENT_APP_INBOX_PORT": "8790",
-  "SUPERAGENT_DAEMON_WORKDIR": "/home/user/workspace",
-  ${mediaBase ? `"XIBECODE_PUBLIC_MEDIA_BASE": ${JSON.stringify(mediaBase)},` : ''}
-  ${mediaBase ? `"SUPERAGENT_PUBLIC_MEDIA_BASE": ${JSON.stringify(mediaBase)},` : ''}
-  ${instanceId ? `"XIBECODE_INSTANCE_ID": ${JSON.stringify(instanceId)},` : ''}
-  ${instanceId ? `"SUPERAGENT_INSTANCE_ID": ${JSON.stringify(instanceId)},` : ''}
-}
-for path in (pathlib.Path("/home/user/.xibecode/daemon.env"), pathlib.Path("/home/user/.superagent/daemon.env")):
-  path.parent.mkdir(parents=True, exist_ok=True)
-  text = path.read_text() if path.exists() else ""
-  lines = [ln for ln in text.splitlines() if ln.strip() and ln.split("=",1)[0] not in keys]
-  for k,v in keys.items():
-    lines.append(f"{k}={v}")
-  path.write_text("\\n".join(lines) + "\\n")
+keys = ${JSON.stringify(keys)}
+path = pathlib.Path(${JSON.stringify(`${runtimeHome}/daemon.env`)})
+path.parent.mkdir(parents=True, exist_ok=True)
+text = path.read_text() if path.exists() else ""
+lines = [ln for ln in text.splitlines() if ln.strip() and ln.split("=", 1)[0] not in keys]
+for k, v in keys.items():
+  lines.append(f"{k}={v}")
+path.write_text("\\n".join(lines) + "\\n")
 print("ok")
 `.trim();
   await execInSession(sessionId, `python3 - <<'PY'\n${py}\nPY`, {
     timeout: 30,
     sandboxId,
+    runtime,
   }).catch(() => undefined);
 }
 
@@ -1660,22 +1928,25 @@ export function sandboxPublicBase(sandboxId: string, port: number): string {
   const domain =
     process.env.XIBECODE_E2B_PREVIEW_DOMAIN?.trim() ||
     process.env.E2B_DOMAIN?.trim() ||
-    'e2b.app';
+    "e2b.app";
   return `https://${port}-${sandboxId}.${domain}`;
 }
 
 export async function appInboxUrl(
   sessionId: string,
   sandboxId?: string,
+  runtime: AgentRuntime = "xibecode",
 ): Promise<string> {
   if (sandboxId) {
-    await ensureGatewaySession(sessionId, sandboxId).catch(() => undefined);
+    await ensureGatewaySession(sessionId, sandboxId, runtime).catch(
+      () => undefined,
+    );
   }
   const host = await getSandboxPreviewHost(sessionId, APP_INBOX_PORT);
-  if (host) return host.replace(/\/$/, '');
+  if (host) return host.replace(/\/$/, "");
   if (sandboxId) return sandboxPublicBase(sandboxId, APP_INBOX_PORT);
   throw new Error(
-    'App inbox host unavailable. Wake the sandbox and tap Update CLI (needs xibecode 1.17.5+ for port 8790).',
+    "App inbox host unavailable. Wake or restart the sandbox and try again; the selected runtime must expose port 8790.",
   );
 }
 
@@ -1683,13 +1954,13 @@ export async function appInboxFetch(
   sessionId: string,
   path: string,
   init: RequestInit = {},
-  opts?: { sandboxId?: string },
+  opts?: { sandboxId?: string; runtime?: AgentRuntime },
 ): Promise<Response> {
-  const base = await appInboxUrl(sessionId, opts?.sandboxId);
+  const base = await appInboxUrl(sessionId, opts?.sandboxId, opts?.runtime);
   const headers = new Headers(init.headers);
   const secret = appInboxSecret();
-  if (secret) headers.set('authorization', `Bearer ${secret}`);
-  if (!headers.has('accept')) headers.set('accept', 'application/json');
+  if (secret) headers.set("authorization", `Bearer ${secret}`);
+  if (!headers.has("accept")) headers.set("accept", "application/json");
   return fetch(`${base}${path}`, { ...init, headers });
 }
 
@@ -1705,18 +1976,26 @@ export type SandboxShare = {
 export async function createSandboxShare(
   sessionId: string,
   path: string,
-  opts?: { sandboxId?: string; name?: string },
+  opts?: { sandboxId?: string; runtime?: AgentRuntime; name?: string },
 ): Promise<SandboxShare> {
   if (opts?.sandboxId) {
-    await ensureGatewaySession(sessionId, opts.sandboxId).catch(() => undefined);
+    await ensureGatewaySession(sessionId, opts.sandboxId, opts.runtime).catch(
+      () => undefined,
+    );
   }
   const host = await getSandboxPreviewHost(sessionId, 8788);
-  if (!host) throw new Error('Wake/file-share service is not reachable; wake the sandbox and try again.');
+  if (!host)
+    throw new Error(
+      "Wake/file-share service is not reachable; wake the sandbox and try again.",
+    );
   const secret = appInboxSecret();
-  const headers = new Headers({ 'content-type': 'application/json', accept: 'application/json' });
-  if (secret) headers.set('authorization', `Bearer ${secret}`);
-  const res = await fetch(`${host.replace(/\/$/, '')}/share`, {
-    method: 'POST',
+  const headers = new Headers({
+    "content-type": "application/json",
+    accept: "application/json",
+  });
+  if (secret) headers.set("authorization", `Bearer ${secret}`);
+  const res = await fetch(`${host.replace(/\/$/, "")}/share`, {
+    method: "POST",
     headers,
     body: JSON.stringify({ path, name: opts?.name }),
     signal: AbortSignal.timeout(20_000),
@@ -1733,7 +2012,7 @@ export async function createSandboxShare(
   }
   return {
     token: String(data.token),
-    name: String(data.name || opts?.name || path.split('/').pop() || 'file'),
+    name: String(data.name || opts?.name || path.split("/").pop() || "file"),
     path: String(data.path || path),
     url: String(data.url),
     expiresAt: data.expiresAt ? String(data.expiresAt) : undefined,

@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
-import { getSessionUser } from '@/lib/auth';
-import { approvePairingCode, listPairings } from '@/lib/gateway-client';
-import { getInstance } from '@/lib/store';
+import { NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth";
+import { approvePairingCode, listPairings } from "@/lib/gateway-client";
+import { getInstance } from "@/lib/store";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -9,16 +9,20 @@ export async function GET(_req: Request, ctx: Ctx) {
   const started = performance.now();
   const user = await getSessionUser();
   if (!user) {
-    return NextResponse.json({ error: 'Login required' }, { status: 401 });
+    return NextResponse.json({ error: "Login required" }, { status: 401 });
   }
   const { id } = await ctx.params;
   const inst = await getInstance(user.id, id);
   if (!inst) {
-    return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+    return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
   try {
-    const pairing = await listPairings(inst.sessionId, inst.sandboxId);
-    console.info('[timing] instance pairing', {
+    const pairing = await listPairings(
+      inst.sessionId,
+      inst.sandboxId,
+      inst.runtime || "xibecode",
+    );
+    console.info("[timing] instance pairing", {
       instanceId: id,
       ms: Math.round(performance.now() - started),
     });
@@ -31,20 +35,21 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function POST(req: Request, ctx: Ctx) {
   const user = await getSessionUser();
   if (!user) {
-    return NextResponse.json({ error: 'Login required' }, { status: 401 });
+    return NextResponse.json({ error: "Login required" }, { status: 401 });
   }
   const { id } = await ctx.params;
   const inst = await getInstance(user.id, id);
   if (!inst) {
-    return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+    return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
   const body = (await req.json()) as { code?: string; platform?: string };
   try {
     const result = await approvePairingCode(
       inst.sessionId,
-      String(body.code || ''),
-      String(body.platform || 'telegram'),
+      String(body.code || ""),
+      String(body.platform || "telegram"),
       inst.sandboxId,
+      inst.runtime || "xibecode",
     );
     return NextResponse.json(result, { status: result.ok ? 200 : 400 });
   } catch (e) {

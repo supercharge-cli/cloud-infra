@@ -1,7 +1,7 @@
 /**
  * Admin-only operations: provision sandboxes, tear down, manage any user.
  */
-import { addBillingPeriod, isSubscriptionActive } from './billing';
+import { addBillingPeriod, isSubscriptionActive } from "./billing";
 import {
   bootstrapAppInbox,
   createGatewaySession,
@@ -9,7 +9,7 @@ import {
   execInSession,
   restartDaemon,
   wakeSession,
-} from './gateway-client';
+} from "./gateway-client";
 import {
   adminUpdateInstance,
   createInstanceRecord,
@@ -27,7 +27,7 @@ import {
   publicUser,
   createUser,
   type UserRole,
-} from './store';
+} from "./store";
 
 export async function adminProvisionInstance(input: {
   /** Existing user id */
@@ -40,46 +40,71 @@ export async function adminProvisionInstance(input: {
   /** Create user if email not found (requires password) */
   createUserIfMissing?: boolean;
   password?: string;
-}): Promise<{ instance: ReturnType<typeof publicInstance>; owner: PublicUser; createdUser?: boolean }> {
-  let userId = input.userId?.trim() || '';
+  runtime?: "xibecode" | "supercharge";
+}): Promise<{
+  instance: ReturnType<typeof publicInstance>;
+  owner: PublicUser;
+  createdUser?: boolean;
+}> {
+  let userId = input.userId?.trim() || "";
   let owner = userId ? await findUserById(userId) : null;
   let createdUser = false;
 
   if (!owner && input.email) {
     owner = await findUserByEmail(input.email);
     if (!owner && input.createUserIfMissing) {
-      const pw = (input.password || '').trim();
+      const pw = (input.password || "").trim();
       if (pw.length < 8) {
-        throw Object.assign(new Error('password min 8 chars when creating user'), { status: 400 });
+        throw Object.assign(
+          new Error("password min 8 chars when creating user"),
+          { status: 400 },
+        );
       }
-      owner = await createUser(input.email, pw, { role: 'user' });
+      owner = await createUser(input.email, pw, { role: "user" });
       createdUser = true;
     }
   }
 
   if (!owner) {
-    throw Object.assign(new Error('User not found — pass userId or email'), { status: 404 });
+    throw Object.assign(new Error("User not found — pass userId or email"), {
+      status: 404,
+    });
   }
   userId = owner.id;
 
-  const session = await createGatewaySession({ strategy: 'sandbox_full' });
-  const days = Math.max(1, Math.min(3650, Math.round(Number(input.days) || 0))) || undefined;
+  const runtime = input.runtime === "supercharge" ? "supercharge" : "xibecode";
+  const session = await createGatewaySession({
+    strategy: "sandbox_full",
+    runtime,
+  });
+  const days =
+    Math.max(1, Math.min(3650, Math.round(Number(input.days) || 0))) ||
+    undefined;
   const paidUntil = addBillingPeriod(new Date(), days);
 
   const instance = await createInstanceRecord({
     userId,
-    name: (input.name || 'workspace').trim() || 'workspace',
+    name: (input.name || "workspace").trim() || "workspace",
     sessionId: session.sessionId,
     sandboxId: session.sandboxId,
+    runtime,
   });
-  await bootstrapAppInbox(session.sessionId, session.sandboxId).catch(() => undefined);
-  const { applySavedPollinationsToNewInstance } = await import('@/lib/pollinations-account');
-  await applySavedPollinationsToNewInstance({ userId, instance }).catch(() => undefined);
+  await bootstrapAppInbox(
+    session.sessionId,
+    session.sandboxId,
+    instance.id,
+    runtime,
+  ).catch(() => undefined);
+  const { applySavedPollinationsToNewInstance } =
+    await import("@/lib/pollinations-account");
+  await applySavedPollinationsToNewInstance({ userId, instance }).catch(
+    () => undefined,
+  );
 
   const withBilling = await adminUpdateInstance(instance.id, {
     paidUntil,
-    billingStatus: 'active',
-    status: 'running',
+    billingStatus: "active",
+    status: "running",
   });
 
   return {
@@ -95,7 +120,7 @@ export async function adminDestroyInstance(
 ): Promise<{ ok: true; hard: boolean }> {
   const inst = await getInstanceById(instanceId);
   if (!inst) {
-    throw Object.assign(new Error('Instance not found'), { status: 404 });
+    throw Object.assign(new Error("Instance not found"), { status: 404 });
   }
 
   try {
@@ -109,7 +134,7 @@ export async function adminDestroyInstance(
     return { ok: true, hard: true };
   }
 
-  await adminUpdateInstance(instanceId, { status: 'destroyed' });
+  await adminUpdateInstance(instanceId, { status: "destroyed" });
   return { ok: true, hard: false };
 }
 
@@ -120,15 +145,19 @@ export async function adminWakeInstance(instanceId: string): Promise<{
   instance?: ReturnType<typeof publicInstance>;
 }> {
   const inst = await getInstanceById(instanceId);
-  if (!inst) throw Object.assign(new Error('Instance not found'), { status: 404 });
+  if (!inst)
+    throw Object.assign(new Error("Instance not found"), { status: 404 });
 
   const result = await wakeSession(inst.sessionId, {
     sandboxId: inst.sandboxId,
+    runtime: inst.runtime || "xibecode",
     restartDaemon: true,
   });
   const next = await adminUpdateInstance(instanceId, {
-    status: result.ok ? 'running' : 'error',
-    lastError: result.ok ? undefined : (result.message || result.logs.join('\n')).slice(0, 500),
+    status: result.ok ? "running" : "error",
+    lastError: result.ok
+      ? undefined
+      : (result.message || result.logs.join("\n")).slice(0, 500),
   });
   return {
     ok: result.ok,
@@ -143,8 +172,13 @@ export async function adminRestartDaemon(instanceId: string): Promise<{
   logs: string[];
 }> {
   const inst = await getInstanceById(instanceId);
-  if (!inst) throw Object.assign(new Error('Instance not found'), { status: 404 });
-  return restartDaemon(inst.sessionId, inst.sandboxId);
+  if (!inst)
+    throw Object.assign(new Error("Instance not found"), { status: 404 });
+  return restartDaemon(
+    inst.sessionId,
+    inst.sandboxId,
+    inst.runtime || "xibecode",
+  );
 }
 
 export async function adminExecOnInstance(
@@ -159,31 +193,38 @@ export async function adminExecOnInstance(
   cwd: string;
 }> {
   const inst = await getInstanceById(instanceId);
-  if (!inst) throw Object.assign(new Error('Instance not found'), { status: 404 });
-  if (inst.status === 'destroyed') {
-    throw Object.assign(new Error('Instance destroyed'), { status: 410 });
+  if (!inst)
+    throw Object.assign(new Error("Instance not found"), { status: 404 });
+  if (inst.status === "destroyed") {
+    throw Object.assign(new Error("Instance destroyed"), { status: 410 });
   }
 
-  const cwd = (opts?.cwd || '/home/user/workspace').trim() || '/home/user/workspace';
+  const cwd =
+    (opts?.cwd || "/home/user/workspace").trim() || "/home/user/workspace";
   const timeout = Math.min(300, Math.max(5, Math.round(opts?.timeout || 120)));
   const result = await execInSession(inst.sessionId, command, {
     timeout,
     cwd,
     sandboxId: inst.sandboxId,
+    runtime: inst.runtime || "xibecode",
   });
   const exitCode =
-    typeof result.exitCode === 'number' ? result.exitCode : result.success === false ? 1 : 0;
+    typeof result.exitCode === "number"
+      ? result.exitCode
+      : result.success === false
+        ? 1
+        : 0;
 
   await adminUpdateInstance(instanceId, {
-    status: 'running',
+    status: "running",
     lastError: undefined,
   }).catch(() => undefined);
 
   return {
     ok: exitCode === 0 && !result.error,
     exitCode,
-    stdout: String(result.stdout || '').slice(0, 80_000),
-    stderr: String(result.stderr || result.message || '').slice(0, 80_000),
+    stdout: String(result.stdout || "").slice(0, 80_000),
+    stderr: String(result.stderr || result.message || "").slice(0, 80_000),
     cwd,
   };
 }
@@ -197,16 +238,18 @@ export async function adminDeleteUser(
   deletedOrders: number;
 }> {
   const user = await findUserById(userId);
-  if (!user) throw Object.assign(new Error('User not found'), { status: 404 });
+  if (!user) throw Object.assign(new Error("User not found"), { status: 404 });
 
   const instances = await listInstancesForUser(userId);
   let destroyedInstances = 0;
 
   if (opts?.destroyInstances !== false) {
     for (const inst of instances) {
-      if (inst.status === 'destroyed' && !opts?.hardDeleteInstances) continue;
+      if (inst.status === "destroyed" && !opts?.hardDeleteInstances) continue;
       try {
-        await adminDestroyInstance(inst.id, { hard: Boolean(opts?.hardDeleteInstances) });
+        await adminDestroyInstance(inst.id, {
+          hard: Boolean(opts?.hardDeleteInstances),
+        });
         destroyedInstances += 1;
       } catch {
         /* continue */
@@ -225,7 +268,8 @@ export async function adminReassignInstance(
   newUserId: string,
 ): Promise<Instance> {
   const next = await reassignInstance(instanceId, newUserId);
-  if (!next) throw Object.assign(new Error('Instance not found'), { status: 404 });
+  if (!next)
+    throw Object.assign(new Error("Instance not found"), { status: 404 });
   return next;
 }
 
@@ -234,12 +278,14 @@ export async function adminSetRole(
   role: UserRole,
   selfId: string,
 ): Promise<PublicUser> {
-  if (userId === selfId && role !== 'admin') {
-    throw Object.assign(new Error('Cannot demote your own admin account'), { status: 400 });
+  if (userId === selfId && role !== "admin") {
+    throw Object.assign(new Error("Cannot demote your own admin account"), {
+      status: 400,
+    });
   }
-  const { setUserRole } = await import('./store');
+  const { setUserRole } = await import("./store");
   const user = await setUserRole(userId, role);
-  if (!user) throw Object.assign(new Error('User not found'), { status: 404 });
+  if (!user) throw Object.assign(new Error("User not found"), { status: 404 });
   return user;
 }
 
