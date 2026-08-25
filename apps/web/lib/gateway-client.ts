@@ -1040,11 +1040,8 @@ export async function writeSandboxConfig(
           `SUPERAGENT_WAKE_PORT=8788`,
           `SUPERAGENT_RUNTIME=supercharge`,
           `SUPERCHARGE_RUNTIME=supercharge`,
+          `SUPERCHARGE_RUNTIME_MODE=e2b`,
           `SUPERAGENT_APP_INBOX_PORT=8790`,
-          `AGENT_BROWSER_STREAM_PORT=9223`,
-          `AGENT_BROWSER_STREAM_QUALITY=40`,
-          `AGENT_BROWSER_STREAM_MAX_WIDTH=960`,
-          `AGENT_BROWSER_STREAM_MAX_HEIGHT=540`,
           input.instanceId ? `SUPERAGENT_INSTANCE_ID=${input.instanceId}` : "",
           mediaBase ? `SUPERAGENT_PUBLIC_MEDIA_BASE=${mediaBase}` : "",
           sandboxWakeHttp ? `SUPERAGENT_TG_WEBHOOK_URL=${tgWebhookUrl}` : "",
@@ -1112,7 +1109,7 @@ export async function writeSandboxConfig(
     `api_base_url = ${tomlQuote(providerBaseUrl)}`,
     `env_key = ${tomlQuote(providerKeyEnv)}`,
     `api_backend = ${tomlQuote(providerFormat === "anthropic" ? "messages" : "chat_completions")}`,
-    `agent_type = ${tomlQuote("supercharge-core")}`,
+    `agent_type = ${tomlQuote("supercharge-e2b")}`,
     "context_window = 128000",
     "",
   ].join("\n");
@@ -2146,4 +2143,59 @@ export async function createSandboxShare(
     url: String(data.url),
     expiresAt: data.expiresAt ? String(data.expiresAt) : undefined,
   };
+}
+
+/** Start or stop an explicit Supercharge browser handoff in an E2B session. */
+export async function setBrowserHandoff(
+  sessionId: string,
+  action: "start" | "stop",
+  minutes = 10,
+): Promise<{ success: boolean; handoff?: boolean; expiresAt?: number; message?: string }> {
+  const res = await gwFetch(
+    `/sessions/${encodeURIComponent(sessionId)}/browser/handoff`,
+    { method: "POST", body: JSON.stringify({ action, minutes }) },
+  );
+  const data = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    ok?: boolean;
+    handoff?: boolean;
+    expiresAt?: number;
+    message?: string;
+    error?: string;
+  };
+  if (!res.ok) {
+    throw new Error(data.message || data.error || `Browser handoff failed (${res.status})`);
+  }
+  return {
+    success: data.success ?? data.ok ?? true,
+    handoff: data.handoff,
+    expiresAt: data.expiresAt,
+    message: data.message,
+  };
+}
+
+/** Mint a short-lived, single-use ticket for the persistent gateway noVNC tunnel. */
+export async function createBrowserVncTicket(
+  sessionId: string,
+): Promise<{ ticket: string; expiresInSeconds: number }> {
+  const res = await gwFetch(
+    `/sessions/${encodeURIComponent(sessionId)}/browser/vnc-ticket`,
+    { method: "POST", body: "{}" },
+  );
+  const data = (await res.json().catch(() => ({}))) as {
+    ticket?: string;
+    expiresInSeconds?: number;
+    message?: string;
+    error?: string;
+  };
+  if (!res.ok || !data.ticket) {
+    throw new Error(data.message || data.error || "Browser handoff ticket was not issued");
+  }
+  return { ticket: data.ticket, expiresInSeconds: data.expiresInSeconds || 60 };
+}
+
+/** Build the ticket-scoped gateway WebSocket URL used by the noVNC browser client. */
+export function browserVncWebSocketUrl(sessionId: string, ticket: string): string {
+  const base = gatewayBase().replace(/^http:/i, "ws:").replace(/^https:/i, "wss:");
+  return `${base}/sessions/${encodeURIComponent(sessionId)}/browser/vnc?ticket=${encodeURIComponent(ticket)}`;
 }

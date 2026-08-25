@@ -1795,6 +1795,7 @@ export function Dashboard({ email }: { email: string }) {
           <SandboxWorkspace
             instanceId={selectedInst.id}
             sandboxId={selectedInst.sandboxId}
+            runtime={selectedInst.runtime || 'xibecode'}
             disabled={
               selectedInst.paid === false ||
               selectedInst.billingStatus === "past_due"

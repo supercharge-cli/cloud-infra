@@ -63,12 +63,14 @@ class ComputerPage extends StatelessWidget {
     required this.instanceName,
     required this.onClose,
     required this.onSelectTab,
+    this.onBrowserHandoff,
   });
 
   final ComputerState state;
   final String instanceName;
   final VoidCallback onClose;
   final ValueChanged<String> onSelectTab;
+  final Future<void> Function()? onBrowserHandoff;
 
   @override
   Widget build(BuildContext context) {
@@ -151,6 +153,12 @@ class ComputerPage extends StatelessWidget {
                             ),
                           ),
                         ),
+                        if (onBrowserHandoff != null)
+                          IconButton(
+                            tooltip: 'Take browser control',
+                            onPressed: onBrowserHandoff,
+                            icon: const Icon(Icons.security, size: 20),
+                          ),
                       ],
                     ),
                   ),

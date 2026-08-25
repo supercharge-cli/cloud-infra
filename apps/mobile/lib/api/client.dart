@@ -558,4 +558,21 @@ class VectraClient {
       client.close();
     }
   }
+
+  Future<String> startBrowserHandoff(String id, {int minutes = 10}) async {
+    await _json('POST', '/api/instances/$id/computer/handoff', body: {
+      'action': 'start',
+      'minutes': minutes.clamp(1, 30),
+    });
+    final ticket = await _json('POST', '/api/instances/$id/computer/vnc-ticket', body: {});
+    final wsUrl = '${ticket['wsUrl'] ?? ''}';
+    if (wsUrl.isEmpty) throw ApiException(502, 'Browser handoff ticket was not issued.');
+    return wsUrl;
+  }
+
+  Future<void> stopBrowserHandoff(String id) async {
+    await _json('POST', '/api/instances/$id/computer/handoff', body: {
+      'action': 'stop',
+    });
+  }
 }

@@ -12,6 +12,7 @@ import {
   Save,
   Share2,
 } from 'lucide-react';
+import { BrowserHandoffView } from './browser-handoff-view';
 
 type WorkspaceEntry = {
   name: string;
@@ -22,6 +23,7 @@ type WorkspaceEntry = {
 type Props = {
   instanceId: string;
   sandboxId?: string;
+  runtime?: 'xibecode' | 'supercharge';
   disabled?: boolean;
 };
 
@@ -55,7 +57,7 @@ function frameData(event: BrowserEvent): string | null {
   return `data:image/jpeg;base64,${candidate}`;
 }
 
-export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Props) {
+export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', disabled = false }: Props) {
   const [tab, setTab] = useState<'browser' | 'files'>('browser');
   const [directory, setDirectory] = useState('/home/user/workspace');
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
@@ -73,6 +75,8 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
   const [browserSelector, setBrowserSelector] = useState('');
   const [browserText, setBrowserText] = useState('');
   const [browserKey, setBrowserKey] = useState('Enter');
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const [handoffWsUrl, setHandoffWsUrl] = useState('');
 
   const loadDirectory = useCallback(async (path: string) => {
     setLoadingFiles(true);
@@ -252,6 +256,37 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
     }
   }
 
+  async function setBrowserHandoff(action: 'start' | 'stop') {
+    if (handoffBusy) return;
+    setHandoffBusy(true);
+    setMessage('');
+    try {
+      const handoff = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action, minutes: 10 }),
+      });
+      const data = await handoff.json().catch(() => ({}));
+      if (!handoff.ok) throw new Error(data.error || 'Browser handoff request failed');
+      if (action === 'stop') {
+        setHandoffWsUrl('');
+        setMessage('Browser control returned to Supercharge.');
+        return;
+      }
+      const ticket = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/vnc-ticket`, {
+        method: 'POST',
+      });
+      const ticketData = await ticket.json().catch(() => ({}));
+      if (!ticket.ok || !ticketData.wsUrl) throw new Error(ticketData.error || 'Browser handoff ticket failed');
+      setHandoffWsUrl(String(ticketData.wsUrl));
+      setMessage('Browser handoff is active in this tab. Complete any login or verification, then return control.');
+    } catch (error) {
+      setMessage((error as Error).message);
+    } finally {
+      setHandoffBusy(false);
+    }
+  }
+
   const tabs = [
     { id: 'browser' as const, label: 'Browser', icon: Monitor },
     { id: 'files' as const, label: 'Files', icon: File },
@@ -296,11 +331,27 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
         <div className="overflow-hidden rounded-xl border border-zinc-800 bg-black">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2 text-xs text-zinc-400">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-              <span>Computer stream · port 9223 · {browserStatus}</span>
-              {previewHosts.browser ? <a href={previewHosts.browser} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">Open raw port</a> : null}
+              <span>Computer stream · {browserStatus}</span>
+              {runtime === 'supercharge' ? <span className="text-emerald-400">E2B Playwright</span> : null}
             </div>
             {sandboxId ? <span className="font-mono text-zinc-600">{sandboxId.slice(0, 16)}…</span> : null}
           </div>
+          {runtime === 'supercharge' ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 bg-amber-500/5 p-3 text-xs">
+              <p className="text-amber-200/80">Use handoff only for login, MFA, OAuth, CAPTCHA, or another action that requires you. It opens inside this browser tab and expires automatically.</p>
+              <div className="flex gap-2">
+                <button type="button" disabled={disabled || handoffBusy || Boolean(handoffWsUrl)} onClick={() => void setBrowserHandoff('start')} className="rounded border border-amber-400/50 px-3 py-1.5 text-amber-100 hover:bg-amber-400/10 disabled:opacity-50">Take control</button>
+                <button type="button" disabled={disabled || handoffBusy || !handoffWsUrl} onClick={() => void setBrowserHandoff('stop')} className="rounded border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Return control</button>
+              </div>
+            </div>
+          ) : null}
+          {handoffWsUrl ? (
+            <div className="min-h-[520px] bg-zinc-950">
+              <BrowserHandoffView wsUrl={handoffWsUrl} onDisconnected={() => setHandoffWsUrl('')} />
+            </div>
+          ) : (
+          <>
+          {runtime !== 'supercharge' ? (
           <div className="grid gap-2 border-b border-zinc-800 bg-zinc-950 p-3 text-xs sm:grid-cols-2">
             <div className="flex gap-2 sm:col-span-2">
               <input value={browserUrl} onChange={(event) => setBrowserUrl(event.target.value)} placeholder="https://example.com" className="min-w-0 flex-1 rounded border border-zinc-800 bg-black px-2 py-1.5 text-zinc-200 outline-none focus:border-sky-700" />
@@ -321,6 +372,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
             </div>
             <p className="sm:col-span-2 text-[10px] text-amber-500/80">Every action is sent through the authenticated app route and requires browser control to be enabled in the sandbox environment.</p>
           </div>
+          ) : null}
           <div className="flex min-h-[320px] items-center justify-center bg-zinc-950 p-2">
             {frame ? (
               // The stream is view-only by design; all browser input remains approval-gated elsewhere.
@@ -332,6 +384,8 @@ export function SandboxWorkspace({ instanceId, sandboxId, disabled = false }: Pr
               </div>
             )}
           </div>
+          </>
+          )}
         </div>
       ) : (
         <>

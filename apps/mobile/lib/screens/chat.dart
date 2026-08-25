@@ -21,6 +21,7 @@ import '../chat/draft.dart';
 import '../chat/notifications.dart';
 import '../chat/computer.dart';
 import '../chat/preview_urls.dart';
+import '../screens/browser_handoff.dart';
 import '../screens/preview.dart';
 import '../state/session.dart';
 import '../theme.dart';
@@ -85,6 +86,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool get working => turnStartedAt != null;
   String get instanceName => inst?.name ?? widget.instance?.name ?? 'Chat';
   AgentRuntime get runtime => inst?.runtime ?? widget.instance?.runtime ?? AgentRuntime.supercharge;
+  bool get _isSupercharge =>
+      runtime == AgentRuntime.supercharge;
 
   Duration get elapsed =>
       turnStartedAt == null ? Duration.zero : DateTime.now().difference(turnStartedAt!);
@@ -1785,6 +1788,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 computer.tab = tab;
                 _syncBrowserStream();
               },
+              onBrowserHandoff: _isSupercharge ? _openBrowserHandoff : null,
             ),
             transitionsBuilder: (ctx, anim, sec, child) {
               return FadeTransition(opacity: anim, child: child);
@@ -1795,6 +1799,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _computerOpen = false;
           if (mounted) _syncBrowserStream();
         });
+  }
+
+  Future<void> _openBrowserHandoff() async {
+    try {
+      final wsUrl = await api.startBrowserHandoff(id);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => BrowserHandoffScreen(wsUrl: wsUrl),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')),
+        );
+      }
+    } finally {
+      try {
+        await api.stopBrowserHandoff(id);
+      } catch (_) {
+        // The E2B sidecar expires an abandoned handoff automatically.
+      }
+    }
   }
 
   void _openPreview([String? url]) {

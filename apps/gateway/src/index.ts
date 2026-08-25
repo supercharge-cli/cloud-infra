@@ -3,10 +3,11 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import { URL } from "node:url";
 import { Sandbox } from "e2b";
+import { WebSocket, WebSocketServer } from "ws";
 
 type SandboxLike = {
   sandboxId?: string;
@@ -207,6 +208,10 @@ const previewDomain =
 const maxExportBytes =
   Math.max(1, Number(process.env.XIBECODE_EXPORT_MAX_MB || 64)) * 1024 * 1024;
 const sessions = new Map<string, SessionRecord>();
+const browserVncTickets = new Map<
+  string,
+  { sessionId: string; expiresAt: number }
+>();
 const defaultWorkspaceRoot =
   process.env.XIBECODE_SANDBOX_WORKSPACE_ROOT?.trim() || "/home/user/workspace";
 const cycleWaiters = new Map<string, Promise<void>>();
@@ -310,6 +315,42 @@ async function resolvePreviewHost(
   }
   // Fallback host template for environments where SDK host helpers are unavailable.
   return `https://${targetPort}-${session.sandboxId}.${previewDomain}`;
+}
+
+function daemonAuthorizationHeaders(): Record<string, string> {
+  const token =
+    process.env.XIBECODE_APP_INBOX_SECRET?.trim() ||
+    process.env.XIBECODE_GATEWAY_TOKEN?.trim() ||
+    "";
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+async function superchargeDaemonFetch(
+  session: SessionRecord,
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  if (session.runtime !== "supercharge") {
+    throw new Error("Browser handoff is available only for Supercharge sessions");
+  }
+  const base = await resolvePreviewHost(session, 8790);
+  const headers = new Headers(init.headers);
+  for (const [name, value] of Object.entries(daemonAuthorizationHeaders())) {
+    headers.set(name, value);
+  }
+  return fetch(`${base.replace(/\/$/, "")}${path}`, { ...init, headers });
+}
+
+function issueBrowserVncTicket(sessionId: string): string {
+  const ticket = randomBytes(32).toString("base64url");
+  browserVncTickets.set(ticket, { sessionId, expiresAt: Date.now() + 60_000 });
+  return ticket;
+}
+
+function consumeBrowserVncTicket(ticket: string, sessionId: string): boolean {
+  const record = browserVncTickets.get(ticket);
+  browserVncTickets.delete(ticket);
+  return Boolean(record && record.sessionId === sessionId && record.expiresAt > Date.now());
 }
 
 async function readJson<T>(req: IncomingMessage): Promise<T> {
@@ -1399,6 +1440,68 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    const browserHandoffMatch = url.pathname.match(
+      /^\/sessions\/([^/]+)\/browser\/handoff$/,
+    );
+    if (method === "POST" && browserHandoffMatch) {
+      const sessionId = decodeURIComponent(browserHandoffMatch[1] || "");
+      const session = sessions.get(sessionId);
+      if (!session) {
+        sendJson(res, 404, { success: false, error: true, message: "Session not found" });
+        return;
+      }
+      if (session.runtime !== "supercharge") {
+        sendJson(res, 404, { success: false, error: true, message: "Browser handoff is available only for Supercharge sessions" });
+        return;
+      }
+      const body = await readJson<{ action?: unknown; minutes?: unknown }>(req);
+      const action = String(body.action || "").trim().toLowerCase();
+      if (action !== "start" && action !== "stop") {
+        sendJson(res, 400, { success: false, error: true, message: "action must be start or stop" });
+        return;
+      }
+      const minutes = Math.min(Math.max(Number(body.minutes) || 10, 1), 30);
+      try {
+        const upstream = await superchargeDaemonFetch(session, "/v1/computer/handoff", {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ action, minutes }),
+        });
+        const text = await upstream.text();
+        sendJson(res, upstream.status, text ? JSON.parse(text) : { success: upstream.ok });
+      } catch (error) {
+        sendJson(res, 502, { success: false, error: true, message: (error as Error).message });
+      }
+      return;
+    }
+
+    const browserTicketMatch = url.pathname.match(
+      /^\/sessions\/([^/]+)\/browser\/vnc-ticket$/,
+    );
+    if (method === "POST" && browserTicketMatch) {
+      const sessionId = decodeURIComponent(browserTicketMatch[1] || "");
+      const session = sessions.get(sessionId);
+      if (!session || session.runtime !== "supercharge") {
+        sendJson(res, 404, { success: false, error: true, message: "Supercharge session not found" });
+        return;
+      }
+      try {
+        const status = await superchargeDaemonFetch(session, "/v1/computer/status");
+        const data = (await status
+          .json()
+          .catch(() => ({}))) as { connected?: boolean; handoff?: boolean };
+        if (!status.ok || !data?.connected || !data?.handoff) {
+          sendJson(res, 409, { success: false, error: true, message: "Browser handoff is not active" });
+          return;
+        }
+        const ticket = issueBrowserVncTicket(sessionId);
+        sendJson(res, 200, { success: true, ticket, expiresInSeconds: 60 });
+      } catch (error) {
+        sendJson(res, 502, { success: false, error: true, message: (error as Error).message });
+      }
+      return;
+    }
+
     // Live E2B state by sandbox id (works even if gateway session map is empty / sandbox paused)
     const sandboxStateMatch = url.pathname.match(
       /^\/sandboxes\/([^/]+)(?:\/state)?$/,
@@ -2074,6 +2177,51 @@ const server = createServer(async (req, res) => {
       error: true,
       message: error?.message || "Internal server error",
     });
+  }
+});
+
+const browserVncServer = new WebSocketServer({ noServer: true });
+
+async function relayBrowserVnc(client: WebSocket, session: SessionRecord): Promise<void> {
+  try {
+    const base = await resolvePreviewHost(session, 8790);
+    const upstreamUrl = `${base.replace(/^http/i, "ws").replace(/\/$/, "")}/v1/computer/browser/vnc`;
+    const upstream = new WebSocket(upstreamUrl, { headers: daemonAuthorizationHeaders() });
+    const closeBoth = () => {
+      if (client.readyState === WebSocket.OPEN) client.close();
+      if (upstream.readyState === WebSocket.OPEN) upstream.close();
+    };
+    client.on("message", (data, isBinary) => {
+      if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary: isBinary });
+    });
+    upstream.on("message", (data, isBinary) => {
+      if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary });
+    });
+    client.on("close", closeBoth);
+    client.on("error", closeBoth);
+    upstream.on("close", closeBoth);
+    upstream.on("error", closeBoth);
+  } catch {
+    client.close(1011, "Unable to connect browser handoff");
+  }
+}
+
+server.on("upgrade", (req, socket, head) => {
+  try {
+    const url = new URL(req.url || "/", `http://${req.headers.host || `localhost:${port}`}`);
+    const match = url.pathname.match(/^\/sessions\/([^/]+)\/browser\/vnc$/);
+    const sessionId = match ? decodeURIComponent(match[1] || "") : "";
+    const ticket = url.searchParams.get("ticket") || "";
+    const session = sessions.get(sessionId);
+    if (!session || session.runtime !== "supercharge" || !consumeBrowserVncTicket(ticket, sessionId)) {
+      socket.destroy();
+      return;
+    }
+    browserVncServer.handleUpgrade(req, socket, head, (client) => {
+      void relayBrowserVnc(client, session);
+    });
+  } catch {
+    socket.destroy();
   }
 });
 
