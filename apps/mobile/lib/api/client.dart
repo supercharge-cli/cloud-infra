@@ -389,7 +389,7 @@ class VectraClient {
         .whereType<Map>()
         .map(
           (e) => BotCommand(
-            command: '${e['command']}',
+            command: '${e['command']}'.replaceFirst(RegExp(r'^/+'), ''),
             description: '${e['description']}',
           ),
         )

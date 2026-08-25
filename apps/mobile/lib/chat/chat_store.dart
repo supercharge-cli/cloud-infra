@@ -273,6 +273,7 @@ class ChatStore {
     if (id != null && id.isNotEmpty) targets.add(_eventsFile(dir, id));
     final encoded = jsonEncode(payload);
     for (final file in targets) {
+      await file.parent.create(recursive: true);
       final tmp = File('${file.path}.tmp');
       await tmp.writeAsString(encoded);
       await tmp.rename(file.path);

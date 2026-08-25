@@ -1,6 +1,6 @@
 import '../api/models.dart';
 
-const defaultBotCommands = <BotCommand>[
+const xibecodeBotCommands = <BotCommand>[
   BotCommand(command: 'start', description: 'Welcome + list commands'),
   BotCommand(command: 'help', description: 'Show available commands'),
   BotCommand(command: 'new', description: 'Start a new conversation (keeps previous in history)'),
@@ -29,15 +29,51 @@ const defaultBotCommands = <BotCommand>[
   BotCommand(command: 'deny', description: 'Deny a pending dangerous command'),
 ];
 
-final _slashOnly = {'start', 'help', 'new', 'reset', 'clear', 'stop', 'compact', 'status', 'queue', 'history', 'models', 'skills', 'update', 'mode'};
+const superchargeBotCommands = <BotCommand>[
+  BotCommand(command: 'new', description: 'Start a new conversation'),
+  BotCommand(command: 'start', description: 'Resume this session'),
+  BotCommand(command: 'stop', description: 'Pause agent turns'),
+  BotCommand(command: 'status', description: 'Show daemon control state'),
+  BotCommand(command: 'model', description: 'Inspect or set the requested model'),
+  BotCommand(command: 'update', description: 'Check for a Supercharge binary update (E2B)'),
+  BotCommand(command: 'help', description: 'Show available commands'),
+];
+
+/// Legacy alias — XibeCode stock list.
+const defaultBotCommands = xibecodeBotCommands;
+
+List<BotCommand> defaultBotCommandsFor(AgentRuntime runtime) =>
+    runtime == AgentRuntime.supercharge ? superchargeBotCommands : xibecodeBotCommands;
+
+final _xibecodeSlashOnly = {
+  'start',
+  'help',
+  'new',
+  'reset',
+  'clear',
+  'stop',
+  'compact',
+  'status',
+  'queue',
+  'history',
+  'models',
+  'skills',
+  'update',
+  'mode',
+};
+
+final _superchargeSlashOnly = {'new', 'start', 'stop', 'status', 'help', 'model', 'update'};
 
 /// Instant send from the palette — not all of these start an agent turn.
-bool commandSendsImmediately(String command) => _slashOnly.contains(command);
+bool commandSendsImmediately(String command, {AgentRuntime runtime = AgentRuntime.xibecode}) {
+  final set = runtime == AgentRuntime.supercharge ? _superchargeSlashOnly : _xibecodeSlashOnly;
+  return set.contains(command);
+}
 
 /// Slash commands that must not lock the composer as "Thinking…".
 /// `/new` / `/history` / `/help` finish immediately; treating them as a
 /// long agent turn left the send button disabled after the pane cleared.
-final _noAgentTurn = {
+final _xibecodeNoAgentTurn = {
   'start',
   'help',
   'new',
@@ -50,9 +86,15 @@ final _noAgentTurn = {
   'models',
   'skills',
   'mode',
+  'update',
 };
 
-bool commandStartsAgentTurn(String command) => !_noAgentTurn.contains(command);
+final _superchargeNoAgentTurn = {'new', 'start', 'stop', 'status', 'help', 'model', 'update'};
+
+bool commandStartsAgentTurn(String command, {AgentRuntime runtime = AgentRuntime.xibecode}) {
+  final set = runtime == AgentRuntime.supercharge ? _superchargeNoAgentTurn : _xibecodeNoAgentTurn;
+  return !set.contains(command);
+}
 
 String? slashCommandName(String text) {
   final t = text.trim();
@@ -64,9 +106,11 @@ String? slashCommandName(String text) {
   return cmd.replaceAll(RegExp(r'[^a-z0-9_].*$'), '');
 }
 
-bool isNewLaneCommand(String text) {
+bool isNewLaneCommand(String text, {AgentRuntime runtime = AgentRuntime.xibecode}) {
   final cmd = slashCommandName(text);
-  return cmd == 'new' || cmd == 'reset' || cmd == 'clear';
+  if (cmd == 'new') return true;
+  if (runtime == AgentRuntime.supercharge) return false;
+  return cmd == 'reset' || cmd == 'clear';
 }
 
 List<BotCommand> filterCommands(List<BotCommand> all, String input) {

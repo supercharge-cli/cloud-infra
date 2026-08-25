@@ -1283,6 +1283,84 @@ export function parseXibecodeVersion(text: string): string | null {
   return m ? m[1] : null;
 }
 
+function superchargeUpdateRepo(): string {
+  return (
+    process.env.SUPERCHARGE_E2B_UPDATE_REPO?.trim() || "iotserver24/supercharge"
+  );
+}
+
+export function superchargeE2bUpdateBaseUrl(): string {
+  return (
+    process.env.SUPERCHARGE_E2B_UPDATE_BASE_URL?.trim().replace(/\/+$/, "") ||
+    `https://github.com/${superchargeUpdateRepo()}/releases/latest/download`
+  );
+}
+
+async function fetchSuperchargeE2bLatestVersion(): Promise<string | null> {
+  const base = superchargeE2bUpdateBaseUrl();
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 8000);
+  try {
+    const res = await fetch(`${base}/e2b-manifest.json`, {
+      signal: ac.signal,
+      headers: { Accept: "application/json" },
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { version?: string };
+      if (data.version) return String(data.version).trim();
+    }
+  } catch {
+    /* fall through to GitHub API */
+  } finally {
+    clearTimeout(t);
+  }
+  try {
+    const ac2 = new AbortController();
+    const t2 = setTimeout(() => ac2.abort(), 8000);
+    const res = await fetch(
+      `https://api.github.com/repos/${superchargeUpdateRepo()}/releases/latest`,
+      {
+        signal: ac2.signal,
+        headers: { Accept: "application/vnd.github+json" },
+      },
+    );
+    clearTimeout(t2);
+    if (!res.ok) return "latest";
+    const data = (await res.json()) as { tag_name?: string };
+    return data.tag_name?.trim() || "latest";
+  } catch {
+    return "latest";
+  }
+}
+
+/** In-sandbox install of Supercharge daemon + CLI (existing VMs, no new template). */
+export function superchargeE2bInstallScript(): string {
+  const base = superchargeE2bUpdateBaseUrl();
+  const daemon = `${base}/supercharge-superagent-server-linux-x86_64`;
+  const cli = `${base}/supercharge-linux-x86_64`;
+  return [
+    "set +e",
+    'echo "--- pre version ---"',
+    "cat /var/lib/superagent/e2b-version 2>/dev/null || supercharge --version 2>&1 || true",
+    "TMP=/tmp/supercharge-e2b-update",
+    "mkdir -p \"$TMP\" /var/lib/superagent",
+    'echo "--- download daemon ---"',
+    `curl -fL --retry 3 -o \"$TMP/supercharge-superagent-server\" "${daemon}"`,
+    'echo "--- download cli ---"',
+    `curl -fL --retry 3 -o \"$TMP/supercharge\" "${cli}"`,
+    "chmod +x \"$TMP/supercharge-superagent-server\" \"$TMP/supercharge\"",
+    'echo "--- install ---"',
+    "sudo -n install -m 0755 \"$TMP/supercharge-superagent-server\" /usr/local/bin/supercharge-superagent-server",
+    "sudo -n install -m 0755 \"$TMP/supercharge\" /usr/local/bin/supercharge",
+    "sudo -n ln -sfn /usr/local/bin/supercharge /usr/local/bin/sc",
+    `curl -fsSL "${base}/e2b-manifest.json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" > /var/lib/superagent/e2b-version 2>/dev/null || date -u +%Y%m%dT%H%M%SZ > /var/lib/superagent/e2b-version`,
+    'echo "--- post version ---"',
+    "cat /var/lib/superagent/e2b-version 2>/dev/null || true",
+    "/usr/local/bin/supercharge --version 2>/dev/null || true",
+    "echo UPDATE_DONE",
+  ].join("\n");
+}
+
 /** Current CLI version inside the sandbox (+ npm latest from host when possible). */
 export async function getCliVersionInfo(
   sessionId: string,
@@ -1319,7 +1397,23 @@ export async function getCliVersionInfo(
   logs.push(redactSecrets(out.slice(0, 1200)));
   current = parseXibecodeVersion(out);
   if (runtime === "supercharge") {
-    return { current, latest: null, updateAvailable: false, logs };
+    let latest: string | null = null;
+    try {
+      latest = await fetchSuperchargeE2bLatestVersion();
+    } catch (error) {
+      logs.push(`latest: ${(error as Error).message}`);
+    }
+    const stamp = await execInSession(
+      sessionId,
+      "cat /var/lib/superagent/e2b-version 2>/dev/null || true",
+      { timeout: 20, sandboxId, runtime },
+    );
+    const stamped = String(stamp.stdout || "").trim();
+    if (stamped) current = stamped;
+    const updateAvailable = Boolean(
+      current && latest && current !== latest,
+    );
+    return { current, latest, updateAvailable, logs };
   }
 
   let latest: string | null = null;
@@ -1400,12 +1494,7 @@ export async function updateCliInSandbox(
 
   const shell =
     runtime === "supercharge"
-      ? [
-          "set +e",
-          'echo "--- supercharge version ---"',
-          "supercharge --version 2>&1 || sc --version 2>&1 || true",
-          "echo UPDATE_DONE",
-        ].join("\n")
+      ? superchargeE2bInstallScript()
       : [
           "set +e",
           'echo "--- pre version ---"',
@@ -1427,10 +1516,12 @@ export async function updateCliInSandbox(
   const out = `${r.stdout || ""}\n${r.stderr || ""}\n${r.message || ""}`;
   logs.push(redactSecrets(out.slice(0, 5000)));
 
-  const from = parseXibecodeVersion(out.split("--- pre version ---")[1] || "");
-  const verified = parseXibecodeVersion(
-    out.split("--- post version ---").pop() || "",
-  );
+  const from = parseXibecodeVersion(out.split("--- pre version ---")[1] || "")
+    || String(out.split("--- pre version ---")[1] || "").trim().split("\n").find((l) => l.trim())
+    || null;
+  const verified = parseXibecodeVersion(out.split("--- post version ---").pop() || "")
+    || String(out.split("--- post version ---").pop() || "").trim().split("\n").find((l) => l.trim() && !l.includes("supercharge"))
+    || null;
 
   logs.push("--- restart daemon ---");
   const restart = await restartDaemon(sessionId, sandboxId, runtime);

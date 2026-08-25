@@ -29,10 +29,26 @@ class ChatImageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final path = event.localPath;
+    final url = event.url;
     final mine = event.isUser;
-    final image = path != null && File(path).existsSync()
-        ? Image.file(File(path), fit: BoxFit.cover, width: 240, height: 240)
-        : null;
+    Widget image;
+    if (path != null && File(path).existsSync()) {
+      image = Image.file(File(path), fit: BoxFit.cover, width: 240, height: 240);
+    } else if (url != null && url.startsWith('http')) {
+      image = Image.network(url, fit: BoxFit.cover, width: 240, height: 180);
+    } else {
+      image = ColoredBox(
+        color: const Color(0xFF18181B),
+        child: Center(
+          child: downloading
+              ? const CircularProgressIndicator(color: Vc.green, strokeWidth: 2)
+              : IconButton(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.broken_image_outlined, color: Vc.muted),
+                ),
+        ),
+      );
+    }
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -52,22 +68,11 @@ class ChatImageBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             GestureDetector(
-              onTap: image != null ? onOpen : onRetry,
+              onTap: onOpen,
               child: SizedBox(
                 width: 240,
                 height: 180,
-                child: image ??
-                    ColoredBox(
-                        color: const Color(0xFF18181B),
-                        child: Center(
-                          child: downloading
-                              ? const CircularProgressIndicator(color: Vc.green, strokeWidth: 2)
-                              : IconButton(
-                                  onPressed: onRetry,
-                                  icon: const Icon(Icons.broken_image_outlined, color: Vc.muted),
-                                ),
-                        ),
-                      ),
+                child: image,
               ),
             ),
             if (event.text.isNotEmpty)
@@ -81,12 +86,12 @@ class ChatImageBubble extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextButton.icon(
-                    onPressed: image != null ? onSave : onRetry,
+                    onPressed: onSave,
                     icon: const Icon(Icons.save_alt, size: 16),
-                    label: Text(image != null ? 'Save' : 'Load'),
+                    label: const Text('Save'),
                   ),
                   TextButton.icon(
-                    onPressed: image != null ? onShare : null,
+                    onPressed: onShare,
                     icon: const Icon(Icons.share_outlined, size: 16),
                     label: const Text('Share'),
                   ),
@@ -296,11 +301,26 @@ class ToolLine extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              event.name != null && event.name != event.text
-                  ? '${event.name} · ${event.text}'
-                  : event.text,
-              style: const TextStyle(fontSize: 12, color: Vc.muted),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  event.command != null && event.command!.isNotEmpty
+                      ? '\$ ${event.command}'
+                      : event.name != null && event.name != event.text
+                          ? '${event.name} · ${event.text}'
+                          : event.text,
+                  style: const TextStyle(fontSize: 12, color: Vc.muted, fontFamily: 'monospace', height: 1.35),
+                ),
+                if ((event.stdout ?? '').trim().isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      event.stdout!,
+                      style: const TextStyle(fontSize: 11, color: Color(0xFFD4D4D8), fontFamily: 'monospace', height: 1.35),
+                    ),
+                  ),
+              ],
             ),
           ),
         ],

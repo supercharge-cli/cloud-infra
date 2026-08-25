@@ -150,19 +150,19 @@ class ComputerState extends ChangeNotifier {
       browserLabel = (ev.label != null && ev.label!.isNotEmpty) ? ev.label : ev.text;
       if (ev.url != null && ev.url!.isNotEmpty) browserUrl = ev.url;
     }
-    if (ev.kind == 'shell' ||
-        (nextTab == 'terminal' && ev.command != null && ev.kind != 'file' && ev.kind != 'focus')) {
+    if (ev.kind != 'file' && ev.kind != 'focus') {
       _applyTerminal(ev);
     }
     notifyListeners();
   }
 
   void _applyTerminal(AppChatEvent ev) {
-    final cmd = (ev.command != null && ev.command!.isNotEmpty)
+    final hasCmd = ev.command != null && ev.command!.isNotEmpty;
+    if (!hasCmd && (ev.kind == 'browser' || ev.action == 'screenshot')) return;
+    final cmd = hasCmd
         ? ev.command!
         : (ev.label != null && ev.label!.isNotEmpty ? ev.label! : ev.text);
     if (cmd.isEmpty) return;
-    if (ev.kind == 'browser') return;
     if (ev.state != 'done') {
       lines.add(ComputerLine(command: cmd, running: true));
       _trim();

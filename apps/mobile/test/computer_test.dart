@@ -56,6 +56,8 @@ void main() {
     }));
     expect(s.tab, 'terminal');
     expect(s.browserLabel, 'Click @e2');
+    expect(s.lines.single.command, 'agent-browser click @e2');
+    expect(s.lines.single.running, isTrue);
     expect(computerTabForEvent(ev({
       'type': 'computer',
       'tab': 'browser',

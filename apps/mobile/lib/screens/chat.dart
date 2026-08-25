@@ -49,7 +49,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   late final ChatStore store;
   StreamSubscription<AppChatEvent>? _sub;
   StreamSubscription<ComputerFrame>? _browserSub;
-  List<BotCommand> commands = defaultBotCommands;
+  List<BotCommand> commands = defaultBotCommandsFor(AgentRuntime.supercharge);
   CloudInstance? inst;
   Map<String, dynamic>? cli;
   bool hideCliUpdate = false;
@@ -84,6 +84,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String get id => widget.instanceId;
   bool get working => turnStartedAt != null;
   String get instanceName => inst?.name ?? widget.instance?.name ?? 'Chat';
+  AgentRuntime get runtime => inst?.runtime ?? widget.instance?.runtime ?? AgentRuntime.supercharge;
 
   Duration get elapsed =>
       turnStartedAt == null ? Duration.zero : DateTime.now().difference(turnStartedAt!);
@@ -152,6 +153,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     try {
       inst = await api.getInstance(id);
+      if (mounted) {
+        setState(() => commands = defaultBotCommandsFor(inst?.runtime ?? AgentRuntime.supercharge));
+      }
       if (inst?.needsPayment == true) {
         if (!mounted) return;
         setState(() {
@@ -404,6 +408,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (ev.type == 'progress') {
       showKickoff = false;
       if (ev.tools != null) toolCount = math.max(toolCount, ev.tools!);
+      final live = events.lastIndexWhere((e) => e.type == 'progress' && !e.local);
+      if (live >= 0) {
+        events[live] = ev;
+      } else {
+        events.add(ev);
+      }
       unawaited(_notifyProgress());
       _persist();
       return;
@@ -412,7 +422,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     if (ev.type == 'done') {
-      _endTurn();
+      if (working) _endTurn();
       return;
     }
     if (ev.type == 'error') {
@@ -421,7 +431,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _endTurn(error: true, body: ev.text);
       return;
     }
-    if (ev.type == 'text' || ev.type == 'ask' || ev.type == 'approve' || ev.type == 'file') {
+    if (ev.type == 'text') {
+      sending = false;
+      showKickoff = false;
+      final live = events.lastIndexWhere(
+        (e) => e.type == 'text' && !e.local && e.raw['final'] != true,
+      );
+      if (live >= 0) {
+        events[live] = ev;
+        if (ev.text.isNotEmpty) {
+          lastAssistantText = ev.text;
+          final show = parseComputerShow(ev.text);
+          if (show != null) computer.tab = show;
+        }
+        _persist();
+        unawaited(_notifyProgress());
+        return;
+      }
+    }
+    if (ev.type == 'ask' || ev.type == 'approve' || ev.type == 'file') {
       sending = false;
       showKickoff = false;
     }
@@ -826,11 +854,51 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _runCliUpdate() async {
     if (sending || working) return;
     final latest = '${cli?['latest'] ?? ''}';
-    await _send('/update yes');
+    if (inst?.runtime == AgentRuntime.supercharge) {
+      await _applySuperchargeUpdate();
+    } else {
+      await _send('/update yes');
+    }
     if (latest.isNotEmpty) {
       await CliUpdateOffer.dismiss(id, latest);
     }
     if (mounted) setState(() => hideCliUpdate = true);
+  }
+
+  Future<void> _applySuperchargeUpdate() async {
+    setState(() => sending = true);
+    events.add(AppChatEvent({
+      'type': 'user',
+      'text': '/update yes',
+      'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
+      'ts': DateTime.now().millisecondsSinceEpoch,
+      'format': 'markdown',
+    }, local: true));
+    try {
+      final result = await api.cliUpdate(id);
+      final ok = result['ok'] == true;
+      final from = result['from'] ?? '?';
+      final to = result['to'] ?? result['verified'] ?? '?';
+      events.add(AppChatEvent({
+        'type': 'text',
+        'text': ok
+            ? '## Supercharge updated\n\n`$from` → `$to`\n\nDaemon restarted. Chats were kept. No new E2B template.'
+            : '## Supercharge update failed\n\n```\n${result['error'] ?? result['logs'] ?? result}\n```',
+        'final': true,
+        'format': 'markdown',
+        'id': 'local-update-${DateTime.now().millisecondsSinceEpoch}',
+        'ts': DateTime.now().millisecondsSinceEpoch,
+      }, local: true));
+    } catch (e) {
+      events.add(AppChatEvent({
+        'type': 'error',
+        'text': e.toString(),
+        'id': 'local-update-err-${DateTime.now().millisecondsSinceEpoch}',
+        'ts': DateTime.now().millisecondsSinceEpoch,
+      }, local: true));
+    } finally {
+      if (mounted) setState(() => sending = false);
+    }
   }
 
   Future<void> _dismissCliUpdate() async {
@@ -865,10 +933,41 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _showHistory();
       return;
     }
+    if (pending.isEmpty &&
+        slashCommandName(t) == 'update' &&
+        inst?.runtime == AgentRuntime.supercharge) {
+      _input.clear();
+      final arg = t.trim().toLowerCase().replaceFirst(RegExp(r'^/update\s*'), '');
+      if (arg == 'no' || arg == 'n' || arg == 'dismiss' || arg == 'later') {
+        await _dismissCliUpdate();
+        return;
+      }
+      if (arg == 'yes' || arg == 'y' || arg == 'apply' || arg == 'install' || arg == 'ok') {
+        await _applySuperchargeUpdate();
+        return;
+      }
+      try {
+        final info = await api.cliVersion(id);
+        if (mounted) setState(() => cli = info);
+        events.add(AppChatEvent({
+          'type': 'text',
+          'text':
+              '## Supercharge update\n\nRunning `${info['current'] ?? '?'}` · latest `${info['latest'] ?? '?'}`.\n\nReply **`/update yes`** to install daemon+CLI and restart (chats kept, no new template).',
+          'final': true,
+          'format': 'markdown',
+          'id': 'local-update-check-${DateTime.now().millisecondsSinceEpoch}',
+          'ts': DateTime.now().millisecondsSinceEpoch,
+        }, local: true));
+        setState(() {});
+      } catch (e) {
+        if (mounted) setState(() => error = e.toString());
+      }
+      return;
+    }
     final drafts = List<DraftAttach>.from(pending);
     final cmd = slashCommandName(t);
-    final agentTurn = drafts.isNotEmpty || cmd == null || commandStartsAgentTurn(cmd);
-    final newLane = isNewLaneCommand(t);
+    final agentTurn = drafts.isNotEmpty || cmd == null || commandStartsAgentTurn(cmd, runtime: runtime);
+    final newLane = isNewLaneCommand(t, runtime: runtime);
     _input.clear();
     HapticFeedback.lightImpact();
     setState(() {
@@ -1191,14 +1290,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _showHistory();
       return;
     }
-    if (commandSendsImmediately(c.command)) {
+    if (commandSendsImmediately(c.name, runtime: runtime)) {
       _input.clear();
-      _send('/${c.command}');
+      _send(c.slash);
       return;
     }
     _input.value = TextEditingValue(
-      text: '/${c.command} ',
-      selection: TextSelection.collapsed(offset: c.command.length + 2),
+      text: '${c.slash} ',
+      selection: TextSelection.collapsed(offset: c.slash.length + 1),
     );
   }
 
@@ -1230,7 +1329,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         children: [
                           for (final c in filtered)
                             ListTile(
-                              title: Text('/${c.command}'),
+                              title: Text(c.slash),
                               subtitle: Text(c.description, style: const TextStyle(color: Vc.muted)),
                               onTap: () {
                                 Navigator.pop(ctx);
@@ -1341,9 +1440,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           padding: const EdgeInsets.all(12),
           child: Text(ev.text, style: const TextStyle(color: Vc.red)),
         );
+      case 'progress':
+        if (ev.text.trim().isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                ev.kind == 'thinking' || ev.text == 'Working…' ? 'Thinking' : 'Working',
+                style: const TextStyle(
+                  color: Vc.muted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.2,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                ev.text,
+                style: const TextStyle(
+                  color: Vc.muted,
+                  fontSize: 13,
+                  height: 1.35,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+        );
       case 'done':
       case 'typing':
-      case 'progress':
       case 'computer':
         return const SizedBox.shrink();
       default:
@@ -1704,7 +1831,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             for (final c in filtered)
               ListTile(
                 dense: true,
-                title: Text('/${c.command}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                title: Text(c.slash, style: const TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text(c.description, style: const TextStyle(color: Vc.muted, fontSize: 11)),
                 onTap: () => _pickCommand(c),
               ),
@@ -1861,7 +1988,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                        if (working || showKickoff)
+                        if ((working || showKickoff) &&
+                            !events.any((e) => e.type == 'progress' && e.text.trim().isNotEmpty))
                           const Padding(
                             padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
                             child: Text(

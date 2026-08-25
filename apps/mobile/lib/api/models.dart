@@ -260,6 +260,18 @@ class BotCommand {
   const BotCommand({required this.command, required this.description});
   final String command;
   final String description;
+
+  /// Display/send form — always exactly one leading slash.
+  String get slash {
+    var name = command.trim();
+    while (name.startsWith('/')) {
+      name = name.substring(1);
+    }
+    return '/$name';
+  }
+
+  /// Command name without any leading slashes.
+  String get name => slash.substring(1);
 }
 
 class ExecResult {
