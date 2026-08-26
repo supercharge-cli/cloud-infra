@@ -282,48 +282,72 @@ class ToolLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: inset
-          ? const EdgeInsets.fromLTRB(8, 2, 8, 2)
-          : const EdgeInsets.fromLTRB(12, 4, 56, 4),
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-      decoration: BoxDecoration(
-        color: inset ? Vc.card : Vc.elevated,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Vc.cardBorder),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            event.state == 'done' ? Icons.check_circle_outline : Icons.build,
-            size: 16,
-            color: event.state == 'done' ? Vc.green : Vc.amber,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  event.command != null && event.command!.isNotEmpty
-                      ? '\$ ${event.command}'
-                      : event.name != null && event.name != event.text
-                          ? '${event.name} · ${event.text}'
-                          : event.text,
-                  style: const TextStyle(fontSize: 12, color: Vc.muted, fontFamily: 'monospace', height: 1.35),
-                ),
-                if ((event.stdout ?? '').trim().isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
+    final done = event.state == 'done';
+    final title = event.command != null && event.command!.isNotEmpty
+        ? event.command!
+        : (event.name ?? event.text);
+    final out = (event.stdout ?? '').trim();
+    return Padding(
+      padding: inset
+          ? const EdgeInsets.fromLTRB(8, 1, 8, 1)
+          : const EdgeInsets.fromLTRB(16, 2, 64, 2),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xFF16181D),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFF2A2E36)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    done ? Icons.check : Icons.play_arrow_rounded,
+                    size: 13,
+                    color: done ? Vc.greenSoft : Vc.amber,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
                     child: Text(
-                      event.stdout!,
-                      style: const TextStyle(fontSize: 11, color: Color(0xFFD4D4D8), fontFamily: 'monospace', height: 1.35),
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        height: 1.25,
+                        fontFamily: 'monospace',
+                        color: Color(0xFFC4C4C8),
+                      ),
                     ),
                   ),
-              ],
-            ),
+                  if (event.name != null && event.name!.isNotEmpty)
+                    Text(
+                      event.name!,
+                      style: const TextStyle(fontSize: 10, color: Vc.faint, fontWeight: FontWeight.w600),
+                    ),
+                ],
+              ),
+              if (out.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3, left: 19),
+                  child: Text(
+                    out,
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      height: 1.3,
+                      fontFamily: 'monospace',
+                      color: Color(0xFF8B8B93),
+                    ),
+                  ),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

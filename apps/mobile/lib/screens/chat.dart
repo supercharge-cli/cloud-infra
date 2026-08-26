@@ -69,6 +69,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Duration? lastTurnElapsed;
   bool pinnedToLatest = true;
   int toolCount = 0;
+  int? etaMs;
   int? usageUsed;
   int? usageMax;
   int? usagePct;
@@ -111,8 +112,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       backgrounded = false;
       unawaited(TaskNotifications.leaveBackground());
-      _listen();
-      _syncBrowserStream();
+      unawaited(_catchUp());
       return;
     }
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
@@ -199,6 +199,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         await api.wake(id);
       } catch (_) {}
     }
+    unawaited(_hydrateFromRemote());
     _listen();
     api.commands(id).then((c) {
       if (mounted && c.isNotEmpty) setState(() => commands = c);
@@ -270,7 +271,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final want = !disposed &&
         !backgrounded &&
         !paymentBlocked &&
-        (computer.isBrowser || computer.live || working);
+        (_computerOpen || computer.isBrowser || computer.live || working);
     if (want) {
       _listenBrowser();
     } else {
@@ -387,8 +388,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           turnStartedAt ??= DateTime.now();
         }
         if (ev.tools != null) toolCount = ev.tools!;
+        if (ev.etaMs != null) etaMs = ev.etaMs;
         computer.setAgentWorking(true);
       } else {
+        etaMs = null;
         turnStartedAt = null;
         computer.setAgentWorking(false);
       }
@@ -407,6 +410,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (!ev.local && ev.id.isNotEmpty) {
       lastServerId = ev.id;
       if (_alreadyHave(ev)) return;
+    }
+    if (ev.type == 'user' && !ev.local) {
+      final text = ev.text.trim();
+      final dup = events.any((e) =>
+          e.type == 'user' &&
+          e.text.trim() == text &&
+          (e.local || (ev.ts > 0 && e.ts > 0 && (e.ts - ev.ts).abs() < 20000)));
+      if (dup) {
+        _persist();
+        return;
+      }
     }
     if (ev.type == 'progress') {
       showKickoff = false;
@@ -582,6 +596,75 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  Future<void> _hydrateFromRemote() async {
+    await _refreshConversations();
+    final sid = store.activeSessionId;
+    if (sid == null || sid.isEmpty) return;
+    try {
+      final remote = await api.getConversation(id, sid);
+      final msgs = (remote['messages'] as List?) ?? const [];
+      if (msgs.isEmpty || !mounted) return;
+      var added = false;
+      for (final m in msgs.whereType<Map>()) {
+        final role = '${m['role'] ?? ''}';
+        final content = m['content'];
+        final text = content is String ? content : (content == null ? '' : content.toString());
+        if (text.trim().isEmpty) continue;
+        final type = role == 'user' ? 'user' : 'text';
+        final exists = events.any((e) =>
+            (type == 'user' ? e.type == 'user' : (e.type == 'text' || e.type == 'error')) &&
+            e.text.trim() == text.trim());
+        if (exists) continue;
+        events.add(AppChatEvent({
+          'type': type,
+          'role': role,
+          'text': text,
+          'format': 'markdown',
+          'final': type == 'text',
+          'id': 'db-$sid-${events.length}',
+          'ts': DateTime.now().millisecondsSinceEpoch,
+        }));
+        added = true;
+      }
+      if (added && mounted) {
+        setState(() {});
+        _persist();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _catchUp() async {
+    try {
+      final s = await api.chatStatus(id);
+      if (!mounted) return;
+      setState(() {
+        final u = s['usage'];
+        if (u is Map) {
+          usageUsed = (u['used'] as num?)?.toInt();
+          usageMax = (u['max'] as num?)?.toInt();
+          usagePct = (u['pct'] as num?)?.toInt();
+          usageLabel = u['label'] as String?;
+        }
+        final t = s['turn'];
+        if (t is Map && t['busy'] == true) {
+          final started = (t['startedAt'] as num?)?.toInt();
+          turnStartedAt = started != null && started > 0
+              ? DateTime.fromMillisecondsSinceEpoch(started)
+              : (turnStartedAt ?? DateTime.now());
+          toolCount = (t['tools'] as num?)?.toInt() ?? toolCount;
+          computer.setAgentWorking(true);
+        }
+      });
+      if (mounted && (s['turn'] is! Map || (s['turn'] as Map)['busy'] != true) && working) {
+        setState(_endTurn);
+      }
+    } catch (_) {}
+    await _hydrateFromRemote();
+    if (!mounted) return;
+    _listen();
+    _syncBrowserStream();
+  }
+
   Future<void> _refreshConversations() async {
     try {
       final raw = await api.listConversations(id);
@@ -717,6 +800,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _beginTurn() {
     turnStartedAt = DateTime.now();
     toolCount = 0;
+    etaMs = null;
     showKickoff = true;
     sending = true;
     error = null;
@@ -741,6 +825,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _endTurn({bool error = false, String? body}) {
     sending = false;
     showKickoff = false;
+    etaMs = null;
     if (turnStartedAt != null) {
       lastTurnElapsed = DateTime.now().difference(turnStartedAt!);
     }
@@ -1332,8 +1417,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         children: [
                           for (final c in filtered)
                             ListTile(
-                              title: Text(c.slash),
-                              subtitle: Text(c.description, style: const TextStyle(color: Vc.muted)),
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
+                              title: Text(c.slash, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                              subtitle: Text(c.description, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 12)),
                               onTap: () {
                                 Navigator.pop(ctx);
                                 _pickCommand(c);
@@ -1729,9 +1816,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   String? get _headerClock {
     if (working) {
-      final t = _fmtClock(elapsed);
-      if (toolCount <= 0) return t;
-      return '$t · $toolCount tool${toolCount == 1 ? '' : 's'}';
+      final bits = <String>[_fmtClock(elapsed)];
+      if (etaMs != null && etaMs! > 0) {
+        bits.add('~${_fmtClock(Duration(milliseconds: etaMs!))} left');
+      }
+      if (toolCount > 0) {
+        bits.add('$toolCount tool${toolCount == 1 ? '' : 's'}');
+      }
+      return bits.join(' · ');
     }
     if (lastTurnElapsed != null) return _fmtClock(lastTurnElapsed!);
     return null;
@@ -1786,8 +1878,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               onClose: () => Navigator.of(ctx).pop(),
               onSelectTab: (tab) {
                 computer.tab = tab;
-                _syncBrowserStream();
+                if (tab == 'browser') _syncBrowserStream();
               },
+              onRunCommand: _runComputerCommand,
               onBrowserHandoff: _isSupercharge ? _openBrowserHandoff : null,
             ),
             transitionsBuilder: (ctx, anim, sec, child) {
@@ -1801,7 +1894,45 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         });
   }
 
+  Future<void> _runComputerCommand(String command) async {
+    final cmd = command.trim();
+    if (cmd.isEmpty) return;
+    computer.apply(AppChatEvent({
+      'type': 'computer',
+      'tab': 'terminal',
+      'kind': 'shell',
+      'state': 'start',
+      'command': cmd,
+      'label': cmd,
+    }));
+    try {
+      final result = await api.exec(id, command: cmd);
+      computer.apply(AppChatEvent({
+        'type': 'computer',
+        'tab': 'terminal',
+        'kind': 'shell',
+        'state': 'done',
+        'command': cmd,
+        'stdout': [result.stdout, result.stderr].where((s) => s.trim().isNotEmpty).join('\n'),
+        'exitCode': result.exitCode,
+        'success': result.ok,
+      }));
+    } catch (e) {
+      computer.apply(AppChatEvent({
+        'type': 'computer',
+        'tab': 'terminal',
+        'kind': 'shell',
+        'state': 'done',
+        'command': cmd,
+        'stdout': e.toString(),
+        'success': false,
+      }));
+    }
+  }
+
   Future<void> _openBrowserHandoff() async {
+    computer.tab = 'browser';
+    _syncBrowserStream();
     try {
       final wsUrl = await api.startBrowserHandoff(id);
       if (!mounted) return;
@@ -1859,8 +1990,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             for (final c in filtered)
               ListTile(
                 dense: true,
-                title: Text(c.slash, style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(c.description, style: const TextStyle(color: Vc.muted, fontSize: 11)),
+                visualDensity: VisualDensity.compact,
+                minVerticalPadding: 0,
+                title: Text(c.slash, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                subtitle: Text(c.description, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 11)),
                 onTap: () => _pickCommand(c),
               ),
             if (filtered.isEmpty)
@@ -1917,6 +2050,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+          IconButton(
+            tooltip: 'Files',
+            onPressed: () => context.push('/instance/$id/files', extra: inst),
+            icon: const Icon(Icons.folder_open),
+          ),
           IconButton(
             tooltip: 'Preview',
             onPressed: () => _openPreview(),

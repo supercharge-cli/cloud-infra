@@ -12,6 +12,7 @@ import 'screens/account.dart';
 import 'screens/billing.dart';
 import 'screens/chat.dart';
 import 'screens/instance_settings.dart';
+import 'screens/workspace.dart';
 import 'screens/instances.dart';
 import 'screens/login.dart';
 import 'screens/pollen_connected.dart';
@@ -107,6 +108,13 @@ class _VectraAppState extends State<VectraApp> {
         GoRoute(
           path: '/instance/:id',
           builder: (c, st) => InstanceSettingsScreen(
+            instanceId: st.pathParameters['id']!,
+            instance: st.extra is CloudInstance ? st.extra as CloudInstance : null,
+          ),
+        ),
+        GoRoute(
+          path: '/instance/:id/files',
+          builder: (c, st) => WorkspaceScreen(
             instanceId: st.pathParameters['id']!,
             instance: st.extra is CloudInstance ? st.extra as CloudInstance : null,
           ),

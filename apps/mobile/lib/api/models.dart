@@ -214,6 +214,7 @@ class AppChatEvent {
   int? get size => (raw['size'] as num?)?.toInt();
   int? get tools => (raw['tools'] as num?)?.toInt();
   int? get elapsedMs => (raw['elapsedMs'] as num?)?.toInt();
+  int? get etaMs => (raw['etaMs'] as num?)?.toInt();
   int? get pct => (raw['pct'] as num?)?.toInt();
   int? get used => (raw['used'] as num?)?.toInt();
   int? get max => (raw['max'] as num?)?.toInt();
@@ -309,6 +310,20 @@ class BillingArgs {
   final String? name;
   final AgentRuntime runtime;
   bool get renew => instanceId != null && instanceId!.isNotEmpty;
+}
+
+class WorkspaceEntry {
+  WorkspaceEntry({required this.name, required this.type, this.size = 0});
+  final String name;
+  final String type;
+  final int size;
+  bool get isDir => type == 'directory' || type == 'dir';
+
+  factory WorkspaceEntry.fromJson(Map<String, dynamic> j) => WorkspaceEntry(
+        name: '${j['name'] ?? ''}',
+        type: '${j['type'] ?? 'file'}',
+        size: (j['size'] as num?)?.toInt() ?? 0,
+      );
 }
 
 class DownloadedFile {

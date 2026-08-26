@@ -41,6 +41,7 @@ void main() {
       'stop',
       'status',
       'model',
+      'cmd',
       'update',
       'help',
     ]);

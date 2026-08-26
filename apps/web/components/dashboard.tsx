@@ -5,10 +5,14 @@ import { useCallback, useEffect, useState } from "react";
 import { BRAND } from "@/lib/brand";
 import {
   lookupProviderDefault,
-  modelsForProvider,
+  mergeCatalogModels,
+  modelsForProviderDetailed,
+  parseCatalogModels,
   providerNeedsBaseUrl,
   stockBaseUrl,
+  type CatalogModel,
 } from "@/lib/provider-defaults";
+import { ModelPicker } from "@/components/model-picker";
 import type { Instance } from "@/lib/store";
 import { SandboxWorkspace } from "@/components/sandbox-workspace";
 
@@ -143,7 +147,7 @@ export function Dashboard({ email }: { email: string }) {
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("https://gen.pollinations.ai/v1");
   const [model, setModel] = useState("openai");
-  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [modelOptions, setModelOptions] = useState<CatalogModel[]>([]);
   const [telegramToken, setTelegramToken] = useState("");
   const [discordToken, setDiscordToken] = useState("");
   const [slackBotToken, setSlackBotToken] = useState("");
@@ -417,7 +421,7 @@ export function Dashboard({ email }: { email: string }) {
         setSavedProviders(
           Array.isArray(s?.savedProviders) ? s.savedProviders : [],
         );
-        setModelOptions(modelsForProvider(s?.provider || "pollinations"));
+        setModelOptions(modelsForProviderDetailed(s?.provider || "pollinations"));
         void refreshModelsForProvider(s?.provider || "pollinations");
       } else {
         setConfig(null);
@@ -581,15 +585,16 @@ export function Dashboard({ email }: { email: string }) {
   function applyProviderPick(next: string) {
     setProvider(next);
     const def = lookupProviderDefault(next);
-    const choices = modelsForProvider(next);
+    const choices = modelsForProviderDetailed(next);
     setModelOptions(choices);
     if (def?.baseUrl) setBaseUrl(def.baseUrl);
     const current = model.trim();
-    if (!current || (choices.length > 0 && !choices.includes(current))) {
+    const ids = choices.map((m) => m.id);
+    if (!current || (ids.length > 0 && !ids.includes(current))) {
       setModel(
-        def?.defaultModel && choices.includes(def.defaultModel)
+        def?.defaultModel && ids.includes(def.defaultModel)
           ? def.defaultModel
-          : choices[0] || "",
+          : choices[0]?.id || "",
       );
     }
     void refreshModelsForProvider(next);
@@ -601,18 +606,11 @@ export function Dashboard({ email }: { email: string }) {
     try {
       const res = await fetch(`/api/models?provider=${encodeURIComponent(id)}`);
       const data = await res.json();
-      const live = Array.isArray(data.models) ? (data.models as string[]) : [];
+      const live = parseCatalogModels(data.models);
       if (!live.length) return;
-      setModelOptions((prev) => {
-        const seen = new Set<string>();
-        const out: string[] = [];
-        for (const m of [...live, ...prev, ...modelsForProvider(id)]) {
-          if (!m || seen.has(m)) continue;
-          seen.add(m);
-          out.push(m);
-        }
-        return out;
-      });
+      setModelOptions((prev) =>
+        mergeCatalogModels(live, prev, modelsForProviderDetailed(id)),
+      );
     } catch {
       /* curated already set */
     }
@@ -646,7 +644,7 @@ export function Dashboard({ email }: { email: string }) {
     setModel(slot.model || "");
     setBaseUrl(slot.baseUrl || stockBaseUrl(slot.provider));
     if (slot.apiKey) setApiKey(slot.apiKey);
-    setModelOptions(modelsForProvider(slot.provider));
+    setModelOptions(modelsForProviderDetailed(slot.provider));
     void refreshModelsForProvider(slot.provider);
   }
 
@@ -1464,18 +1462,12 @@ export function Dashboard({ email }: { email: string }) {
                 </datalist>
               </Field>
               <Field label="Model">
-                <input
-                  list="ai-models"
+                <ModelPicker
                   value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="pick from list or type a custom id"
-                  className="field"
+                  options={modelOptions}
+                  onChange={setModel}
+                  placeholder="Search by name or id"
                 />
-                <datalist id="ai-models">
-                  {modelOptions.map((id) => (
-                    <option key={id} value={id} />
-                  ))}
-                </datalist>
               </Field>
               {provider.trim().toLowerCase() === "pollinations" ? (
                 <div className="sm:col-span-2">
@@ -1639,8 +1631,9 @@ export function Dashboard({ email }: { email: string }) {
               <div>
                 <h3 className="font-semibold text-white">Command pane</h3>
                 <p className="mt-0.5 text-xs text-zinc-500">
-                  Run shell commands in this sandbox (wakes if paused). Working
-                  directory defaults to{" "}
+                  Run shell commands in this sandbox (wakes if paused). Same as{" "}
+                  <code className="text-zinc-400">/cmd</code> in chat for
+                  XibeCode and Supercharge. Working directory defaults to{" "}
                   <span className="font-mono text-zinc-400">
                     /home/user/workspace
                   </span>

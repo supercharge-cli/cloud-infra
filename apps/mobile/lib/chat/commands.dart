@@ -35,6 +35,7 @@ const superchargeBotCommands = <BotCommand>[
   BotCommand(command: 'stop', description: 'Pause agent turns'),
   BotCommand(command: 'status', description: 'Show daemon control state'),
   BotCommand(command: 'model', description: 'Inspect or set the requested model'),
+  BotCommand(command: 'cmd', description: 'Run shell: /cmd <command>'),
   BotCommand(command: 'update', description: 'Check for a Supercharge binary update (E2B)'),
   BotCommand(command: 'help', description: 'Show available commands'),
 ];
@@ -89,7 +90,7 @@ final _xibecodeNoAgentTurn = {
   'update',
 };
 
-final _superchargeNoAgentTurn = {'new', 'start', 'stop', 'status', 'help', 'model', 'update'};
+final _superchargeNoAgentTurn = {'new', 'start', 'stop', 'status', 'help', 'model', 'cmd', 'update'};
 
 bool commandStartsAgentTurn(String command, {AgentRuntime runtime = AgentRuntime.xibecode}) {
   final set = runtime == AgentRuntime.supercharge ? _superchargeNoAgentTurn : _xibecodeNoAgentTurn;

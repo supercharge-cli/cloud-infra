@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../chat/computer.dart';
 import 'models.dart';
+import 'providers.dart';
 
 class ApiException implements Exception {
   ApiException(this.status, this.message, {this.code});
@@ -190,6 +191,43 @@ class VectraClient {
         'source': source,
         'lines': '$lines',
       }, timeout: _slow);
+
+  Future<List<WorkspaceEntry>> listWorkspace(String id, {String path = '/home/user/workspace'}) async {
+    final data = await _json(
+      'GET',
+      '/api/instances/$id/workspace',
+      query: {'path': path},
+      timeout: _slow,
+    );
+    final list = (data['entries'] as List?) ?? const [];
+    return list
+        .whereType<Map>()
+        .map((e) => WorkspaceEntry.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<String> readWorkspaceFile(String id, String path) async {
+    final data = await _json(
+      'GET',
+      '/api/instances/$id/workspace/file',
+      query: {'path': path},
+      timeout: _slow,
+    );
+    return '${data['content'] ?? data['text'] ?? ''}';
+  }
+
+  Future<String?> shareWorkspaceFile(String id, String path) async {
+    final data = await _json(
+      'POST',
+      '/api/instances/$id/workspace/share',
+      body: {'path': path},
+      timeout: _slow,
+    );
+    final share = data['share'];
+    if (share is Map) return '${share['url'] ?? ''}';
+    final url = '${data['url'] ?? ''}';
+    return url.isEmpty ? null : url;
+  }
 
   Future<ExecResult> exec(
     String id, {
@@ -376,10 +414,9 @@ class VectraClient {
     return out;
   }
 
-  Future<List<String>> modelsForProvider(String provider) async {
+  Future<List<CatalogModel>> modelsForProvider(String provider) async {
     final data = await _json('GET', '/api/models', query: {'provider': provider.trim()}, timeout: _fast);
-    final live = ((data['models'] as List?) ?? const []).map((e) => '$e').toList();
-    return live.where((id) => id.isNotEmpty).toList();
+    return parseCatalogModels(data['models']);
   }
 
   Future<List<BotCommand>> commands(String id) async {
@@ -560,14 +597,36 @@ class VectraClient {
   }
 
   Future<String> startBrowserHandoff(String id, {int minutes = 10}) async {
-    await _json('POST', '/api/instances/$id/computer/handoff', body: {
-      'action': 'start',
-      'minutes': minutes.clamp(1, 30),
-    });
-    final ticket = await _json('POST', '/api/instances/$id/computer/vnc-ticket', body: {});
-    final wsUrl = '${ticket['wsUrl'] ?? ''}';
-    if (wsUrl.isEmpty) throw ApiException(502, 'Browser handoff ticket was not issued.');
-    return wsUrl;
+    try {
+      await _json('POST', '/api/instances/$id/computer/handoff', body: {
+        'action': 'start',
+        'minutes': minutes.clamp(1, 30),
+      });
+    } on ApiException catch (e) {
+      if (e.status == 404) {
+        throw ApiException(
+          404,
+          'Take control needs the Supercharge E2B browser. Update the sandbox CLI, then try again.',
+        );
+      }
+      rethrow;
+    }
+    try {
+      final ticket = await _json('POST', '/api/instances/$id/computer/vnc-ticket', body: {});
+      final wsUrl = '${ticket['wsUrl'] ?? ''}';
+      if (wsUrl.isEmpty) {
+        throw ApiException(502, 'Browser ticket missing. Wake the sandbox and retry.');
+      }
+      return wsUrl;
+    } on ApiException catch (e) {
+      if (e.status == 404) {
+        throw ApiException(
+          404,
+          'Take control is not on this sandbox yet. Update CLI, then open Browser again.',
+        );
+      }
+      rethrow;
+    }
   }
 
   Future<void> stopBrowserHandoff(String id) async {

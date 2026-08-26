@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -56,13 +57,14 @@ class ComputerBar extends StatelessWidget {
   }
 }
 
-class ComputerPage extends StatelessWidget {
+class ComputerPage extends StatefulWidget {
   const ComputerPage({
     super.key,
     required this.state,
     required this.instanceName,
     required this.onClose,
     required this.onSelectTab,
+    this.onRunCommand,
     this.onBrowserHandoff,
   });
 
@@ -70,17 +72,45 @@ class ComputerPage extends StatelessWidget {
   final String instanceName;
   final VoidCallback onClose;
   final ValueChanged<String> onSelectTab;
+  final Future<void> Function(String command)? onRunCommand;
   final Future<void> Function()? onBrowserHandoff;
+
+  @override
+  State<ComputerPage> createState() => _ComputerPageState();
+}
+
+class _ComputerPageState extends State<ComputerPage> {
+  final _cmd = TextEditingController();
+  bool _running = false;
+
+  @override
+  void dispose() {
+    _cmd.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run() async {
+    final text = _cmd.text.trim();
+    if (text.isEmpty || _running || widget.onRunCommand == null) return;
+    setState(() => _running = true);
+    _cmd.clear();
+    try {
+      await widget.onRunCommand!(text);
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: state,
+      listenable: widget.state,
       builder: (context, _) {
+        final state = widget.state;
         return PopScope(
           canPop: false,
           onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) onClose();
+            if (!didPop) widget.onClose();
           },
           child: Scaffold(
             backgroundColor: const Color(0xFF0B0B0D),
@@ -93,12 +123,12 @@ class ComputerPage extends StatelessWidget {
                       children: [
                         IconButton(
                           tooltip: 'Close',
-                          onPressed: onClose,
+                          onPressed: widget.onClose,
                           icon: const Icon(Icons.close, size: 22),
                         ),
                         Expanded(
                           child: Text(
-                            "$instanceName's computer",
+                            "${widget.instanceName}'s computer",
                             textAlign: TextAlign.center,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -108,7 +138,7 @@ class ComputerPage extends StatelessWidget {
                         PopupMenuButton<String>(
                           tooltip: 'Terminal or Browser',
                           initialValue: state.tab,
-                          onSelected: onSelectTab,
+                          onSelected: widget.onSelectTab,
                           position: PopupMenuPosition.under,
                           itemBuilder: (ctx) => [
                             PopupMenuItem(
@@ -153,11 +183,11 @@ class ComputerPage extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (onBrowserHandoff != null)
+                        if (widget.onBrowserHandoff != null)
                           IconButton(
-                            tooltip: 'Take browser control',
-                            onPressed: onBrowserHandoff,
-                            icon: const Icon(Icons.security, size: 20),
+                            tooltip: 'Take control of the browser',
+                            onPressed: () => widget.onBrowserHandoff?.call(),
+                            icon: const Icon(Icons.ads_click, size: 20),
                           ),
                       ],
                     ),
@@ -179,7 +209,7 @@ class ComputerPage extends StatelessWidget {
                                 height: 40,
                                 child: Center(
                                   child: Text(
-                                    instanceName,
+                                    widget.instanceName,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(fontSize: 12, color: Vc.muted),
@@ -198,6 +228,41 @@ class ComputerPage extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (!state.isBrowser && widget.onRunCommand != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _cmd,
+                              enabled: !_running,
+                              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                              decoration: const InputDecoration(
+                                hintText: 'Run a command…',
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              ),
+                              onSubmitted: (_) => unawaited(_run()),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton(
+                            onPressed: _running ? null : () => unawaited(_run()),
+                            child: Text(_running ? '…' : 'Run'),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (state.isBrowser && widget.onBrowserHandoff != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: FilledButton.icon(
+                        onPressed: () => widget.onBrowserHandoff?.call(),
+                        icon: const Icon(Icons.ads_click, size: 18),
+                        label: const Text('Take control'),
+                      ),
+                    ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
                     child: Row(

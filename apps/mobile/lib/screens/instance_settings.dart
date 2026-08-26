@@ -51,7 +51,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   final cmd = TextEditingController();
   final cwd = TextEditingController(text: '/home/user/workspace');
 
-  List<String> modelChoices = const [];
+  List<CatalogModel> modelChoices = const [];
   List<Map<String, String>> savedProviders = [];
   CloudInstance? inst;
   Map<String, dynamic>? config;
@@ -168,14 +168,15 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   }
 
   void _swapModelList(String raw, {bool resetModel = true}) {
-    final choices = modelsForProvider(raw);
+    final choices = modelsForProviderDetailed(raw);
     modelChoices = choices;
     if (!resetModel) return;
     final current = model.text.trim();
     if (choices.isEmpty) return;
-    if (current.isEmpty || !choices.contains(current)) {
+    final ids = choices.map((m) => m.id).toSet();
+    if (current.isEmpty || !ids.contains(current)) {
       final def = lookupProviderDefault(raw)?.defaultModel ?? '';
-      model.text = choices.contains(def) ? def : choices.first;
+      model.text = ids.contains(def) ? def : choices.first.id;
     }
   }
 
@@ -202,21 +203,25 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       if (!mounted || provider.text.trim().toLowerCase() != id.toLowerCase()) return;
       if (live.isEmpty) return;
       setState(() {
-        final seen = <String>{};
-        modelChoices = [...live, ...modelsForProvider(id)].where((m) {
-          if (m.isEmpty || seen.contains(m)) return false;
-          seen.add(m);
-          return true;
-        }).toList();
-        if (model.text.trim().isEmpty || !modelChoices.contains(model.text.trim())) {
+        modelChoices = mergeCatalogModels([live, modelsForProviderDetailed(id)]);
+        final ids = modelChoices.map((m) => m.id).toSet();
+        if (model.text.trim().isEmpty || !ids.contains(model.text.trim())) {
           final def = lookupProviderDefault(id)?.defaultModel ?? '';
-          model.text = modelChoices.contains(def) ? def : modelChoices.first;
+          model.text = ids.contains(def) ? def : modelChoices.first.id;
         }
       });
     } catch (_) {}
   }
 
   bool get _showBaseUrl => providerNeedsBaseUrl(provider.text, baseUrl.text);
+
+  String get _modelLabel {
+    final id = model.text.trim();
+    for (final m in modelChoices) {
+      if (m.id == id) return m.name;
+    }
+    return id;
+  }
 
   void _useSavedProvider(Map<String, String> slot) {
     setState(() {
@@ -534,6 +539,10 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
         actions: [
           IconButton(onPressed: overlay == null ? _load : null, icon: const Icon(Icons.refresh)),
           IconButton(
+            onPressed: () => context.push('/instance/$id/files', extra: inst),
+            icon: const Icon(Icons.folder_open),
+          ),
+          IconButton(
             onPressed: () => context.push('/chat/$id', extra: inst),
             icon: const Icon(Icons.chat_bubble_outline),
           ),
@@ -679,22 +688,77 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                           },
                         ),
                         const SizedBox(height: 10),
-                        TextField(
-                          controller: model,
-                          decoration: InputDecoration(
-                            labelText: 'Model',
-                            hintText: 'pick or type a custom id',
-                            suffixIcon: modelChoices.isEmpty
-                                ? null
-                                : PopupMenuButton<String>(
-                                    icon: const Icon(Icons.expand_more, color: Vc.muted),
-                                    onSelected: (v) => setState(() => model.text = v),
-                                    itemBuilder: (_) => [
-                                      for (final m in modelChoices.take(80))
-                                        PopupMenuItem(value: m, child: Text(m, overflow: TextOverflow.ellipsis)),
+                        Autocomplete<CatalogModel>(
+                          initialValue: TextEditingValue(text: _modelLabel),
+                          displayStringForOption: (m) => m.name,
+                          optionsBuilder: (text) {
+                            final q = text.text.trim();
+                            final hits = modelChoices.where((m) => m.matches(q)).take(80);
+                            if (q.isNotEmpty && !hits.any((m) => m.id == q)) {
+                              return [...hits, CatalogModel(id: q, name: 'Use “$q”')];
+                            }
+                            return hits;
+                          },
+                          onSelected: (m) => setState(() => model.text = m.id),
+                          fieldViewBuilder: (context, controller, focus, onSubmit) {
+                            CatalogModel? current;
+                            for (final m in modelChoices) {
+                              if (m.id == model.text) {
+                                current = m;
+                                break;
+                              }
+                            }
+                            return TextField(
+                              controller: controller,
+                              focusNode: focus,
+                              decoration: InputDecoration(
+                                labelText: 'Model',
+                                hintText: current?.name ?? 'Search by name or type an id',
+                                helperText: model.text.trim().isEmpty ? null : model.text,
+                                helperMaxLines: 1,
+                              ),
+                              onChanged: (v) {
+                                CatalogModel? hit;
+                                final needle = v.trim().toLowerCase();
+                                for (final m in modelChoices) {
+                                  if (m.name.toLowerCase() == needle || m.id == v.trim()) {
+                                    hit = m;
+                                    break;
+                                  }
+                                }
+                                model.text = hit?.id ?? v.trim();
+                              },
+                              onSubmitted: (_) => onSubmit(),
+                            );
+                          },
+                          optionsViewBuilder: (context, onSelected, options) {
+                            return Align(
+                              alignment: Alignment.topLeft,
+                              child: Material(
+                                color: Vc.card,
+                                elevation: 8,
+                                borderRadius: BorderRadius.circular(12),
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(maxHeight: 280, minWidth: 280),
+                                  child: ListView(
+                                    padding: EdgeInsets.zero,
+                                    shrinkWrap: true,
+                                    children: [
+                                      for (final m in options)
+                                        ListTile(
+                                          dense: true,
+                                          title: Text(m.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                          subtitle: m.name == m.id
+                                              ? null
+                                              : Text(m.id, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 11)),
+                                          onTap: () => onSelected(m),
+                                        ),
                                     ],
                                   ),
-                          ),
+                                ),
+                              ),
+                            );
+                          },
                         ),
                         if (_showBaseUrl) ...[
                           const SizedBox(height: 10),
