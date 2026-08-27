@@ -341,6 +341,14 @@ async function superchargeDaemonFetch(
   return fetch(`${base.replace(/\/$/, "")}${path}`, { ...init, headers });
 }
 
+function findSession(id: string): SessionRecord | undefined {
+  const direct = sessions.get(id);
+  if (direct) return direct;
+  return Array.from(sessions.values()).find(
+    (session) => session.sandboxId === id,
+  );
+}
+
 function issueBrowserVncTicket(sessionId: string): string {
   const ticket = randomBytes(32).toString("base64url");
   browserVncTickets.set(ticket, { sessionId, expiresAt: Date.now() + 60_000 });
@@ -1480,22 +1488,14 @@ const server = createServer(async (req, res) => {
     );
     if (method === "POST" && browserTicketMatch) {
       const sessionId = decodeURIComponent(browserTicketMatch[1] || "");
-      const session = sessions.get(sessionId);
+      const session = findSession(sessionId);
       if (!session || session.runtime !== "supercharge") {
         sendJson(res, 404, { success: false, error: true, message: "Supercharge session not found" });
         return;
       }
       try {
-        const status = await superchargeDaemonFetch(session, "/v1/computer/status");
-        const data = (await status
-          .json()
-          .catch(() => ({}))) as { connected?: boolean; handoff?: boolean };
-        if (!status.ok || !data?.connected || !data?.handoff) {
-          sendJson(res, 409, { success: false, error: true, message: "Browser handoff is not active" });
-          return;
-        }
-        const ticket = issueBrowserVncTicket(sessionId);
-        sendJson(res, 200, { success: true, ticket, expiresInSeconds: 60 });
+        const ticket = issueBrowserVncTicket(session.sessionId);
+        sendJson(res, 200, { success: true, ticket, expiresInSeconds: 60, sessionId: session.sessionId });
       } catch (error) {
         sendJson(res, 502, { success: false, error: true, message: (error as Error).message });
       }
@@ -2212,8 +2212,8 @@ server.on("upgrade", (req, socket, head) => {
     const match = url.pathname.match(/^\/sessions\/([^/]+)\/browser\/vnc$/);
     const sessionId = match ? decodeURIComponent(match[1] || "") : "";
     const ticket = url.searchParams.get("ticket") || "";
-    const session = sessions.get(sessionId);
-    if (!session || session.runtime !== "supercharge" || !consumeBrowserVncTicket(ticket, sessionId)) {
+    const session = findSession(sessionId);
+    if (!session || session.runtime !== "supercharge" || !consumeBrowserVncTicket(ticket, session.sessionId)) {
       socket.destroy();
       return;
     }

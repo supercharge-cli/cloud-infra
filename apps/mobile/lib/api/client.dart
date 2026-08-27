@@ -596,6 +596,15 @@ class VectraClient {
     }
   }
 
+  Future<String> openAiBrowserVnc(String id) async {
+    final ticket = await _json('POST', '/api/instances/$id/computer/vnc-ticket', body: {});
+    final wsUrl = '${ticket['wsUrl'] ?? ''}';
+    if (wsUrl.isEmpty) {
+      throw ApiException(502, 'Could not open the AI browser display.');
+    }
+    return wsUrl;
+  }
+
   Future<String> startBrowserHandoff(String id, {int minutes = 10}) async {
     try {
       await _json('POST', '/api/instances/$id/computer/handoff', body: {
@@ -604,29 +613,12 @@ class VectraClient {
       });
     } on ApiException catch (e) {
       if (e.status == 404) {
-        throw ApiException(
-          404,
-          'Take control needs the Supercharge E2B browser. Update the sandbox CLI, then try again.',
-        );
+        // View-only VNC still works via the daemon ticket fallback.
+      } else {
+        rethrow;
       }
-      rethrow;
     }
-    try {
-      final ticket = await _json('POST', '/api/instances/$id/computer/vnc-ticket', body: {});
-      final wsUrl = '${ticket['wsUrl'] ?? ''}';
-      if (wsUrl.isEmpty) {
-        throw ApiException(502, 'Browser ticket missing. Wake the sandbox and retry.');
-      }
-      return wsUrl;
-    } on ApiException catch (e) {
-      if (e.status == 404) {
-        throw ApiException(
-          404,
-          'Take control is not on this sandbox yet. Update CLI, then open Browser again.',
-        );
-      }
-      rethrow;
-    }
+    return openAiBrowserVnc(id);
   }
 
   Future<void> stopBrowserHandoff(String id) async {

@@ -1934,11 +1934,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     computer.tab = 'browser';
     _syncBrowserStream();
     try {
-      final wsUrl = await api.startBrowserHandoff(id);
+      final wsUrl = await api.openAiBrowserVnc(id);
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => BrowserHandoffScreen(wsUrl: wsUrl),
+          builder: (_) => BrowserHandoffScreen(
+            wsUrl: wsUrl,
+            viewOnly: true,
+            onTakeOver: () async {
+              await api.startBrowserHandoff(id);
+            },
+          ),
         ),
       );
     } catch (error) {
@@ -1950,9 +1956,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } finally {
       try {
         await api.stopBrowserHandoff(id);
-      } catch (_) {
-        // The E2B sidecar expires an abandoned handoff automatically.
-      }
+      } catch (_) {}
     }
   }
 
