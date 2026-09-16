@@ -35,6 +35,7 @@ const superchargeBotCommands = <BotCommand>[
   BotCommand(command: 'stop', description: 'Pause agent turns'),
   BotCommand(command: 'status', description: 'Show daemon control state'),
   BotCommand(command: 'model', description: 'Inspect or set the requested model'),
+  BotCommand(command: 'format', description: 'API format: chat_completions | messages | responses'),
   BotCommand(command: 'cmd', description: 'Run shell: /cmd <command>'),
   BotCommand(command: 'update', description: 'Check for a Supercharge binary update (E2B)'),
   BotCommand(command: 'help', description: 'Show available commands'),
@@ -63,7 +64,16 @@ final _xibecodeSlashOnly = {
   'mode',
 };
 
-final _superchargeSlashOnly = {'new', 'start', 'stop', 'status', 'help', 'model', 'update'};
+final _superchargeSlashOnly = {
+  'new',
+  'start',
+  'stop',
+  'status',
+  'help',
+  'model',
+  'format',
+  'update',
+};
 
 /// Instant send from the palette — not all of these start an agent turn.
 bool commandSendsImmediately(String command, {AgentRuntime runtime = AgentRuntime.xibecode}) {
@@ -90,7 +100,17 @@ final _xibecodeNoAgentTurn = {
   'update',
 };
 
-final _superchargeNoAgentTurn = {'new', 'start', 'stop', 'status', 'help', 'model', 'cmd', 'update'};
+final _superchargeNoAgentTurn = {
+  'new',
+  'start',
+  'stop',
+  'status',
+  'help',
+  'model',
+  'format',
+  'cmd',
+  'update',
+};
 
 bool commandStartsAgentTurn(String command, {AgentRuntime runtime = AgentRuntime.xibecode}) {
   final set = runtime == AgentRuntime.supercharge ? _superchargeNoAgentTurn : _xibecodeNoAgentTurn;

@@ -91,6 +91,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     apiKey?: string;
     baseUrl?: string;
     model?: string;
+    format?: string;
     savedProviders?: Array<{
       id?: string;
       provider?: string;
@@ -141,6 +142,7 @@ export async function PUT(req: Request, ctx: Ctx) {
       apiKey: body.apiKey,
       baseUrl: body.baseUrl,
       model: body.model,
+      format: body.format,
       savedProviders: Array.isArray(body.savedProviders)
         ? parseSavedProviders(body.savedProviders)
         : undefined,

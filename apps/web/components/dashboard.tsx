@@ -13,6 +13,12 @@ import {
   type CatalogModel,
 } from "@/lib/provider-defaults";
 import { ModelPicker } from "@/components/model-picker";
+import {
+  API_WIRE_FORMATS,
+  defaultApiWireFormat,
+  normalizeApiWireFormat,
+  type ApiWireFormat,
+} from "@/lib/api-format";
 import type { Instance } from "@/lib/store";
 import { SandboxWorkspace } from "@/components/sandbox-workspace";
 
@@ -25,6 +31,7 @@ type SavedSlot = {
   baseUrl?: string;
   apiKey?: string;
   apiKeyHint?: string;
+  format?: ApiWireFormat;
 };
 
 type ConfigView = {
@@ -47,6 +54,7 @@ type ConfigView = {
   discordHint?: string;
   slackHint?: string;
   savedProviders?: SavedSlot[];
+  format?: ApiWireFormat;
 };
 
 type PairingView = {
@@ -138,6 +146,7 @@ export function Dashboard({ email }: { email: string }) {
     current: string | null;
     latest: string | null;
     updateAvailable: boolean;
+    runtime?: "xibecode" | "supercharge";
   } | null>(null);
   /** Dismissed latest version per instance (session memory). */
   const [cliDismissed, setCliDismissed] = useState<Record<string, string>>({});
@@ -155,6 +164,7 @@ export function Dashboard({ email }: { email: string }) {
   const [allowAll, setAllowAll] = useState(false);
   const [pairCode, setPairCode] = useState("");
   const [savedProviders, setSavedProviders] = useState<SavedSlot[]>([]);
+  const [apiFormat, setApiFormat] = useState<ApiWireFormat>("chat_completions");
   const [byopReady, setByopReady] = useState(false);
 
   // Command pane (shell in sandbox)
@@ -421,6 +431,9 @@ export function Dashboard({ email }: { email: string }) {
         setSavedProviders(
           Array.isArray(s?.savedProviders) ? s.savedProviders : [],
         );
+        setApiFormat(
+          normalizeApiWireFormat(s?.format, s?.provider || "openai"),
+        );
         setModelOptions(modelsForProviderDetailed(s?.provider || "pollinations"));
         void refreshModelsForProvider(s?.provider || "pollinations");
       } else {
@@ -440,6 +453,7 @@ export function Dashboard({ email }: { email: string }) {
         setSlackAppToken("");
         setAllowAll(false);
         setSavedProviders([]);
+        setApiFormat("chat_completions");
         setError(cData.error || "Config load failed");
       }
       void fetch(`/api/instances/${id}/pairing`)
@@ -454,6 +468,7 @@ export function Dashboard({ email }: { email: string }) {
               ? {
                   current: value.current || null,
                   latest: value.latest || null,
+                  runtime: value.runtime === "supercharge" ? "supercharge" : "xibecode",
                   updateAvailable: Boolean(value.updateAvailable),
                 }
               : null,
@@ -579,11 +594,13 @@ export function Dashboard({ email }: { email: string }) {
       model: model || undefined,
       baseUrl: url || undefined,
       apiKey: apiKey || undefined,
+      format: apiFormat,
     };
   }
 
   function applyProviderPick(next: string) {
     setProvider(next);
+    setApiFormat(defaultApiWireFormat(next));
     const def = lookupProviderDefault(next);
     const choices = modelsForProviderDetailed(next);
     setModelOptions(choices);
@@ -626,6 +643,7 @@ export function Dashboard({ email }: { email: string }) {
       apiKey: slot.apiKey || prev.apiKey,
       baseUrl: slot.baseUrl ?? prev.baseUrl,
       model: slot.model ?? prev.model,
+      format: slot.format ?? prev.format,
     };
     return list.map((s, i) => (i === idx ? next : s));
   }
@@ -644,6 +662,9 @@ export function Dashboard({ email }: { email: string }) {
     setModel(slot.model || "");
     setBaseUrl(slot.baseUrl || stockBaseUrl(slot.provider));
     if (slot.apiKey) setApiKey(slot.apiKey);
+    setApiFormat(
+      normalizeApiWireFormat(slot.format, slot.provider),
+    );
     setModelOptions(modelsForProviderDetailed(slot.provider));
     void refreshModelsForProvider(slot.provider);
   }
@@ -673,6 +694,7 @@ export function Dashboard({ email }: { email: string }) {
           apiKey: apiKey || undefined,
           baseUrl: baseUrl.trim() || stockBaseUrl(provider),
           model,
+          format: apiFormat,
           savedProviders: slots,
           telegramBotToken: telegramToken || undefined,
           discordBotToken: discordToken || undefined,
@@ -1295,7 +1317,7 @@ export function Dashboard({ email }: { email: string }) {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <strong className="text-white">
-                      XibeCode update available
+                      {cliUpdate.runtime === "supercharge" ? "Supercharge" : "XibeCode"} update available
                     </strong>
                     <p className="mt-1 text-sky-100/90">
                       {cliUpdate.latest} available
@@ -1311,8 +1333,10 @@ export function Dashboard({ email }: { email: string }) {
                       ) : null}
                       . Opt-in only — installs on this sandbox and restarts the
                       daemon. Workspace and{" "}
-                      <code className="text-sky-200">~/.xibecode</code> secrets
-                      are kept.
+                      <code className="text-sky-200">
+                        {cliUpdate.runtime === "supercharge" ? "~/.supercharge" : "~/.xibecode"}
+                      </code>{" "}
+                      secrets are kept.
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1412,7 +1436,8 @@ export function Dashboard({ email }: { email: string }) {
                 · TG {config.hasTelegramToken ? config.telegramHint : "—"} · DC{" "}
                 {config.hasDiscordToken ? config.discordHint : "—"} · SL{" "}
                 {config.hasSlackToken ? config.slackHint : "—"} ·{" "}
-                {config.provider || "?"} / {config.model || "no model"}
+                {config.provider || "?"} / {config.model || "no model"} /{" "}
+                {config.format || apiFormat}
               </p>
             ) : null}
             <div className="mb-3 rounded-xl border border-emerald-800/50 bg-emerald-950/30 px-3 py-2.5">
@@ -1501,6 +1526,23 @@ export function Dashboard({ email }: { email: string }) {
                   />
                 </Field>
               )}
+              <Field label="API format">
+                <select
+                  value={apiFormat}
+                  onChange={(e) =>
+                    setApiFormat(
+                      normalizeApiWireFormat(e.target.value, provider),
+                    )
+                  }
+                  className="field"
+                >
+                  {API_WIRE_FORMATS.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.label} · {row.hint}
+                    </option>
+                  ))}
+                </select>
+              </Field>
               {providerNeedsBaseUrl(provider, baseUrl) ? (
                 <Field label="Base URL">
                   <input
@@ -1515,7 +1557,8 @@ export function Dashboard({ email }: { email: string }) {
                 <p className="mb-2 text-xs text-zinc-500">
                   Saved providers keep their own key and URL (like Hermes). Add
                   another without wiping this one, then pick it from{" "}
-                  <code>/model</code> in the app.
+                  <code>/model</code> or change protocol with{" "}
+                  <code>/format</code> in the app.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {savedProviders.map((s) => {

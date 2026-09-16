@@ -57,7 +57,7 @@ class _InstancesScreenState extends State<InstancesScreen> {
     for (final inst in targets) {
       try {
         final raw = await api.cliVersion(inst.id);
-        final info = CliVersion.fromJson(raw);
+        final info = CliVersion.fromJson(raw, runtime: inst.runtime.apiValue);
         if (!mounted) return;
         setState(() => cliById[inst.id] = info);
         if (info.updateAvailable) {
@@ -170,7 +170,21 @@ class _InstancesScreenState extends State<InstancesScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'A new XibeCode CLI is out. Open a workspace and tap Update — same as /update.',
+                              () {
+                                final sc = items.any((i) =>
+                                    i.runtime == AgentRuntime.supercharge &&
+                                    cliById[i.id]?.updateAvailable == true);
+                                final xc = items.any((i) =>
+                                    i.runtime != AgentRuntime.supercharge &&
+                                    cliById[i.id]?.updateAvailable == true);
+                                if (sc && xc) {
+                                  return 'A Supercharge or XibeCode CLI update is out. Open that workspace and tap Update.';
+                                }
+                                if (sc) {
+                                  return 'A new Supercharge CLI is out. Open a Supercharge workspace and tap Update — same as /update.';
+                                }
+                                return 'A new XibeCode CLI is out. Open a XibeCode workspace and tap Update — same as /update.';
+                              }(),
                               style: const TextStyle(fontSize: 13, height: 1.35),
                             ),
                           ),

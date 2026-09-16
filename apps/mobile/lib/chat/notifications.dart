@@ -305,11 +305,12 @@ class TaskNotifications {
     required String name,
     required String current,
     required String latest,
+    String product = 'CLI',
   }) async {
     await init();
     await _plugin.show(
       id: cliUpdateId,
-      title: 'XibeCode $latest is out',
+      title: '$product $latest is out',
       body: '$name is on ${current.isEmpty ? 'an older CLI' : current}. Tap to open chat and update.',
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(

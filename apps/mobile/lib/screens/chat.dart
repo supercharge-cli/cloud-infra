@@ -143,6 +143,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         answered
           ..clear()
           ..addAll(snap.answered);
+        lastServerId = _isServerSeq(snap.lastServerId) ? snap.lastServerId : null;
         connecting = false;
         computer.replay(events);
       });
@@ -324,11 +325,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  bool _isServerSeq(String? value) =>
+      value != null && value.isNotEmpty && RegExp(r'^\d+$').hasMatch(value);
+
   Stream<AppChatEvent> _eventLoop() async* {
     var delay = 1;
     while (!disposed) {
       try {
-        await for (final ev in api.events(id, since: lastServerId)) {
+        await for (final ev in api.events(id, since: _isServerSeq(lastServerId) ? lastServerId : null)) {
           delay = 1;
           yield ev;
         }
@@ -407,7 +411,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       return;
     }
-    if (!ev.local && ev.id.isNotEmpty) {
+    if (!ev.local && _isServerSeq(ev.id)) {
       lastServerId = ev.id;
       if (_alreadyHave(ev)) return;
     }
@@ -633,10 +637,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  Future<void> _catchUp() async {
+  Future<void> _pollTurnStatus() async {
     try {
       final s = await api.chatStatus(id);
       if (!mounted) return;
+      final t = s['turn'];
+      final busy = t is Map && t['busy'] == true;
       setState(() {
         final u = s['usage'];
         if (u is Map) {
@@ -645,8 +651,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           usagePct = (u['pct'] as num?)?.toInt();
           usageLabel = u['label'] as String?;
         }
-        final t = s['turn'];
-        if (t is Map && t['busy'] == true) {
+        if (busy) {
           final started = (t['startedAt'] as num?)?.toInt();
           turnStartedAt = started != null && started > 0
               ? DateTime.fromMillisecondsSinceEpoch(started)
@@ -655,10 +660,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           computer.setAgentWorking(true);
         }
       });
-      if (mounted && (s['turn'] is! Map || (s['turn'] as Map)['busy'] != true) && working) {
-        setState(_endTurn);
+      if (!busy && working) {
+        await _hydrateFromRemote();
+        if (mounted) setState(_endTurn);
       }
     } catch (_) {}
+  }
+
+  Future<void> _catchUp() async {
+    await _pollTurnStatus();
     await _hydrateFromRemote();
     if (!mounted) return;
     _listen();
@@ -702,7 +712,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       answered
         ..clear()
         ..addAll(snap.answered);
-      lastServerId = snap.lastServerId;
+      lastServerId = _isServerSeq(snap.lastServerId) ? snap.lastServerId : null;
       computer.replay(events);
     });
     if (snap.events.isEmpty) {
@@ -807,10 +817,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     lastAssistantText = null;
     computer.setAgentWorking(true);
     _tick?.cancel();
+    var statusTicks = 0;
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || turnStartedAt == null) return;
       setState(() => _checkLivePause());
       unawaited(_notifyProgress());
+      statusTicks += 1;
+      if (statusTicks % 4 == 0) unawaited(_pollTurnStatus());
     });
     _syncBrowserStream();
     unawaited(TaskNotifications.startTurn(
@@ -818,7 +831,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       name: instanceName,
       apiBase: api.baseUrl,
       token: api.token,
-      since: lastServerId,
+      since: _isServerSeq(lastServerId) ? lastServerId : null,
     ));
   }
 
@@ -926,7 +939,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _maybeOfferCliUpdate(Map<String, dynamic> raw) async {
-    final info = CliVersion.fromJson(raw);
+    final info = CliVersion.fromJson(raw, runtime: runtime.apiValue);
     if (!info.updateAvailable) return;
     if (await CliUpdateOffer.isDismissed(id, info.latest)) {
       if (mounted) setState(() => hideCliUpdate = true);

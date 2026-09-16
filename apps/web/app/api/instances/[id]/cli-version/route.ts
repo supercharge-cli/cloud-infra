@@ -46,6 +46,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     });
     return NextResponse.json({
       instanceId: inst.id,
+      runtime: info.runtime,
       current: info.current,
       latest: info.latest,
       updateAvailable: info.updateAvailable,

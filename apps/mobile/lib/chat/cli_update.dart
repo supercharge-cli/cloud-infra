@@ -9,19 +9,51 @@ class CliVersion {
     required this.current,
     required this.latest,
     required this.updateAvailable,
+    this.runtime = 'xibecode',
   });
 
   final String current;
   final String latest;
   final bool updateAvailable;
+  final String runtime;
 
-  factory CliVersion.fromJson(Map<String, dynamic>? j) {
-    if (j == null) return CliVersion(current: '', latest: '', updateAvailable: false);
+  bool get isSupercharge => runtime == 'supercharge';
+  String get product => isSupercharge ? 'Supercharge' : 'XibeCode';
+
+  factory CliVersion.fromJson(Map<String, dynamic>? j, {String? runtime}) {
+    if (j == null) {
+      return CliVersion(current: '', latest: '', updateAvailable: false, runtime: runtime ?? 'xibecode');
+    }
+    final current = '${j['current'] ?? ''}';
+    final latest = '${j['latest'] ?? ''}';
+    final raw = (runtime ?? '${j['runtime'] ?? j['kind'] ?? 'xibecode'}').toLowerCase();
+    final newer = _isNewer(latest, current);
     return CliVersion(
-      current: '${j['current'] ?? ''}',
-      latest: '${j['latest'] ?? ''}',
-      updateAvailable: j['updateAvailable'] == true,
+      current: current,
+      latest: latest,
+      runtime: raw.contains('supercharge') ? 'supercharge' : 'xibecode',
+      updateAvailable: newer && (j['updateAvailable'] != false),
     );
+  }
+
+  static final _semver = RegExp(r'(\d+)\.(\d+)\.(\d+)');
+
+  static String? _core(String raw) {
+    final m = _semver.firstMatch(raw.trim().replaceFirst(RegExp(r'^v', caseSensitive: false), ''));
+    if (m == null) return null;
+    return '${m[1]}.${m[2]}.${m[3]}';
+  }
+
+  static bool _isNewer(String latest, String current) {
+    final a = _core(latest);
+    final b = _core(current);
+    if (a == null || b == null) return false;
+    final av = a.split('.').map(int.parse).toList();
+    final bv = b.split('.').map(int.parse).toList();
+    for (var i = 0; i < 3; i++) {
+      if (av[i] != bv[i]) return av[i] > bv[i];
+    }
+    return false;
   }
 }
 
@@ -55,6 +87,7 @@ class CliUpdateOffer {
       name: name,
       current: info.current,
       latest: info.latest,
+      product: info.product,
     );
   }
 }
@@ -87,9 +120,9 @@ class CliUpdateNote extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'New XibeCode CLI',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  Text(
+                    'New ${info.product} CLI',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                   ),
                   Text(
                     '${info.current.isEmpty ? '?' : info.current} → ${info.latest}',

@@ -1,10 +1,18 @@
+import {
+  defaultApiWireFormat,
+  parseApiWireFormat,
+  type ApiWireFormat,
+} from "./api-format";
+
+export type { ApiWireFormat };
+
 export type SavedProvider = {
   id: string;
   provider: string;
   apiKey?: string;
   baseUrl?: string;
   model?: string;
-  format?: 'openai' | 'anthropic';
+  format?: ApiWireFormat;
   label?: string;
 };
 
@@ -41,7 +49,9 @@ export function parseSavedProviders(raw: unknown): SavedProvider[] {
       apiKey: apiKey || undefined,
       baseUrl: baseUrl || undefined,
       model: rec.model != null ? String(rec.model).trim() || undefined : undefined,
-      format: rec.format === 'anthropic' ? 'anthropic' : rec.format === 'openai' ? 'openai' : undefined,
+      format: parseApiWireFormat(
+        rec.format != null ? String(rec.format) : undefined,
+      ),
       label: rec.label != null ? String(rec.label).trim() || undefined : undefined,
     });
   }
@@ -74,6 +84,7 @@ export function slotFromActive(input: {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  format?: string;
 }): SavedProvider | null {
   const provider = (input.provider || '').trim() || (input.baseUrl?.trim() ? 'custom' : '');
   if (!provider && !input.apiKey?.trim()) return null;
@@ -83,6 +94,9 @@ export function slotFromActive(input: {
     apiKey: input.apiKey?.trim() || undefined,
     baseUrl: input.baseUrl?.trim() || undefined,
     model: input.model?.trim() || undefined,
+    format:
+      parseApiWireFormat(input.format) ||
+      defaultApiWireFormat(provider || "custom"),
   };
 }
 

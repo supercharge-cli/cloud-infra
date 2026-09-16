@@ -66,6 +66,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   bool byopReady = false;
   bool byopConnected = false;
   bool pastePollinationsKey = false;
+  String apiFormat = 'chat_completions';
   String? runtimeMismatchMessage;
   final history = <ExecResult>[];
 
@@ -132,6 +133,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
           ? stockBaseUrl(provider.text)
           : baseUrl.text.trim()),
       'apiKey': apiKey.text.trim(),
+      'format': apiFormat,
     };
   }
 
@@ -183,6 +185,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   void _onProviderPicked(String v) {
     setState(() {
       provider.text = v;
+      apiFormat = defaultApiWireFormat(v);
       if (v.trim().toLowerCase() == 'custom') {
         final known = providerDefaults.values.any((d) => urlsMatch(baseUrl.text, d.baseUrl));
         if (known) baseUrl.clear();
@@ -229,6 +232,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       model.text = slot['model'] ?? '';
       baseUrl.text = slot['baseUrl'] ?? '';
       if ((slot['apiKey'] ?? '').isNotEmpty) apiKey.text = slot['apiKey']!;
+      apiFormat = normalizeApiWireFormat(slot['format'], slot['provider'] ?? '');
       if (baseUrl.text.trim().isEmpty) _applyProviderDefaults(provider.text, fillModel: false);
       _swapModelList(provider.text, resetModel: model.text.trim().isEmpty);
     });
@@ -324,6 +328,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
             'baseUrl': '${item['baseUrl'] ?? ''}',
             'apiKey': '${item['apiKey'] ?? ''}',
             'apiKeyHint': '${item['apiKeyHint'] ?? ''}',
+            'format': normalizeApiWireFormat('${item['format'] ?? ''}', '${item['provider'] ?? ''}'),
           });
         }
       }
@@ -332,6 +337,10 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       slackBot.text = _str(sandbox, stored, 'slackBotToken');
       slackApp.text = _str(sandbox, stored, 'slackAppToken');
       allowAll = sandbox['allowAllUsers'] == true || stored['allowAllUsers'] == true;
+      apiFormat = normalizeApiWireFormat(
+        _str(sandbox, stored, 'format'),
+        provider.text,
+      );
       await _fillFromCacheIfMissing();
       await _cacheSecrets();
       _swapModelList(provider.text, resetModel: false);
@@ -342,7 +351,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       unawaited(api.cliVersion(id).then((value) async {
         if (!mounted) return;
         setState(() => cli = value);
-        final info = CliVersion.fromJson(value);
+        final info = CliVersion.fromJson(value, runtime: inst?.runtime.apiValue);
         if (info.updateAvailable) {
           await CliUpdateOffer.notifyOnce(instanceId: id, name: inst?.name ?? 'workspace', info: info);
         }
@@ -385,9 +394,10 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       await api.saveConfig(id, {
         'provider': provider.text.trim(),
         'model': model.text.trim(),
-        'baseUrl': (baseUrl.text.trim().isEmpty
+        'format': apiFormat,
+        'baseUrl': (baseUrl.text.trim().isEmpty)
                 ? stockBaseUrl(provider.text)
-                : baseUrl.text.trim()),
+                : baseUrl.text.trim(),
         'savedProviders': _upsertLocal(savedProviders, _snapshotCurrent()),
         if (apiKey.text.trim().isNotEmpty) 'apiKey': apiKey.text.trim(),
         if (telegram.text.trim().isNotEmpty) 'telegramBotToken': telegram.text.trim(),
@@ -620,7 +630,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(16),
                       child: CliUpdateNote(
-                        info: CliVersion.fromJson(cli),
+                        info: CliVersion.fromJson(cli, runtime: inst?.runtime.apiValue),
                         busy: overlay != null,
                         onUpdate: _updateCli,
                       ),
@@ -759,6 +769,31 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                               ),
                             );
                           },
+                        ),
+                        const SizedBox(height: 10),
+                        InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'API format',
+                            helperText: '/format in chat also changes this',
+                            helperMaxLines: 1,
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              isExpanded: true,
+                              value: apiFormat,
+                              items: [
+                                for (final entry in apiWireFormats.entries)
+                                  DropdownMenuItem(
+                                    value: entry.key,
+                                    child: Text(entry.value, overflow: TextOverflow.ellipsis),
+                                  ),
+                              ],
+                              onChanged: (v) {
+                                if (v == null) return;
+                                setState(() => apiFormat = normalizeApiWireFormat(v, provider.text));
+                              },
+                            ),
+                          ),
                         ),
                         if (_showBaseUrl) ...[
                           const SizedBox(height: 10),

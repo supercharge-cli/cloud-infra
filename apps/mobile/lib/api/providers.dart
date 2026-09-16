@@ -54,6 +54,37 @@ bool providerNeedsBaseUrl(String provider, String currentUrl) {
 
 String stockBaseUrl(String provider) => lookupProviderDefault(provider)?.baseUrl ?? '';
 
+const apiWireFormats = <String, String>{
+  'chat_completions': 'Chat Completions · /chat/completions',
+  'messages': 'Messages · /messages',
+  'responses': 'Responses · /responses',
+};
+
+String parseApiWireFormat(String? raw) {
+  final v = (raw ?? '').trim().toLowerCase().replaceAll('-', '_');
+  if (v == 'messages' || v == 'anthropic' || v == 'anthropic_messages') {
+    return 'messages';
+  }
+  if (v == 'responses' || v == 'response') return 'responses';
+  if (v == 'chat_completions' ||
+      v == 'chat_completion' ||
+      v == 'chatcompletions' ||
+      v == 'openai' ||
+      v == 'openai_compatible') {
+    return 'chat_completions';
+  }
+  return '';
+}
+
+String defaultApiWireFormat(String provider) {
+  return provider.trim().toLowerCase() == 'anthropic' ? 'messages' : 'chat_completions';
+}
+
+String normalizeApiWireFormat(String? raw, [String provider = '']) {
+  final parsed = parseApiWireFormat(raw);
+  return parsed.isEmpty ? defaultApiWireFormat(provider) : parsed;
+}
+
 /// Curated picker lists (mirrors xibecode-core CURATED_PROVIDER_MODELS).
 const providerModels = <String, List<String>>{
   'pollinations': [

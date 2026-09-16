@@ -5,6 +5,10 @@
 
 import { stockBaseUrl } from "./provider-defaults";
 import {
+  normalizeApiWireFormat,
+  type ApiWireFormat,
+} from "./api-format";
+import {
   envKeysForProvider,
   parseSavedProviders,
   slotFromActive,
@@ -506,6 +510,7 @@ export type SavedProviderView = {
   baseUrl?: string;
   apiKey?: string;
   apiKeyHint?: string;
+  format?: ApiWireFormat;
 };
 
 export type SandboxConfigView = {
@@ -529,6 +534,7 @@ export type SandboxConfigView = {
   discordHint?: string;
   slackHint?: string;
   savedProviders?: SavedProviderView[];
+  format?: ApiWireFormat;
 };
 
 function hint(secret: string | undefined): string | undefined {
@@ -556,6 +562,7 @@ function toSavedView(slot: SavedProvider): SavedProviderView {
     baseUrl: slot.baseUrl,
     apiKey: slot.apiKey,
     apiKeyHint: hint(slot.apiKey),
+    format: slot.format,
   };
 }
 
@@ -635,11 +642,19 @@ function viewFromSources(
     "openai",
   );
   const slackOk = Boolean(slackBot && slackApp);
+  const format = normalizeApiWireFormat(
+    pick(
+      strField(profile, "format"),
+      env.SUPERAGENT_PROVIDER_FORMAT,
+    ),
+    provider,
+  );
   const current = slotFromActive({
     provider: provider || "openai",
     apiKey,
     baseUrl,
     model,
+    format,
   });
   const saved = upsertSavedProvider(
     parseSavedProviders(profile.savedProviders),
@@ -671,6 +686,7 @@ function viewFromSources(
     discordHint: hint(dc),
     slackHint: slackOk ? hint(slackBot) : undefined,
     savedProviders: saved.map(toSavedView),
+    format,
   };
 }
 
@@ -841,6 +857,7 @@ export type ConfigInput = {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  format?: string;
   /** Full list from the editor. Omitted = keep existing + upsert current. */
   savedProviders?: SavedProvider[];
   /** Vectra instance id — used to mint public vision URLs. */
@@ -942,7 +959,17 @@ export async function writeSandboxConfig(
   const incomingSaved = Array.isArray(input.savedProviders)
     ? parseSavedProviders(input.savedProviders)
     : parseSavedProviders(prevProfile.savedProviders);
-  const currentSlot = slotFromActive({ provider, apiKey, baseUrl, model });
+  const providerFormat = normalizeApiWireFormat(
+    input.format || existing.format,
+    provider,
+  );
+  const currentSlot = slotFromActive({
+    provider,
+    apiKey,
+    baseUrl,
+    model,
+    format: providerFormat,
+  });
   const savedProviders = currentSlot
     ? upsertSavedProvider(incomingSaved, currentSlot)
     : incomingSaved;
@@ -986,7 +1013,6 @@ export async function writeSandboxConfig(
     Boolean(telegramBotToken) && Boolean(tgWebhookUrl) && tgWebhookPort > 0;
   const providerKeyEnv = envKeysForProvider(provider)[0] || "OPENAI_API_KEY";
   const providerBaseUrl = baseUrl || stockBaseUrl(provider);
-  const providerFormat = provider === "anthropic" ? "anthropic" : "openai";
   const mediaBase = input.instanceId
     ? `${(
         process.env.PUBLIC_BASE_URL?.trim() ||
@@ -1088,6 +1114,7 @@ export async function writeSandboxConfig(
   const mergedProfile = {
     ...prevProfile,
     provider,
+    format: providerFormat,
     ...(model ? { model } : {}),
     ...(baseUrl
       ? { baseUrl }
@@ -1108,7 +1135,7 @@ export async function writeSandboxConfig(
     `base_url = ${tomlQuote(providerBaseUrl)}`,
     `api_base_url = ${tomlQuote(providerBaseUrl)}`,
     `env_key = ${tomlQuote(providerKeyEnv)}`,
-    `api_backend = ${tomlQuote(providerFormat === "anthropic" ? "messages" : "chat_completions")}`,
+    `api_backend = ${tomlQuote(providerFormat)}`,
     `agent_type = ${tomlQuote("supercharge-e2b")}`,
     "context_window = 128000",
     "",
@@ -1179,7 +1206,7 @@ export async function writeSandboxConfig(
   );
   logs.push(
     redact(
-      `config saved OK · channels=${channels.join("+") || "none"} · pairing=${openAccess ? "OFF (open access)" : "ON (approve in dashboard)"} · templateWake=${sandboxWakeHttp ? tgWebhookUrl : "off"} · provider=${provider} model=${model || "(none)"} baseUrl=${baseUrl || "(none)"}\n${verify.stdout || ""}`,
+      `config saved OK · channels=${channels.join("+") || "none"} · pairing=${openAccess ? "OFF (open access)" : "ON (approve in dashboard)"} · templateWake=${sandboxWakeHttp ? tgWebhookUrl : "off"} · provider=${provider} format=${providerFormat} model=${model || "(none)"} baseUrl=${baseUrl || "(none)"}\n${verify.stdout || ""}`,
     ),
   );
 
@@ -1187,6 +1214,7 @@ export async function writeSandboxConfig(
     runtime,
     provider,
     model,
+    format: providerFormat,
     baseUrl,
     hasApiKey: true,
     hasTelegramToken: Boolean(telegramBotToken),
@@ -1274,15 +1302,29 @@ export async function approvePairingCode(
   return { ok, logs: [out.slice(0, 800)] };
 }
 
+/** First `x.y.z` in CLI / npm / GitHub output (`v1.1.0` → `1.1.0`). */
+export function parseSemverCore(text: string): string | null {
+  const m = String(text || "")
+    .trim()
+    .replace(/^v/i, "")
+    .match(/(\d+\.\d+\.\d+)/);
+  return m ? m[1] : null;
+}
+
 /** Parse `xibecode -v` / package version from shell output. */
 export function parseXibecodeVersion(text: string): string | null {
-  const m = String(text || "").match(/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/);
-  return m ? m[1] : null;
+  return parseSemverCore(text);
+}
+
+function isNewerRelease(latest: string | null, current: string | null): boolean {
+  if (!latest || !current) return false;
+  if (!parseSemverCore(latest) || !parseSemverCore(current)) return false;
+  return compareSemverCore(latest, current) > 0;
 }
 
 function superchargeUpdateRepo(): string {
   return (
-    process.env.SUPERCHARGE_E2B_UPDATE_REPO?.trim() || "iotserver24/supercharge"
+    process.env.SUPERCHARGE_E2B_UPDATE_REPO?.trim() || "iotserver24/supercharge-releases"
   );
 }
 
@@ -1304,7 +1346,8 @@ async function fetchSuperchargeE2bLatestVersion(): Promise<string | null> {
     });
     if (res.ok) {
       const data = (await res.json()) as { version?: string };
-      if (data.version) return String(data.version).trim();
+      const version = parseSemverCore(String(data.version || ""));
+      if (version) return version;
     }
   } catch {
     /* fall through to GitHub API */
@@ -1322,11 +1365,11 @@ async function fetchSuperchargeE2bLatestVersion(): Promise<string | null> {
       },
     );
     clearTimeout(t2);
-    if (!res.ok) return "latest";
+    if (!res.ok) return null;
     const data = (await res.json()) as { tag_name?: string };
-    return data.tag_name?.trim() || "latest";
+    return parseSemverCore(data.tag_name || "") || null;
   } catch {
-    return "latest";
+    return null;
   }
 }
 
@@ -1367,6 +1410,7 @@ export async function getCliVersionInfo(
   current: string | null;
   latest: string | null;
   updateAvailable: boolean;
+  runtime: AgentRuntime;
   logs: string[];
 }> {
   const logs: string[] = [];
@@ -1392,7 +1436,7 @@ export async function getCliVersionInfo(
   );
   const out = `${r.stdout || ""}\n${r.stderr || ""}`;
   logs.push(redactSecrets(out.slice(0, 1200)));
-  current = parseXibecodeVersion(out);
+  current = parseSemverCore(out);
   if (runtime === "supercharge") {
     let latest: string | null = null;
     try {
@@ -1405,12 +1449,15 @@ export async function getCliVersionInfo(
       "cat /var/lib/superagent/e2b-version 2>/dev/null || true",
       { timeout: 20, sandboxId, runtime },
     );
-    const stamped = String(stamp.stdout || "").trim();
+    const stamped = parseSemverCore(String(stamp.stdout || "").trim());
     if (stamped) current = stamped;
-    const updateAvailable = Boolean(
-      current && latest && current !== latest,
-    );
-    return { current, latest, updateAvailable, logs };
+    return {
+      current,
+      latest,
+      updateAvailable: isNewerRelease(latest, current),
+      runtime,
+      logs,
+    };
   }
 
   let latest: string | null = null;
@@ -1447,20 +1494,24 @@ export async function getCliVersionInfo(
     }
   }
 
-  const updateAvailable = Boolean(
-    current && latest && compareSemverCore(latest, current) > 0,
-  );
-
-  return { current, latest, updateAvailable, logs };
+  return {
+    current,
+    latest,
+    updateAvailable: isNewerRelease(latest, current),
+    runtime,
+    logs,
+  };
 }
 
-/** Semver core compare (positive if a > b). */
+/** Semver core compare (positive if a > b). Strips a leading `v`. */
 export function compareSemverCore(a: string, b: string): number {
-  const coreA = a
+  const na = parseSemverCore(a) || a;
+  const nb = parseSemverCore(b) || b;
+  const coreA = na
     .split("-")[0]
     .split(".")
     .map((n) => parseInt(n, 10) || 0);
-  const coreB = b
+  const coreB = nb
     .split("-")[0]
     .split(".")
     .map((n) => parseInt(n, 10) || 0);
