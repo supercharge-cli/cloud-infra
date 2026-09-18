@@ -106,6 +106,11 @@ export async function PUT(req: Request, ctx: Ctx) {
     name?: string;
     restart?: boolean;
     allowAllUsers?: boolean;
+    imageProvider?: string;
+    imageModel?: string;
+    imageBaseUrl?: string;
+    imageApiKey?: string;
+    imageFormat?: string;
   };
 
   try {
@@ -159,6 +164,11 @@ export async function PUT(req: Request, ctx: Ctx) {
         webhookMode === "sandbox" ? tgWebhookSecret : undefined,
       telegramWebhookPort:
         webhookMode === "sandbox" ? SANDBOX_TG_WEBHOOK_PORT : undefined,
+      imageProvider: body.imageProvider,
+      imageModel: body.imageModel,
+      imageBaseUrl: body.imageBaseUrl,
+      imageApiKey: body.imageApiKey,
+      imageFormat: body.imageFormat,
     });
     if (!result.ok) {
       return NextResponse.json(
@@ -237,6 +247,11 @@ export async function PUT(req: Request, ctx: Ctx) {
         hasTelegramToken: result.meta.hasTelegramToken,
         hasDiscordToken: result.meta.hasDiscordToken,
         hasSlackToken: result.meta.hasSlackToken,
+        imageProvider: result.meta.imageProvider,
+        imageModel: result.meta.imageModel,
+        imageBaseUrl: result.meta.imageBaseUrl,
+        imageFormat: result.meta.imageFormat,
+        hasImageApiKey: result.meta.hasImageApiKey,
       },
     });
 

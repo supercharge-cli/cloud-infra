@@ -9,7 +9,7 @@ The web application sends one of two values when an instance is created:
 | Runtime value | Gateway template variable  | Default template alias     | Daemon                                         |
 | ------------- | -------------------------- | -------------------------- | ---------------------------------------------- |
 | `xibecode`    | `XIBECODE_E2B_TEMPLATE`    | `xibecode-full-sandbox`    | Existing XibeCode daemon                       |
-| `supercharge` | `SUPERCHARGE_E2B_TEMPLATE` | `supercharge-full-sandbox` | `/usr/local/bin/supercharge-superagent-server` |
+| `supercharge` | `SUPERCHARGE_E2B_TEMPLATE` | `supercharge-daemon-sandbox` | `supercharge agent daemon --bind 0.0.0.0:8790` (launches CLI stdio) |
 
 The selected value is persisted on the instance record. It is reused for gateway reattachment, wake/resume, daemon restart, workspace/file operations, and sandbox recreation. Existing database rows without a runtime are treated as `xibecode`.
 
@@ -76,7 +76,14 @@ SUPERAGENT_PROVIDER_BASE_URL=<optional-openai-compatible-or-anthropic-url>
 SUPERAGENT_PROVIDER_FORMAT=openai|anthropic
 SUPERAGENT_PROVIDER_API_KEY_ENV=<environment-variable-name>
 SUPERAGENT_PROVIDER_CONFIG_PATH=/home/user/.supercharge/provider-config.toml
+SUPERAGENT_IMAGE_PROVIDER=<provider-id>
+SUPERAGENT_IMAGE_MODEL=<image-model-id>
+SUPERAGENT_IMAGE_BASE_URL=<optional-openai-compatible-images-url>
+SUPERAGENT_IMAGE_FORMAT=openai_images|pollinations|custom
+SUPERAGENT_IMAGE_API_KEY=<optional>
 ```
+
+Image generation is independent of the chat provider. Vectra instance settings write `[image_provider]` into `~/.supercharge/config.toml`. In-app commands: `/isetup`, `/imodels`, `/imagine`.
 
 The active credential is written only to the provider-specific environment variable named by `SUPERAGENT_PROVIDER_API_KEY_ENV` (for example, `POLLINATIONS_API_KEY`, `OPENAI_API_KEY`, or a user-selected custom variable). The generated runtime TOML contains provider metadata and an environment-variable name, never the secret itself. Custom OpenAI-compatible providers must use an HTTPS URL, except for loopback development addresses.
 
@@ -105,7 +112,7 @@ cargo build --release --ignore-rust-version -p supercharge-pager --bin superchar
 # and create /usr/local/bin/sc -> /usr/local/bin/supercharge.
 
 # Build and publish the local E2B template using the chosen alias.
-e2b template build --name supercharge-full-sandbox
+e2b template build --name supercharge-daemon-sandbox
 # Publish according to the E2B CLI version used by the local account.
 # Then set SUPERCHARGE_E2B_TEMPLATE to that published alias or template id.
 ```

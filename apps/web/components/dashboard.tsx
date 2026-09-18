@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { BRAND } from "@/lib/brand";
 import {
+  defaultImageModel,
+  imageModelsForProvider,
+  imageProviderFormat,
   lookupProviderDefault,
   mergeCatalogModels,
   modelsForProviderDetailed,
@@ -55,6 +58,13 @@ type ConfigView = {
   slackHint?: string;
   savedProviders?: SavedSlot[];
   format?: ApiWireFormat;
+  imageProvider?: string;
+  imageModel?: string;
+  imageBaseUrl?: string;
+  imageFormat?: string;
+  imageApiKey?: string;
+  hasImageApiKey?: boolean;
+  imageApiKeyHint?: string;
 };
 
 type PairingView = {
@@ -166,6 +176,16 @@ export function Dashboard({ email }: { email: string }) {
   const [savedProviders, setSavedProviders] = useState<SavedSlot[]>([]);
   const [apiFormat, setApiFormat] = useState<ApiWireFormat>("chat_completions");
   const [byopReady, setByopReady] = useState(false);
+  const [imageProvider, setImageProvider] = useState("pollinations");
+  const [imageModel, setImageModel] = useState("flux");
+  const [imageBaseUrl, setImageBaseUrl] = useState(
+    "https://gen.pollinations.ai/v1",
+  );
+  const [imageApiKey, setImageApiKey] = useState("");
+  const [imageFormat, setImageFormat] = useState("pollinations");
+  const [imageModelOptions, setImageModelOptions] = useState<string[]>(
+    imageModelsForProvider("pollinations"),
+  );
 
   // Command pane (shell in sandbox)
   const [cmdInput, setCmdInput] = useState("");
@@ -436,6 +456,15 @@ export function Dashboard({ email }: { email: string }) {
         );
         setModelOptions(modelsForProviderDetailed(s?.provider || "pollinations"));
         void refreshModelsForProvider(s?.provider || "pollinations");
+        const imgP = s?.imageProvider || s?.provider || "pollinations";
+        setImageProvider(imgP);
+        setImageModel(s?.imageModel || defaultImageModel(imgP));
+        setImageBaseUrl(
+          s?.imageBaseUrl || stockBaseUrl(imgP) || s?.baseUrl || "",
+        );
+        setImageApiKey(s?.imageApiKey || "");
+        setImageFormat(s?.imageFormat || imageProviderFormat(imgP));
+        setImageModelOptions(imageModelsForProvider(imgP));
       } else {
         setConfig(null);
         setRuntime(
@@ -617,6 +646,19 @@ export function Dashboard({ email }: { email: string }) {
     void refreshModelsForProvider(next);
   }
 
+  function applyImageProviderPick(next: string) {
+    setImageProvider(next);
+    setImageFormat(imageProviderFormat(next));
+    const def = lookupProviderDefault(next);
+    if (def?.baseUrl) setImageBaseUrl(def.baseUrl);
+    const choices = imageModelsForProvider(next);
+    setImageModelOptions(choices);
+    const current = imageModel.trim();
+    if (!current || (choices.length > 0 && !choices.includes(current))) {
+      setImageModel(defaultImageModel(next));
+    }
+  }
+
   async function refreshModelsForProvider(next: string) {
     const id = next.trim();
     if (!id || id === "custom") return;
@@ -702,6 +744,11 @@ export function Dashboard({ email }: { email: string }) {
           slackAppToken: slackAppToken || undefined,
           restart,
           allowAllUsers: allowAll,
+          imageProvider,
+          imageModel,
+          imageBaseUrl: imageBaseUrl.trim() || stockBaseUrl(imageProvider),
+          imageApiKey: imageApiKey || undefined,
+          imageFormat: imageFormat || imageProviderFormat(imageProvider),
         }),
       });
       const data = await res.json();
@@ -1600,6 +1647,82 @@ export function Dashboard({ email }: { email: string }) {
                   </button>
                 </div>
               </div>
+              {runtime === "supercharge" ? (
+                <div className="sm:col-span-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+                  <p className="mb-1 text-sm font-semibold text-white">
+                    Image generation
+                  </p>
+                  <p className="mb-3 text-xs text-zinc-500">
+                    Independent of chat. Writes{" "}
+                    <code>[image_provider]</code> for <code>/imagine</code>.
+                    In chat: <code>/isetup</code>, <code>/imodels</code>. Any
+                    custom model id is allowed.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Image provider">
+                      <input
+                        list="image-providers"
+                        value={imageProvider}
+                        onChange={(e) => applyImageProviderPick(e.target.value)}
+                        placeholder="pollinations, openai, custom…"
+                        className="field"
+                      />
+                      <datalist id="image-providers">
+                        <option value="pollinations" />
+                        <option value="openai" />
+                        <option value="openrouter" />
+                        <option value="google" />
+                        <option value="custom" />
+                      </datalist>
+                    </Field>
+                    <Field label="Image model">
+                      <input
+                        list="image-models"
+                        value={imageModel}
+                        onChange={(e) => setImageModel(e.target.value)}
+                        placeholder="flux or any custom id"
+                        className="field"
+                      />
+                      <datalist id="image-models">
+                        {imageModelOptions.map((id) => (
+                          <option key={id} value={id} />
+                        ))}
+                      </datalist>
+                    </Field>
+                    <Field label="Image format">
+                      <select
+                        value={imageFormat}
+                        onChange={(e) => setImageFormat(e.target.value)}
+                        className="field"
+                      >
+                        <option value="openai_images">openai_images</option>
+                        <option value="pollinations">pollinations</option>
+                        <option value="custom">custom</option>
+                      </select>
+                    </Field>
+                    <Field label="Image API key (optional)">
+                      <input
+                        value={imageApiKey}
+                        onChange={(e) => setImageApiKey(e.target.value)}
+                        type="text"
+                        autoComplete="off"
+                        placeholder="empty = reuse chat key / none"
+                        className="field"
+                      />
+                    </Field>
+                    {providerNeedsBaseUrl(imageProvider, imageBaseUrl) ? (
+                      <Field label="Image base URL">
+                        <input
+                          value={imageBaseUrl}
+                          onChange={(e) => setImageBaseUrl(e.target.value)}
+                          placeholder="https://…/v1"
+                          className="field"
+                        />
+                      </Field>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               <Field label="Telegram bot token">
                 <input
                   value={telegramToken}

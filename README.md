@@ -125,7 +125,7 @@ New instances can use either the existing **XibeCode** image or the **Supercharg
 | Runtime     | Environment variable       | Default alias              | Daemon                                         |
 | ----------- | -------------------------- | -------------------------- | ---------------------------------------------- |
 | XibeCode    | `XIBECODE_E2B_TEMPLATE`    | `xibecode-full-sandbox`    | Existing XibeCode daemon                       |
-| Supercharge | `SUPERCHARGE_E2B_TEMPLATE` | `supercharge-full-sandbox` | `/usr/local/bin/supercharge-superagent-server` |
+| Supercharge | `SUPERCHARGE_E2B_TEMPLATE` | `supercharge-daemon-sandbox` | `supercharge agent daemon --bind 0.0.0.0:8790` |
 
 The Supercharge image is intentionally built and published by the repository owner’s local E2B workflow. This repository contains the application selection/configuration code and the exact [Supercharge E2B template contract](docs/supercharge-e2b-template.md), not a published image or embedded credentials. The image must expose the app-compatible daemon on `0.0.0.0:8790`, the wake/file-share service on `8788`, and the visible browser stream on `9223`. It must include `supercharge`, `sc`, Chromium, `agent-browser`, terminal/workspace tools, and the static `supercharge-superagent-server` binary.
 

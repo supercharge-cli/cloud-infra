@@ -16,7 +16,8 @@ class SessionController extends ChangeNotifier {
   String? error;
 
   Future<void> load() async {
-    client = VectraClient(baseUrl: apiBase);
+    final savedBase = await _store.read(key: 'apiBase');
+    client = VectraClient(baseUrl: (savedBase != null && savedBase.isNotEmpty) ? savedBase : apiBase);
     final token = await _store.read(key: 'token');
     if (token != null && token.isNotEmpty) {
       client.token = token;
@@ -41,6 +42,7 @@ class SessionController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
+      client = VectraClient(baseUrl: apiBase);
       final result = register
           ? await client.register(email, password)
           : await client.login(email, password);
@@ -50,6 +52,32 @@ class SessionController extends ChangeNotifier {
       client.token = result.token;
       user = result.user;
       await _store.write(key: 'token', value: result.token);
+      await _store.delete(key: 'apiBase');
+    } catch (e) {
+      error = e.toString();
+    }
+    notifyListeners();
+  }
+
+  /// Paseo-style: phone talks to a Supercharge daemon (host + password).
+  Future<void> connectDaemon(String host, String password) async {
+    error = null;
+    notifyListeners();
+    try {
+      var base = host.trim();
+      if (base.endsWith('/')) base = base.substring(0, base.length - 1);
+      if (!base.startsWith('http://') && !base.startsWith('https://')) {
+        base = 'http://$base';
+      }
+      client = VectraClient(baseUrl: base);
+      final result = await client.login('server@supercharge', password);
+      if (result.token.isEmpty) {
+        throw ApiException(500, 'Daemon did not return a token');
+      }
+      client.token = result.token;
+      user = result.user;
+      await _store.write(key: 'token', value: result.token);
+      await _store.write(key: 'apiBase', value: base);
     } catch (e) {
       error = e.toString();
     }
@@ -60,6 +88,8 @@ class SessionController extends ChangeNotifier {
     user = null;
     client.token = null;
     await _store.delete(key: 'token');
+    await _store.delete(key: 'apiBase');
+    client = VectraClient(baseUrl: apiBase);
     notifyListeners();
   }
 }

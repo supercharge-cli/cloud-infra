@@ -123,10 +123,10 @@ const runtimeProfiles: Record<AgentRuntime, RuntimeProfile> = {
     label: "Supercharge",
     template:
       process.env.SUPERCHARGE_E2B_TEMPLATE?.trim() ||
-      "supercharge-full-sandbox",
+      "supercharge-daemon-sandbox",
     daemonCommand:
       process.env.SUPERCHARGE_SANDBOX_DAEMON_COMMAND?.trim() ||
-      "/usr/local/bin/supercharge-superagent-server",
+      "supercharge agent daemon --bind 0.0.0.0:8790",
     pidFile:
       process.env.SUPERCHARGE_SANDBOX_DAEMON_PIDFILE?.trim() ||
       "/tmp/supercharge-daemon.pid",
@@ -135,7 +135,7 @@ const runtimeProfiles: Record<AgentRuntime, RuntimeProfile> = {
       "/tmp/supercharge-daemon.log",
     processMatch:
       process.env.SUPERCHARGE_SANDBOX_DAEMON_MATCH?.trim() ||
-      "supercharge-superagent-server|superagent-server",
+      "supercharge agent daemon|supercharge-superagent-server|superagent-server",
   },
 };
 function normalizeRuntime(value: unknown): AgentRuntime {

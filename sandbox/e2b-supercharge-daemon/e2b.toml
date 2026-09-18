@@ -1,0 +1,3 @@
+# e2b template build --name supercharge-daemon-sandbox
+team_id = "local"
+start_cmd = "/opt/vectra/start-supercharge-daemon.sh"

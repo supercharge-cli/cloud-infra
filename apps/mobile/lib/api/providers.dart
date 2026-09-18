@@ -241,4 +241,20 @@ List<CatalogModel> mergeCatalogModels(List<List<CatalogModel>> groups) {
     }
   }
   return out;
+const imageProviderModels = <String, List<String>>{
+  'pollinations': ['flux', 'turbo', 'gptimage', 'kontext'],
+  'openai': ['gpt-image-1', 'dall-e-3', 'dall-e-2'],
+  'openrouter': ['openai/gpt-image-1', 'black-forest-labs/flux'],
+  'google': ['imagen-4.0-generate-001', 'imagen-3.0-generate-002'],
+List<String> imageModelsForProvider(String provider) {
+  final id = provider.trim().toLowerCase();
+  return List<String>.from(imageProviderModels[id] ?? const <String>[]);
+String defaultImageModel(String provider) {
+  final list = imageModelsForProvider(provider);
+  return list.isEmpty ? 'flux' : list.first;
+String imageProviderFormat(String provider) {
+  final id = provider.trim().toLowerCase();
+  if (id == 'pollinations') return 'pollinations';
+  if (id == 'custom') return 'custom';
+  return 'openai_images';
 }

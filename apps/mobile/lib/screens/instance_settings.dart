@@ -50,6 +50,12 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   final pairCode = TextEditingController();
   final cmd = TextEditingController();
   final cwd = TextEditingController(text: '/home/user/workspace');
+  final imageProvider = TextEditingController(text: 'pollinations');
+  final imageModel = TextEditingController(text: 'flux');
+  final imageBaseUrl = TextEditingController();
+  final imageApiKey = TextEditingController();
+  final imageFormat = TextEditingController(text: 'pollinations');
+  List<String> imageModelChoices = imageModelsForProvider('pollinations');
 
   List<CatalogModel> modelChoices = const [];
   List<Map<String, String>> savedProviders = [];
@@ -93,6 +99,11 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     pairCode.dispose();
     cmd.dispose();
     cwd.dispose();
+    imageProvider.dispose();
+    imageModel.dispose();
+    imageBaseUrl.dispose();
+    imageApiKey.dispose();
+    imageFormat.dispose();
     super.dispose();
   }
 
@@ -341,6 +352,20 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
         _str(sandbox, stored, 'format'),
         provider.text,
       );
+      final imgP = _str(sandbox, stored, 'imageProvider');
+      imageProvider.text = imgP.isEmpty ? provider.text : imgP;
+      imageModel.text = _str(sandbox, stored, 'imageModel');
+      if (imageModel.text.trim().isEmpty) {
+        imageModel.text = defaultImageModel(imageProvider.text);
+      }
+      imageBaseUrl.text = _str(sandbox, stored, 'imageBaseUrl');
+      if (imageBaseUrl.text.trim().isEmpty) {
+        imageBaseUrl.text = stockBaseUrl(imageProvider.text);
+      }
+      imageApiKey.text = _str(sandbox, stored, 'imageApiKey');
+      final fmt = _str(sandbox, stored, 'imageFormat');
+      imageFormat.text = fmt.isEmpty ? imageProviderFormat(imageProvider.text) : fmt;
+      imageModelChoices = imageModelsForProvider(imageProvider.text);
       await _fillFromCacheIfMissing();
       await _cacheSecrets();
       _swapModelList(provider.text, resetModel: false);
@@ -406,6 +431,17 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
         if (slackApp.text.trim().isNotEmpty) 'slackAppToken': slackApp.text.trim(),
         'allowAllUsers': allowAll,
         'restart': true,
+        if (inst?.runtime == AgentRuntime.supercharge) ...{
+          'imageProvider': imageProvider.text.trim(),
+          'imageModel': imageModel.text.trim(),
+          'imageBaseUrl': (imageBaseUrl.text.trim().isEmpty
+              ? stockBaseUrl(imageProvider.text)
+              : imageBaseUrl.text.trim()),
+          'imageFormat': imageFormat.text.trim().isEmpty
+              ? imageProviderFormat(imageProvider.text)
+              : imageFormat.text.trim(),
+          if (imageApiKey.text.trim().isNotEmpty) 'imageApiKey': imageApiKey.text.trim(),
+        },
       });
       msg = 'Saved. Daemon restarted.';
       await _load();
@@ -884,6 +920,80 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                             ),
                           ],
                         ),
+                        if (inst?.runtime == AgentRuntime.supercharge) ...[
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Image generation',
+                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Separate from chat. Used by /imagine. Commands: /isetup, /imodels. Any custom model id is allowed.',
+                            style: TextStyle(color: Vc.muted, fontSize: 12, height: 1.35),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: imageProvider,
+                            decoration: const InputDecoration(
+                              labelText: 'Image provider',
+                              hintText: 'pollinations, openai, custom…',
+                            ),
+                            onChanged: (v) => setState(() {
+                              imageFormat.text = imageProviderFormat(v);
+                              imageModelChoices = imageModelsForProvider(v);
+                              if (imageModel.text.trim().isEmpty ||
+                                  (imageModelChoices.isNotEmpty &&
+                                      !imageModelChoices.contains(imageModel.text.trim()))) {
+                                imageModel.text = defaultImageModel(v);
+                              }
+                              if (stockBaseUrl(v).isNotEmpty) {
+                                imageBaseUrl.text = stockBaseUrl(v);
+                              }
+                            }),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: imageModel,
+                            decoration: InputDecoration(
+                              labelText: 'Image model',
+                              hintText: 'flux or any custom id',
+                              suffixIcon: imageModelChoices.isEmpty
+                                  ? null
+                                  : PopupMenuButton<String>(
+                                      icon: const Icon(Icons.expand_more, color: Vc.muted),
+                                      onSelected: (v) => setState(() => imageModel.text = v),
+                                      itemBuilder: (_) => [
+                                        for (final m in imageModelChoices)
+                                          PopupMenuItem(value: m, child: Text(m)),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: imageFormat,
+                            decoration: const InputDecoration(
+                              labelText: 'Image format',
+                              hintText: 'openai_images | pollinations | custom',
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          SecretField(
+                            controller: imageApiKey,
+                            label: 'Image API key (optional)',
+                            hint: 'empty = reuse chat key / none',
+                          ),
+                          if (providerNeedsBaseUrl(imageProvider.text, imageBaseUrl.text)) ...[
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: imageBaseUrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Image base URL',
+                                hintText: 'https://…/v1',
+                              ),
+                            ),
+                          ],
+                        ],
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           title: const Text('Allow all users (skip pairing)'),

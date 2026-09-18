@@ -43,9 +43,16 @@ void main() {
       'model',
       'format',
       'cmd',
+      'setup',
+      'isetup',
+      'imodels',
+      'imagine',
       'update',
       'help',
     ]);
+    expect(commandSendsImmediately('isetup', runtime: AgentRuntime.supercharge), isTrue);
+    expect(commandStartsAgentTurn('imagine', runtime: AgentRuntime.supercharge), isTrue);
+    expect(commandStartsAgentTurn('isetup', runtime: AgentRuntime.supercharge), isFalse);
     expect(commandSendsImmediately('start', runtime: AgentRuntime.supercharge), isTrue);
     expect(isNewLaneCommand('/reset', runtime: AgentRuntime.supercharge), isFalse);
   });

@@ -33,8 +33,11 @@ Select an instance, then:
 | Discord bot token | Discord bot + Message Content Intent |
 | Slack bot + app tokens | `xoxb-…` and `xapp-…` (Socket Mode) |
 | Allow all users | Off = pairing (recommended); on = anyone can talk |
+| Image generation (Supercharge) | Separate image provider, model, format (`openai_images` / `pollinations` / `custom`), optional key, and custom base URL. Any model id is allowed. Used by `/imagine`. |
 
 Set **at least one** channel. Use **Save config** or **Save & restart** so the agent reloads settings.
+
+On a Supercharge sandbox, chat commands include `/setup`, `/isetup`, `/imodels [id]`, and `/imagine <description>`. Image settings are independent of the chat provider.
 
 ## Command pane
 

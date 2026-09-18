@@ -82,6 +82,10 @@ export type Instance = {
   userId: string;
   name: string;
   runtime: AgentRuntime;
+  /** E2B template alias used at create (auto-selected from runtime). */
+  e2bTemplate?: string;
+  /** Inbox port inside the sandbox (Supercharge daemon). */
+  daemonPort?: number;
   sessionId: string;
   sandboxId?: string;
   status: InstanceStatus;
@@ -512,6 +516,12 @@ export async function createInstanceRecord(input: {
     sessionId: input.sessionId,
     sandboxId: input.sandboxId,
     runtime: input.runtime || "xibecode",
+    e2bTemplate:
+      input.runtime === "supercharge"
+        ? process.env.SUPERCHARGE_E2B_TEMPLATE?.trim() ||
+          "supercharge-daemon-sandbox"
+        : process.env.XIBECODE_E2B_TEMPLATE?.trim() || "xibecode-full-sandbox",
+    daemonPort: input.runtime === "supercharge" ? 8790 : undefined,
     status: "running",
     aiConfigured: false,
     telegramConfigured: false,

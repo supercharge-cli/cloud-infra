@@ -14,18 +14,26 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final email = TextEditingController();
   final password = TextEditingController();
+  final host = TextEditingController();
   bool busy = false;
   bool signup = false;
   bool showPass = false;
+  bool daemon = false;
 
   @override
   void dispose() {
     email.dispose();
     password.dispose();
+    host.dispose();
     super.dispose();
   }
 
   String? _validate() {
+    if (daemon) {
+      if (host.text.trim().isEmpty) return 'Enter the Supercharge server host.';
+      if (password.text.isEmpty) return 'Enter the server password.';
+      return null;
+    }
     final e = email.text.trim();
     if (e.isEmpty || !e.contains('@')) return 'Enter a valid email.';
     if (password.text.length < 6) return 'Password must be at least 6 characters.';
@@ -40,7 +48,11 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     setState(() => busy = true);
-    await session.signIn(email.text.trim(), password.text, register: signup);
+    if (daemon) {
+      await session.connectDaemon(host.text.trim(), password.text);
+    } else {
+      await session.signIn(email.text.trim(), password.text, register: signup);
+    }
     if (mounted) setState(() => busy = false);
   }
 
@@ -95,14 +107,41 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w800, letterSpacing: -0.8),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Chat with your cloud sandbox and run the full dashboard from your phone.',
-                    style: TextStyle(color: Vc.muted, height: 1.45, fontSize: 15),
+                  Text(
+                    daemon
+                        ? 'Talk to a Supercharge daemon on your VPS or LAN. Same password as SUPERCHARGE_PASSWORD.'
+                        : 'Chat with your cloud sandbox and run the full dashboard from your phone.',
+                    style: const TextStyle(color: Vc.muted, height: 1.45, fontSize: 15),
                   ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilterChip(
+                      label: const Text('Supercharge server'),
+                      selected: daemon,
+                      onSelected: busy
+                          ? null
+                          : (v) {
+                              context.read<SessionController>().setError(null);
+                              setState(() => daemon = v);
+                            },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   VcPanel(
                     child: Column(
                       children: [
+                        if (daemon)
+                          TextField(
+                            controller: host,
+                            keyboardType: TextInputType.url,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: 'Host',
+                              hintText: 'http://192.168.1.10:6767',
+                            ),
+                          )
+                        else
                         TextField(
                           controller: email,
                           keyboardType: TextInputType.emailAddress,
@@ -136,12 +175,16 @@ class _LoginScreenState extends State<LoginScreen> {
                           onPressed: busy ? null : _submit,
                           child: SizedBox(
                             width: double.infinity,
-                            child: Text(signup ? 'Create account' : 'Sign in', textAlign: TextAlign.center),
+                            child: Text(
+                              daemon ? 'Connect' : (signup ? 'Create account' : 'Sign in'),
+                              textAlign: TextAlign.center,
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
+                  if (!daemon)
                   TextButton(
                     onPressed: busy
                         ? null

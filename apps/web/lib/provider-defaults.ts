@@ -218,4 +218,20 @@ export function mergeCatalogModels(...groups: CatalogModel[][]): CatalogModel[] 
     }
   }
   return out;
+/** Image-generation model ids (OpenAI-compatible `/images/generations`). */
+export const IMAGE_PROVIDER_MODELS: Record<string, string[]> = {
+  pollinations: ["flux", "turbo", "gptimage", "kontext"],
+  openai: ["gpt-image-1", "dall-e-3", "dall-e-2"],
+  openrouter: ["openai/gpt-image-1", "black-forest-labs/flux"],
+  google: ["imagen-4.0-generate-001", "imagen-3.0-generate-002"],
+export function imageModelsForProvider(provider: string): string[] {
+  return [...(IMAGE_PROVIDER_MODELS[provider.trim().toLowerCase()] || [])];
+export function defaultImageModel(provider: string): string {
+  return imageModelsForProvider(provider)[0] || "flux";
+/** Wire format Supercharge `[image_provider].format` understands. */
+export function imageProviderFormat(provider: string): "pollinations" | "custom" | "openai_images" {
+  const id = provider.trim().toLowerCase();
+  if (id === "pollinations") return "pollinations";
+  if (id === "custom") return "custom";
+  return "openai_images";
 }

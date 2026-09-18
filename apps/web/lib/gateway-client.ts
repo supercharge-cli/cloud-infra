@@ -3,7 +3,11 @@
  * API keys for the cloud provider stay on the gateway, not in the browser.
  */
 
-import { stockBaseUrl } from "./provider-defaults";
+import {
+  defaultImageModel,
+  imageProviderFormat,
+  stockBaseUrl,
+} from "./provider-defaults";
 import {
   normalizeApiWireFormat,
   type ApiWireFormat,
@@ -535,6 +539,14 @@ export type SandboxConfigView = {
   slackHint?: string;
   savedProviders?: SavedProviderView[];
   format?: ApiWireFormat;
+  /** Supercharge image generation (`/isetup`). Independent of chat provider. */
+  imageProvider?: string;
+  imageModel?: string;
+  imageBaseUrl?: string;
+  imageFormat?: string;
+  imageApiKey?: string;
+  hasImageApiKey?: boolean;
+  imageApiKeyHint?: string;
 };
 
 function hint(secret: string | undefined): string | undefined {
@@ -551,6 +563,11 @@ function emptyConfigView(runtime: AgentRuntime = "xibecode"): SandboxConfigView 
     hasSlackToken: false,
     allowAllUsers: false,
     savedProviders: [],
+    imageProvider: "",
+    imageModel: "",
+    imageBaseUrl: "",
+    imageFormat: "openai_images",
+    hasImageApiKey: false,
   };
 }
 
@@ -687,6 +704,68 @@ function viewFromSources(
     slackHint: slackOk ? hint(slackBot) : undefined,
     savedProviders: saved.map(toSavedView),
     format,
+    ...imageFieldsFromSources(env, profile, provider, baseUrl),
+  };
+}
+
+function imageProfile(profile: Record<string, unknown>): Record<string, unknown> {
+  const raw = profile.imageProvider;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  return {};
+}
+
+function imageFieldsFromSources(
+  env: Record<string, string>,
+  profile: Record<string, unknown>,
+  chatProvider: string,
+  chatBaseUrl: string,
+): Pick<
+  SandboxConfigView,
+  | "imageProvider"
+  | "imageModel"
+  | "imageBaseUrl"
+  | "imageFormat"
+  | "imageApiKey"
+  | "hasImageApiKey"
+  | "imageApiKeyHint"
+> {
+  const img = imageProfile(profile);
+  const imageProvider = pick(
+    strField(img, "id"),
+    strField(img, "provider"),
+    env.SUPERAGENT_IMAGE_PROVIDER,
+    chatProvider || "pollinations",
+  );
+  const imageBaseUrl = pick(
+    strField(img, "baseUrl"),
+    env.SUPERAGENT_IMAGE_BASE_URL,
+    chatBaseUrl,
+    stockBaseUrl(imageProvider),
+  );
+  const imageModel = pick(
+    strField(img, "model"),
+    env.SUPERAGENT_IMAGE_MODEL,
+    defaultImageModel(imageProvider),
+  );
+  const imageFormat = pick(
+    strField(img, "format"),
+    env.SUPERAGENT_IMAGE_FORMAT,
+    imageProviderFormat(imageProvider),
+  );
+  const imageApiKey = pick(
+    strField(img, "apiKey"),
+    env.SUPERAGENT_IMAGE_API_KEY,
+  );
+  return {
+    imageProvider,
+    imageModel,
+    imageBaseUrl,
+    imageFormat,
+    imageApiKey: imageApiKey || undefined,
+    hasImageApiKey: Boolean(imageApiKey),
+    imageApiKeyHint: hint(imageApiKey),
   };
 }
 
@@ -881,6 +960,11 @@ export type ConfigInput = {
   telegramWebhookSecret?: string;
   telegramWebhookPort?: number;
   runtime?: AgentRuntime;
+  imageProvider?: string;
+  imageModel?: string;
+  imageBaseUrl?: string;
+  imageApiKey?: string;
+  imageFormat?: string;
 };
 
 /** Write AI + chat-channel config into the sandbox (no daemon start). */
@@ -923,6 +1007,28 @@ export async function writeSandboxConfig(
     ) || "pollinations";
   const model = (input.model ?? existing.model ?? "").trim();
   const baseUrl = (input.baseUrl ?? existing.baseUrl ?? "").trim();
+  const sanitizeId = (raw: string, fallback: string) =>
+    raw.replace(/[^a-z0-9_-]/gi, "") || fallback;
+  const imageProvider = sanitizeId(
+    (input.imageProvider || existing.imageProvider || provider).trim(),
+    provider,
+  );
+  const imageBaseUrl = (
+    input.imageBaseUrl ??
+    existing.imageBaseUrl ??
+    stockBaseUrl(imageProvider) ??
+    baseUrl
+  ).trim();
+  const imageModel = (
+    input.imageModel ??
+    existing.imageModel ??
+    defaultImageModel(imageProvider)
+  ).trim();
+  const imageFormat = (
+    input.imageFormat ||
+    existing.imageFormat ||
+    imageProviderFormat(imageProvider)
+  ).trim();
 
   const merge = input.mergeExisting !== false;
   const apiKey =
@@ -939,6 +1045,12 @@ export async function writeSandboxConfig(
   const slackAppToken =
     (input.slackAppToken || "").trim() ||
     (merge ? existing.slackAppToken || "" : "");
+  const imageApiKey =
+    (input.imageApiKey || "").trim() ||
+    (merge ? existing.imageApiKey || "" : "") ||
+    (imageProvider === provider && imageBaseUrl === (baseUrl || stockBaseUrl(provider))
+      ? apiKey
+      : "");
 
   if (!apiKey) {
     return {
@@ -983,6 +1095,7 @@ export async function writeSandboxConfig(
     discordBotToken,
     slackBotToken,
     slackAppToken,
+    imageApiKey,
   );
 
   const inboxSecret =
@@ -1058,6 +1171,11 @@ export async function writeSandboxConfig(
           `SUPERAGENT_PROVIDER_FORMAT=${providerFormat}`,
           `SUPERAGENT_PROVIDER_API_KEY_ENV=${providerKeyEnv}`,
           `SUPERAGENT_PROVIDER_CONFIG_PATH=/home/user/.supercharge/provider-config.toml`,
+          imageProvider ? `SUPERAGENT_IMAGE_PROVIDER=${imageProvider}` : "",
+          imageModel ? `SUPERAGENT_IMAGE_MODEL=${imageModel}` : "",
+          imageBaseUrl ? `SUPERAGENT_IMAGE_BASE_URL=${imageBaseUrl}` : "",
+          imageFormat ? `SUPERAGENT_IMAGE_FORMAT=${imageFormat}` : "",
+          imageApiKey ? `SUPERAGENT_IMAGE_API_KEY=${imageApiKey}` : "",
           `SUPERAGENT_BIND=0.0.0.0:8790`,
           `SUPERAGENT_DAEMON_WORKDIR=/home/user/workspace`,
           `SUPERAGENT_SHARE_WORKSPACE_ROOT=/home/user/workspace`,
@@ -1124,6 +1242,14 @@ export async function writeSandboxConfig(
     apiKey,
     runtime,
     savedProviders,
+    imageProvider: {
+      id: imageProvider,
+      provider: imageProvider,
+      baseUrl: imageBaseUrl,
+      model: imageModel,
+      format: imageFormat,
+      ...(imageApiKey ? { apiKey: imageApiKey } : {}),
+    },
   };
   const profileJson = JSON.stringify(mergedProfile, null, 2);
   const tomlQuote = (value: string) => JSON.stringify(value);
@@ -1141,7 +1267,7 @@ export async function writeSandboxConfig(
     "",
   ].join("\n");
 
-  await execInSession(sessionId, `mkdir -p ${runtimeHome}`, {
+  await execInSession(sessionId, `mkdir -p ${runtimeHome} /home/user/.supercharge`, {
     timeout: 30,
     sandboxId,
     runtime,
@@ -1168,6 +1294,17 @@ export async function writeSandboxConfig(
     sandboxId,
     runtime,
   );
+  const imageProviderToml = [
+    `[image_provider]`,
+    `id = ${tomlQuote(imageProvider)}`,
+    `base_url = ${tomlQuote(imageBaseUrl || providerBaseUrl)}`,
+    `model = ${tomlQuote(imageModel)}`,
+    `format = ${tomlQuote(imageFormat || imageProviderFormat(imageProvider))}`,
+    imageApiKey ? `api_key = ${tomlQuote(imageApiKey)}` : "",
+    "",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
   const w4 =
     runtime === "supercharge"
       ? await writeFileInSession(
@@ -1178,15 +1315,26 @@ export async function writeSandboxConfig(
           runtime,
         )
       : { success: true, message: "not needed" };
+  const w5 =
+    runtime === "supercharge"
+      ? await writeFileInSession(
+          sessionId,
+          "/home/user/.supercharge/image-provider.fragment.toml",
+          imageProviderToml,
+          sandboxId,
+          runtime,
+        )
+      : { success: true, message: "not needed" };
   if (
     w1.success === false ||
     w2.success === false ||
     w3.success === false ||
-    w4.success === false
+    w4.success === false ||
+    w5.success === false
   ) {
     logs.push(
       redact(
-        `WRITE FAILED: daemon.env=${w1.message || w1.success} gateway.env=${w2.message || w2.success} profile=${w3.message || w3.success} providerToml=${w4.message || w4.success}`,
+        `WRITE FAILED: daemon.env=${w1.message || w1.success} gateway.env=${w2.message || w2.success} profile=${w3.message || w3.success} providerToml=${w4.message || w4.success} imageToml=${w5.message || w5.success}`,
       ),
     );
     return { ok: false, logs, meta: existing };
@@ -1194,7 +1342,12 @@ export async function writeSandboxConfig(
 
   await execInSession(
     sessionId,
-    `chmod 600 ${runtimeHome}/daemon.env ${runtimeHome}/gateway.env ${runtimeHome}/profile-default.json /home/user/.supercharge/provider-config.toml 2>/dev/null; true`,
+    [
+      `chmod 600 ${runtimeHome}/daemon.env ${runtimeHome}/gateway.env ${runtimeHome}/profile-default.json /home/user/.supercharge/provider-config.toml /home/user/.supercharge/image-provider.fragment.toml 2>/dev/null; true`,
+      runtime === "supercharge"
+        ? `python3 -c "from pathlib import Path; import re; frag=Path('/home/user/.supercharge/image-provider.fragment.toml').read_text(); p=Path('/home/user/.supercharge/config.toml'); text=p.read_text() if p.exists() else ''; text=re.sub(r'(?ms)^\\\\[image_provider\\\\][^\\\\[]*', '', text); p.parent.mkdir(parents=True, exist_ok=True); p.write_text((text.rstrip()+chr(10)+chr(10)+frag).strip()+chr(10))"`
+        : "true",
+    ].join("\n"),
     { timeout: 30, sandboxId, runtime },
   );
 
@@ -1206,7 +1359,7 @@ export async function writeSandboxConfig(
   );
   logs.push(
     redact(
-      `config saved OK · channels=${channels.join("+") || "none"} · pairing=${openAccess ? "OFF (open access)" : "ON (approve in dashboard)"} · templateWake=${sandboxWakeHttp ? tgWebhookUrl : "off"} · provider=${provider} format=${providerFormat} model=${model || "(none)"} baseUrl=${baseUrl || "(none)"}\n${verify.stdout || ""}`,
+      `config saved OK · channels=${channels.join("+") || "none"} · pairing=${openAccess ? "OFF (open access)" : "ON (approve in dashboard)"} · templateWake=${sandboxWakeHttp ? tgWebhookUrl : "off"} · provider=${provider} format=${providerFormat} model=${model || "(none)"} baseUrl=${baseUrl || "(none)"} · image=${imageProvider}/${imageModel || "(none)"}\n${verify.stdout || ""}`,
     ),
   );
 
@@ -1231,6 +1384,13 @@ export async function writeSandboxConfig(
     discordHint: hint(discordBotToken),
     slackHint: slackBotToken ? hint(slackBotToken) : undefined,
     savedProviders: savedProviders.map(toSavedView),
+    imageProvider,
+    imageModel,
+    imageBaseUrl,
+    imageFormat,
+    imageApiKey: imageApiKey || undefined,
+    hasImageApiKey: Boolean(imageApiKey),
+    imageApiKeyHint: hint(imageApiKey),
   };
   return { ok: true, logs, meta: existing };
 }
@@ -1608,13 +1768,13 @@ export async function restartDaemon(
   const daemonCommand =
     runtime === "supercharge"
       ? process.env.SUPERCHARGE_SANDBOX_DAEMON_COMMAND?.trim() ||
-        "/usr/local/bin/supercharge-superagent-server"
+        "supercharge agent daemon --bind 0.0.0.0:8790"
       : process.env.XIBECODE_SANDBOX_DAEMON_COMMAND?.trim() ||
         "xibecode daemon --workdir /home/user/workspace";
   const daemonMatch =
     runtime === "supercharge"
       ? process.env.SUPERCHARGE_SANDBOX_DAEMON_MATCH?.trim() ||
-        "supercharge-superagent-server|superagent-server"
+        "supercharge agent daemon|supercharge-superagent-server|superagent-server"
       : process.env.XIBECODE_SANDBOX_DAEMON_MATCH?.trim() ||
         "node.*xibecode|xibecode/dist";
   const daemonLabel = runtime === "supercharge" ? "supercharge" : "xibecode";
