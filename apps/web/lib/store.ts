@@ -75,6 +75,11 @@ export type InstanceConfigMeta = {
   hasTelegramToken?: boolean;
   hasDiscordToken?: boolean;
   hasSlackToken?: boolean;
+  imageProvider?: string;
+  imageModel?: string;
+  imageBaseUrl?: string;
+  imageFormat?: string;
+  hasImageApiKey?: boolean;
 };
 
 export type Instance = {
