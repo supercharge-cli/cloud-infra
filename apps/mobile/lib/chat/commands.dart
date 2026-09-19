@@ -37,7 +37,6 @@ const superchargeBotCommands = <BotCommand>[
   BotCommand(command: 'model', description: 'Inspect or set the requested model'),
   BotCommand(command: 'format', description: 'API format: chat_completions | messages | responses'),
   BotCommand(command: 'cmd', description: 'Run shell: /cmd <command>'),
-  BotCommand(command: 'model', description: 'Inspect or set the chat model'),
   BotCommand(command: 'setup', description: 'Chat provider: use instance settings (or TUI /setup)'),
   BotCommand(command: 'isetup', description: 'Image provider: use instance settings (or TUI /isetup)'),
   BotCommand(command: 'imodels', description: 'Show or set the image model (/imodels flux)'),

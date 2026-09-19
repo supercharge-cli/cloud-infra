@@ -18,6 +18,7 @@ import '../chat/chat_store.dart';
 import '../chat/cli_update.dart';
 import '../chat/commands.dart';
 import '../chat/draft.dart';
+import '../chat/event_stream.dart';
 import '../chat/notifications.dart';
 import '../chat/computer.dart';
 import '../chat/preview_urls.dart';
@@ -26,6 +27,7 @@ import '../screens/preview.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/file_viewer.dart';
+import '../widgets/background_tasks.dart';
 import '../widgets/markdown.dart';
 import '../widgets/computer_pane.dart';
 import '../widgets/media.dart';
@@ -49,6 +51,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final fetching = <String>{};
   late final ChatStore store;
   StreamSubscription<AppChatEvent>? _sub;
+  EventStreamCancellation? _eventCancellation;
+  int _eventGeneration = 0;
+  bool _statusPolling = false;
+  final backgroundTasks = <String, Map<String, dynamic>>{};
   StreamSubscription<ComputerFrame>? _browserSub;
   List<BotCommand> commands = defaultBotCommandsFor(AgentRuntime.supercharge);
   CloudInstance? inst;
@@ -123,6 +129,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (working) {
         unawaited(TaskNotifications.enterBackground());
       } else {
+        _eventCancellation?.cancel();
+        _eventGeneration += 1;
         _sub?.cancel();
       }
     }
@@ -236,9 +244,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _listen() {
+    _eventCancellation?.cancel();
     _sub?.cancel();
-    _sub = _eventLoop().listen((ev) {
-      if (!mounted) return;
+    final generation = ++_eventGeneration;
+    final cancellation = EventStreamCancellation();
+    _eventCancellation = cancellation;
+    _sub = _eventLoop(generation, cancellation).listen((ev) {
+      if (!mounted || generation != _eventGeneration) return;
       setState(() {
         connecting = false;
         reconnecting = false;
@@ -328,15 +340,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _isServerSeq(String? value) =>
       value != null && value.isNotEmpty && RegExp(r'^\d+$').hasMatch(value);
 
-  Stream<AppChatEvent> _eventLoop() async* {
+  Stream<AppChatEvent> _eventLoop(int generation, EventStreamCancellation cancellation) async* {
     var delay = 1;
-    while (!disposed) {
+    var connectedBefore = false;
+    bool active() => !disposed && generation == _eventGeneration && !cancellation.isCancelled;
+    while (active()) {
       try {
-        await for (final ev in api.events(id, since: _isServerSeq(lastServerId) ? lastServerId : null)) {
+        var receivedReady = false;
+        await for (final ev in api.events(id, since: _isServerSeq(lastServerId) ? lastServerId : null, cancellation: cancellation)) {
+          if (!active()) return;
           delay = 1;
+          if (ev.type == 'ready' && !receivedReady) {
+            receivedReady = true;
+            if (connectedBefore || ev.raw['resync'] == true) {
+              unawaited(_pollTurnStatus());
+              unawaited(_hydrateFromRemote());
+            }
+            connectedBefore = true;
+          }
           yield ev;
         }
       } on ApiException catch (e) {
+        if (!active()) return;
         if (e.paymentRequired || e.status == 401 || e.status == 410) {
           rethrow;
         }
@@ -351,6 +376,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           });
         }
       } catch (e) {
+        if (!active()) return;
         if (!disposed && mounted && connecting && events.isEmpty) {
           setState(() {
             error = e.toString();
@@ -360,7 +386,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           setState(() => reconnecting = true);
         }
       }
-      if (disposed) return;
+      if (!active()) return;
+      if (mounted && !backgrounded) setState(() => reconnecting = true);
       await Future<void>.delayed(Duration(seconds: delay));
       delay = math.min(delay * 2, 12);
     }
@@ -376,7 +403,48 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _ingest(AppChatEvent ev) {
+    if (!ev.local) {
+      final next = nextEventCursor(lastServerId, ev.id);
+      if (next != lastServerId) {
+        lastServerId = next;
+        _persist();
+      }
+    }
     if (ev.type == 'ready' || ev.type == 'hello' || ev.type == 'ping') {
+      return;
+    }
+    if (ev.type == 'resync') {
+      unawaited(_pollTurnStatus());
+      unawaited(_hydrateFromRemote());
+      return;
+    }
+    if (ev.type == 'background') {
+      final session = ev.sessionId;
+      backgroundTasks.removeWhere((_, task) => task['sessionId'] == session);
+      for (final task in (ev.raw['tasks'] as List? ?? const []).whereType<Map>()) {
+        final value = Map<String, dynamic>.from(task);
+        backgroundTasks['${value['sessionId']}:${value['taskId']}'] = value;
+      }
+      return;
+    }
+    if (ev.type == 'runtime') {
+      if (ev.state == 'error') {
+        error = ev.text.isEmpty ? 'Agent runtime stopped. Send a new message to reconnect.' : ev.text;
+        unawaited(_pollTurnStatus());
+      }
+      return;
+    }
+    if (ev.type == 'snapshot') {
+      _applyBackgroundSnapshot(ev.raw['backgroundTasks']);
+      if (ev.busy == true) {
+        turnStartedAt = (ev.startedAt ?? 0) > 0
+            ? DateTime.fromMillisecondsSinceEpoch(ev.startedAt!)
+            : (turnStartedAt ?? DateTime.now());
+        toolCount = ev.tools ?? toolCount;
+        computer.setAgentWorking(true);
+      } else if (working || sending) {
+        _endTurn();
+      }
       return;
     }
     if (ev.type == 'conversation') {
@@ -394,10 +462,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (ev.tools != null) toolCount = ev.tools!;
         if (ev.etaMs != null) etaMs = ev.etaMs;
         computer.setAgentWorking(true);
-      } else {
-        etaMs = null;
-        turnStartedAt = null;
-        computer.setAgentWorking(false);
+      } else if (working || sending) {
+        _endTurn();
       }
       return;
     }
@@ -411,10 +477,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       return;
     }
-    if (!ev.local && _isServerSeq(ev.id)) {
-      lastServerId = ev.id;
-      if (_alreadyHave(ev)) return;
-    }
+    if (!ev.local && _isServerSeq(ev.id) && _alreadyHave(ev)) return;
     if (ev.type == 'user' && !ev.local) {
       final text = ev.text.trim();
       final dup = events.any((e) =>
@@ -637,13 +700,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
+  void _applyBackgroundSnapshot(Object? raw) {
+    if (raw is! List) return;
+    backgroundTasks.clear();
+    for (final task in raw.whereType<Map>()) {
+      final value = Map<String, dynamic>.from(task);
+      backgroundTasks['${value['sessionId']}:${value['taskId']}'] = value;
+    }
+  }
+
   Future<void> _pollTurnStatus() async {
+    if (_statusPolling || disposed) return;
+    _statusPolling = true;
     try {
       final s = await api.chatStatus(id);
       if (!mounted) return;
       final t = s['turn'];
       final busy = t is Map && t['busy'] == true;
       setState(() {
+        _applyBackgroundSnapshot(s['backgroundTasks']);
         final u = s['usage'];
         if (u is Map) {
           usageUsed = (u['used'] as num?)?.toInt();
@@ -664,7 +739,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         await _hydrateFromRemote();
         if (mounted) setState(_endTurn);
       }
-    } catch (_) {}
+    } catch (_) {
+      // The event stream owns reconnect; polling must not create another listener.
+    } finally {
+      _statusPolling = false;
+    }
   }
 
   Future<void> _catchUp() async {
@@ -922,6 +1001,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     disposed = true;
+    _eventGeneration += 1;
+    _eventCancellation?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
     _browserSub?.cancel();
@@ -2096,6 +2177,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   onDismiss: () => unawaited(_dismissCliUpdate()),
                 ),
               if (reconnecting) const ReconnectBar(),
+              if (backgroundTasks.isNotEmpty)
+                BackgroundTasksBar(tasks: backgroundTasks.values.toList()),
               if (error != null)
                 ErrorBanner(
                   message: error!,

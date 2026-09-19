@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'event_stream.dart';
+
 typedef OpenChatCallback = void Function(String instanceId);
 
 class TaskNotifications {
@@ -463,7 +465,7 @@ class _VectraTaskHandler extends TaskHandler {
 
   void _onEvent(Map<String, dynamic> ev, String instanceId) {
     final id = '${ev['id'] ?? ''}';
-    if (id.isNotEmpty) _since = id;
+    _since = nextEventCursor(_since, id) ?? _since;
     final type = '${ev['type'] ?? ''}';
     if (type == 'tool' && ev['state'] != 'done') {
       _tools += 1;

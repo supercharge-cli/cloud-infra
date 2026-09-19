@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../chat/computer.dart';
+import '../chat/event_stream.dart';
 import 'models.dart';
 import 'providers.dart';
 
@@ -484,7 +485,7 @@ class VectraClient {
   Future<Map<String, dynamic>> pollinationsApplyAll() =>
       _json('PUT', '/api/pollinations/start', timeout: _slow);
 
-  Stream<AppChatEvent> events(String id, {String? since}) async* {
+  Stream<AppChatEvent> events(String id, {String? since, EventStreamCancellation? cancellation}) async* {
     final uri = _u('/api/instances/$id/chat/events', {
       if (since != null && since.isNotEmpty) 'since': since,
     });
@@ -494,7 +495,9 @@ class VectraClient {
       if (token != null && token!.isNotEmpty) 'authorization': 'Bearer $token',
     });
     final client = http.Client();
+    final removeCancel = cancellation?.onCancel(client.close);
     try {
+      if (cancellation?.isCancelled == true) return;
       final res = await client.send(req).timeout(_sseConnect);
       if (res.statusCode >= 400) {
         final body = await res.stream.bytesToString();
@@ -509,29 +512,14 @@ class VectraClient {
           code: data['code'] as String?,
         );
       }
-      var buf = '';
-      await for (final chunk in res.stream.transform(utf8.decoder)) {
-        buf += chunk;
-        while (true) {
-          final i = buf.indexOf('\n\n');
-          if (i < 0) break;
-          final block = buf.substring(0, i);
-          buf = buf.substring(i + 2);
-          for (final line in block.split('\n')) {
-            if (line.startsWith('data: ')) {
-              try {
-                final map = jsonDecode(line.substring(6));
-                if (map is Map<String, dynamic>) {
-                  yield AppChatEvent(map);
-                }
-              } catch (_) {}
-            }
-          }
-        }
+      await for (final event in decodeEventStream(res.stream.timeout(const Duration(seconds: 35)))) {
+        if (cancellation?.isCancelled == true) return;
+        yield AppChatEvent(event);
       }
     } on TimeoutException {
-      throw ApiException(0, 'Chat inbox timed out while connecting.');
+      throw ApiException(0, 'Chat connection stopped responding. Reconnecting…');
     } finally {
+      removeCancel?.call();
       client.close();
     }
   }
