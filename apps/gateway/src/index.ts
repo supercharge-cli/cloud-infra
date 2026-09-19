@@ -8,6 +8,7 @@ import { posix as pathPosix } from "node:path";
 import { URL } from "node:url";
 import { Sandbox } from "e2b";
 import { WebSocket, WebSocketServer } from "ws";
+import { runtimeHasWork } from "./runtime-activity.js";
 
 type SandboxLike = {
   sandboxId?: string;
@@ -1726,8 +1727,12 @@ const server = createServer(async (req, res) => {
               "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do",
               "  sleep 1",
               '  if curl -sf -m 2 "http://127.0.0.1:${INBOX}/health" >/dev/null 2>&1 || curl -sf -m 2 "http://127.0.0.1:${INBOX}/healthz" >/dev/null 2>&1; then OK=1; break; fi',
-              `  if [ -f ${shQuote(profile.pidFile)} ] && kill -0 "$(cat ${shQuote(profile.pidFile)})" 2>/dev/null; then OK=1; break; fi`,
-              `  if pgrep -af ${shQuote(profile.processMatch)} 2>/dev/null | grep -vF "pgrep" | grep -q .; then OK=1; break; fi`,
+              ...(session.runtime === "supercharge"
+                ? [`  if ! kill -0 "$(cat ${shQuote(profile.pidFile)} 2>/dev/null)" 2>/dev/null; then break; fi`]
+                : [
+                    `  if [ -f ${shQuote(profile.pidFile)} ] && kill -0 "$(cat ${shQuote(profile.pidFile)})" 2>/dev/null; then OK=1; break; fi`,
+                    `  if pgrep -af ${shQuote(profile.processMatch)} 2>/dev/null | grep -vF "pgrep" | grep -q .; then OK=1; break; fi`,
+                  ]),
               "done",
               'if [ "$OK" = "1" ]; then echo DAEMON_OK; else echo DAEMON_FAIL; fi',
               'curl -sS -m 2 "http://127.0.0.1:${INBOX}/health" 2>/dev/null | head -c 200 || curl -sS -m 2 "http://127.0.0.1:${INBOX}/healthz" 2>/dev/null | head -c 200 || true',
@@ -2224,6 +2229,27 @@ server.on("upgrade", (req, socket, head) => {
     socket.destroy();
   }
 });
+
+const activityChecks = new Set<string>();
+setInterval(() => {
+  for (const session of sessions.values()) {
+    if (session.runtime !== "supercharge" || session.cycleResetting || activityChecks.has(session.sessionId)) continue;
+    activityChecks.add(session.sessionId);
+    void (async () => {
+      // A health request can auto-resume a paused VM; inspect lifecycle without waking it first.
+      const info = await Sandbox.getInfo(session.sandboxId);
+      if (info.state !== "running") return;
+      const response = await superchargeDaemonFetch(session, "/v1/status", {
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (response.ok && runtimeHasWork(await response.json())) {
+        await refreshSandboxTimeout(session);
+      }
+    })().catch((error) => {
+      console.warn(`[vectra-gateway] activity check failed sandbox=${session.sandboxId}: ${(error as Error).message}`);
+    }).finally(() => activityChecks.delete(session.sessionId));
+  }
+}, Math.min(30_000, Math.max(5_000, Math.floor(sandboxTimeoutMs / 3)))).unref?.();
 
 // Proactive 23h continuous-run check even if traffic is sparse
 if (maxContinuousMs > 0) {

@@ -94,17 +94,35 @@ export async function ensureInbox(inst: Instance): Promise<void> {
   try {
     if (await inboxHealthy(inst)) return;
 
+    if (inst.runtime === "supercharge") {
+      const resumed = await wakeSession(inst.sessionId, {
+        sandboxId: inst.sandboxId,
+        runtime: inst.runtime,
+        restartDaemon: false,
+      });
+      if (resumed.ok && await inboxHealthy(inst)) return;
+    }
+
     await bootstrapAppInbox(
       inst.sessionId,
       inst.sandboxId,
       inst.id,
       inst.runtime || "xibecode",
     ).catch(() => undefined);
-    await wakeSession(inst.sessionId, {
+    const wake = await wakeSession(inst.sessionId, {
       sandboxId: inst.sandboxId,
       runtime: inst.runtime || "xibecode",
       restartDaemon: true,
     });
+    if (!wake.ok || wake.daemonOk === false) {
+      console.error(`App inbox startup failed for ${inst.id}`, {
+        state: wake.state,
+        daemonOk: wake.daemonOk,
+      });
+      throw new Error(
+        wake.message || "App inbox daemon failed to start. Check the instance logs for binary or startup errors.",
+      );
+    }
 
     for (let i = 0; i < 8; i++) {
       await new Promise((r) => setTimeout(r, 750));
@@ -112,7 +130,7 @@ export async function ensureInbox(inst: Instance): Promise<void> {
     }
 
     throw new Error(
-      "App inbox not reachable on :8790 after wake. Open Control → Update CLI (need xibecode 1.17.5+) then try chat again.",
+      "App inbox not reachable on :8790 after wake. Check the instance logs and verify that its CLI can run on the sandbox OS.",
     );
   } finally {
     release();

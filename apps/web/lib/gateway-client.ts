@@ -1539,24 +1539,32 @@ export function superchargeE2bInstallScript(): string {
   const daemon = `${base}/supercharge-superagent-server-linux-x86_64`;
   const cli = `${base}/supercharge-linux-x86_64`;
   return [
-    "set +e",
+    "set -eu",
     'echo "--- pre version ---"',
-    "cat /var/lib/superagent/e2b-version 2>/dev/null || supercharge --version 2>&1 || true",
-    "TMP=/tmp/supercharge-e2b-update",
-    "mkdir -p \"$TMP\" /var/lib/superagent",
+    "supercharge --version 2>&1 || true",
+    'TMP="$(mktemp -d /tmp/supercharge-e2b-update.XXXXXX)"',
+    "trap 'rm -rf \"$TMP\"' EXIT",
     'echo "--- download daemon ---"',
     `curl -fL --retry 3 -o \"$TMP/supercharge-superagent-server\" "${daemon}"`,
     'echo "--- download cli ---"',
     `curl -fL --retry 3 -o \"$TMP/supercharge\" "${cli}"`,
     "chmod +x \"$TMP/supercharge-superagent-server\" \"$TMP/supercharge\"",
+    'echo "--- validate binaries on this sandbox ---"',
+    '"$TMP/supercharge" --version >"$TMP/version-output" 2>&1 || { cat "$TMP/version-output"; exit 1; }',
+    '"$TMP/supercharge" agent daemon --help >/dev/null 2>&1 || { echo "Downloaded CLI does not support agent daemon"; exit 1; }',
+    'ldd "$TMP/supercharge-superagent-server" >"$TMP/daemon-libraries" 2>&1 || { cat "$TMP/daemon-libraries"; exit 1; }',
+    'if grep -q "not found" "$TMP/daemon-libraries"; then cat "$TMP/daemon-libraries"; exit 1; fi',
+    'python3 -c \'import pathlib,re,sys; text=pathlib.Path(sys.argv[1]).read_text(); match=re.search(r"\\b(\\d+\\.\\d+\\.\\d+)\\b",text); sys.exit("CLI did not report a version") if match is None else print(match[1])\' "$TMP/version-output" >"$TMP/version"',
     'echo "--- install ---"',
-    "sudo -n install -m 0755 \"$TMP/supercharge-superagent-server\" /usr/local/bin/supercharge-superagent-server",
-    "sudo -n install -m 0755 \"$TMP/supercharge\" /usr/local/bin/supercharge",
+    // Rename validated binaries instead of truncating executables that may still be running.
+    'sudo -n install -m 0755 "$TMP/supercharge-superagent-server" /usr/local/bin/.supercharge-superagent-server-next-$$',
+    'sudo -n install -m 0755 "$TMP/supercharge" /usr/local/bin/.supercharge-next-$$',
+    'sudo -n mv -f /usr/local/bin/.supercharge-superagent-server-next-$$ /usr/local/bin/supercharge-superagent-server',
+    'sudo -n mv -f /usr/local/bin/.supercharge-next-$$ /usr/local/bin/supercharge',
     "sudo -n ln -sfn /usr/local/bin/supercharge /usr/local/bin/sc",
-    `curl -fsSL "${base}/e2b-manifest.json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" > /var/lib/superagent/e2b-version 2>/dev/null || date -u +%Y%m%dT%H%M%SZ > /var/lib/superagent/e2b-version`,
+    'sudo -n install -D -m 0644 "$TMP/version" /var/lib/superagent/e2b-version',
     'echo "--- post version ---"',
-    "cat /var/lib/superagent/e2b-version 2>/dev/null || true",
-    "/usr/local/bin/supercharge --version 2>/dev/null || true",
+    "/usr/local/bin/supercharge --version",
     "echo UPDATE_DONE",
   ].join("\n");
 }
@@ -1604,13 +1612,6 @@ export async function getCliVersionInfo(
     } catch (error) {
       logs.push(`latest: ${(error as Error).message}`);
     }
-    const stamp = await execInSession(
-      sessionId,
-      "cat /var/lib/superagent/e2b-version 2>/dev/null || true",
-      { timeout: 20, sandboxId, runtime },
-    );
-    const stamped = parseSemverCore(String(stamp.stdout || "").trim());
-    if (stamped) current = stamped;
     return {
       current,
       latest,
@@ -1731,6 +1732,14 @@ export async function updateCliInSandbox(
     || String(out.split("--- post version ---").pop() || "").trim().split("\n").find((l) => l.trim() && !l.includes("supercharge"))
     || null;
 
+  if (
+    runtime === "supercharge" &&
+    (r.exitCode !== 0 || r.success === false || !/^UPDATE_DONE$/m.test(out) || !verified)
+  ) {
+    logs.push("Update validation failed; the daemon was not restarted.");
+    return { ok: false, from, to: null, verified: null, logs };
+  }
+
   logs.push("--- restart daemon ---");
   const restart = await restartDaemon(sessionId, sandboxId, runtime);
   logs.push(...restart.logs);
@@ -1826,8 +1835,12 @@ export async function restartDaemon(
     "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do",
     "  sleep 1",
     '  if curl -sf -m 2 "http://127.0.0.1:${INBOX}/health" >/dev/null 2>&1 || curl -sf -m 2 "http://127.0.0.1:${INBOX}/healthz" >/dev/null 2>&1; then OK=1; break; fi',
-    `  if [ -f ${daemonPidFile} ] && kill -0 "$(cat ${daemonPidFile})" 2>/dev/null; then OK=1; break; fi`,
-    `  if pgrep -af "${daemonMatch}" 2>/dev/null | grep -vF "pgrep" | grep -q .; then OK=1; break; fi`,
+    ...(runtime === "supercharge"
+      ? [`  if ! kill -0 "$(cat ${daemonPidFile} 2>/dev/null)" 2>/dev/null; then break; fi`]
+      : [
+          `  if [ -f ${daemonPidFile} ] && kill -0 "$(cat ${daemonPidFile})" 2>/dev/null; then OK=1; break; fi`,
+          `  if pgrep -af "${daemonMatch}" 2>/dev/null | grep -vF "pgrep" | grep -q .; then OK=1; break; fi`,
+        ]),
     "done",
     `if [ "$OK" = "1" ]; then echo "${daemonLabel} daemon: running"; else echo "${daemonLabel} daemon: not found"; fi`,
     'curl -sS -m 2 "http://127.0.0.1:${INBOX}/health" 2>/dev/null | head -c 200 || curl -sS -m 2 "http://127.0.0.1:${INBOX}/healthz" 2>/dev/null | head -c 200 || true',
@@ -1846,6 +1859,7 @@ export async function restartDaemon(
   const r = await execInSession(sessionId, setupCmd, {
     timeout: 180,
     sandboxId,
+    runtime,
   });
   const out = `${r.stdout || ""}\n${r.stderr || ""}\n${r.message || ""}`;
   const logs = [
@@ -1853,10 +1867,11 @@ export async function restartDaemon(
       `restart runtime=${runtime} exit=${r.exitCode ?? "?"} ${out.slice(0, 2500)}`,
     ),
   ];
-  const ok =
-    out.includes(`${daemonLabel} daemon: running`) ||
-    out.includes("RESTART_DONE") ||
-    /telegram enabled|discord enabled|slack enabled/i.test(out);
+  const ok = runtime === "supercharge"
+    ? r.exitCode === 0 && /^supercharge daemon: running$/m.test(out)
+    : out.includes(`${daemonLabel} daemon: running`) ||
+      out.includes("RESTART_DONE") ||
+      /telegram enabled|discord enabled|slack enabled/i.test(out);
   // Prefer explicit process check; RESTART_DONE alone can mean shell finished after a dead spawn
   if (
     out.includes(`${daemonLabel} daemon: not found`) &&

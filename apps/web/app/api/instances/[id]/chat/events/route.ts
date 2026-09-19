@@ -1,34 +1,13 @@
 import { proxyInbox, requireChatInstance } from '@/lib/app-chat';
+import { inboxEventStream } from '@/lib/inbox-event-stream';
 
-/** Keep well under Vercel’s 300s hard kill so idle SSE does not pile up. */
 export const maxDuration = 55;
+const streamBudgetMs = 40_000;
 
 type Ctx = { params: Promise<{ id: string }> };
 
-function withReadyFrame(upstream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  const ready = encoder.encode(
-    `data: ${JSON.stringify({ type: 'ready', id: 'ready', ts: Date.now() })}\n\n`,
-  );
-  return new ReadableStream({
-    async start(controller) {
-      controller.enqueue(ready);
-      const reader = upstream.getReader();
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) controller.enqueue(value);
-        }
-      } finally {
-        reader.releaseLock();
-        controller.close();
-      }
-    },
-  });
-}
-
 export async function GET(req: Request, ctx: Ctx) {
+  const startedAt = Date.now();
   const { id } = await ctx.params;
   const gate = await requireChatInstance(id);
   if (!gate.ok) return gate.response;
@@ -42,11 +21,13 @@ export async function GET(req: Request, ctx: Ctx) {
   try {
     const res = await proxyInbox(gate.inst, `/v1/chat/events?${q.toString()}`, {
       headers: { accept: 'text/event-stream' },
+      signal: req.signal,
     });
     if (!res.body) {
       return new Response('No stream', { status: 502 });
     }
-    return new Response(withReadyFrame(res.body), {
+    const remainingMs = streamBudgetMs - (Date.now() - startedAt);
+    return new Response(inboxEventStream(res.body, req.signal, remainingMs), {
       status: res.status,
       headers: {
         'content-type': 'text/event-stream; charset=utf-8',

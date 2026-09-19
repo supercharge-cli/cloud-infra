@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getPlan, hasInstanceAccess } from "@/lib/billing";
 import { wakeSession } from "@/lib/gateway-client";
+import { ensureInbox } from "@/lib/app-chat";
 import { getInstance, updateInstance } from "@/lib/store";
 import { syncTelegramWakeWebhook } from "@/lib/telegram-webhook";
 
@@ -37,8 +38,9 @@ export async function POST(_req: Request, ctx: Ctx) {
     const result = await wakeSession(inst.sessionId, {
       sandboxId: inst.sandboxId,
       runtime: inst.runtime || "xibecode",
-      restartDaemon: true,
+      restartDaemon: inst.runtime !== "supercharge",
     });
+    if (result.ok && inst.runtime === "supercharge") await ensureInbox(inst);
     const logs = [...(result.logs || [])];
     const fullyUp = result.ok && result.daemonOk !== false;
 
