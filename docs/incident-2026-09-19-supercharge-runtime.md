@@ -157,6 +157,16 @@ Validation:
 
 Live deployment (02:14–02:20 UTC): new daemon SHA-256 `2e8ca6fda97ed47deb88283297d07b6614dae6e5a20f31ddb6f27bf21ce78baa` installed with rollback copy `/usr/local/bin/supercharge-superagent-server.pre-persistent-20260919`. Verified live: `PERSIST_LIVE_1/2` answered in 4–5 s with one stable CLI process; a `sleep 45` background task stayed visible in `backgroundTasks`, replied `BG_LIVE_OK` immediately, the next prompt finished in 8 s while it ran, and the task drained on its own; after a daemon restart the same conversation resumed (`RESUME_OK`, full history). One earlier deploy attempt aborted safely on a stale-hash guard; a duplicate start then failed with "Address already in use" and was cleaned up (pidfile restored, no runtime impact).
 
+## Release 1.3.17 (later on 2026-09-19)
+
+Published under the user's explicit release authorization. Note: the requested tag `v1.3.8` already existed (2026-09-16), so the release went out as **v1.3.17** (next after v1.3.16).
+
+- Source pushed to `iotserver24/supercharge` main: persistent ACP runtime (`a85d4e2a2`), sandbox-compatible release builds (`7b17f042a`), version bump (`f7eedc734`). Release binaries were built with the dedicated scripts (`prepare-e2b-agent-assets.sh` / `publish-e2b-update.sh`), verified in the live sandbox preflight (glibc ≤ 2.39, version 1.3.17, daemon subcommand), then published; tag `v1.3.17` triggered the cross-platform Actions build, which merges its assets into the same release via `--clobber`.
+- cloud-infra pushed to main (`73f31aa` gateway/web, `681403c` mobile, `dbb0b39` docs); Vercel deployed `dbb0b39` successfully at 02:50 UTC.
+- End-to-end update through the deployed website: `/api/instances/GpYl_9yhJX/cli-update` returned 200, `from 1.3.15 → to 1.3.17, verified 1.3.17`, daemon restarted healthy; `/v1/status` reports `runtimeMode: persistent` and a live prompt answered in 9 s.
+- Deployed web confirmed live: idle chat SSE now closes at ~41 s (previously ~55 s).
+- The Coolify gateway must be redeployed separately (readiness + keepalive changes); Vercel and GitHub Actions do not deploy it.
+
 ## Rollout boundaries
 
 No source commits, pushes, release publications, template recreations, or Vercel/Coolify deployments were performed. Source changes remain on local branches `fix/e2b-supercharge-runtime-validation` (cloud-infra) and `fix/e2b-compatible-runtime-build` (Supercharge). **Already live in the sandbox:** the compatible CLI (1.3.15 recovery build) and the persistent-runtime daemon.
