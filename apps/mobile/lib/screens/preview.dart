@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../chat/preview_urls.dart';
+import '../desktop.dart';
 import '../theme.dart';
 
 const _ports = [3000, 5173, 8080, 4173, 5000, 8000];
@@ -26,7 +29,7 @@ class PreviewBrowserScreen extends StatefulWidget {
 }
 
 class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
-  late final WebViewController _web;
+  WebViewController? _web;
   late final TextEditingController _url;
   bool loading = true;
   String? error;
@@ -43,6 +46,15 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
               ? buildPreviewUrl(sandboxId: widget.sandboxId!, port: 3000)
               : ''),
     );
+    if (isDesktop) {
+      if (_url.text.isNotEmpty) {
+        final u = Uri.tryParse(_url.text);
+        if (u != null) {
+          unawaited(launchUrl(u, mode: LaunchMode.externalApplication));
+        }
+      }
+      return;
+    }
     _web = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Vc.bg)
@@ -97,7 +109,12 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
       error = null;
       _url.text = next;
     });
-    await _web.loadRequest(uri);
+    if (isDesktop) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (mounted) setState(() => loading = false);
+      return;
+    }
+    await _web?.loadRequest(uri);
   }
 
   Future<void> _openPort(int port) async {
@@ -134,12 +151,12 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
         actions: [
           IconButton(
             tooltip: 'Back',
-            onPressed: () => _web.goBack(),
+            onPressed: isDesktop ? null : () => _web?.goBack(),
             icon: const Icon(Icons.arrow_back_ios_new, size: 18),
           ),
           IconButton(
             tooltip: 'Reload',
-            onPressed: () => _web.reload(),
+            onPressed: isDesktop ? () => _go(_url.text) : () => _web?.reload(),
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
@@ -213,7 +230,14 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
                       style: TextStyle(color: Vc.muted),
                     ),
                   )
-                : WebViewWidget(controller: _web),
+                : isDesktop
+                    ? Center(
+                        child: FilledButton(
+                          onPressed: () => _go(_url.text),
+                          child: const Text('Open in system browser'),
+                        ),
+                      )
+                    : WebViewWidget(controller: _web!),
           ),
         ],
       ),

@@ -7,7 +7,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import { URL } from "node:url";
 import { Sandbox } from "e2b";
-import { WebSocket, WebSocketServer } from "ws";
+import { WebSocketServer } from "ws";
+import { relayBrowserVnc } from "./browser-vnc.js";
 
 type SandboxLike = {
   sandboxId?: string;
@@ -2182,30 +2183,6 @@ const server = createServer(async (req, res) => {
 
 const browserVncServer = new WebSocketServer({ noServer: true });
 
-async function relayBrowserVnc(client: WebSocket, session: SessionRecord): Promise<void> {
-  try {
-    const base = await resolvePreviewHost(session, 8790);
-    const upstreamUrl = `${base.replace(/^http/i, "ws").replace(/\/$/, "")}/v1/computer/browser/vnc`;
-    const upstream = new WebSocket(upstreamUrl, { headers: daemonAuthorizationHeaders() });
-    const closeBoth = () => {
-      if (client.readyState === WebSocket.OPEN) client.close();
-      if (upstream.readyState === WebSocket.OPEN) upstream.close();
-    };
-    client.on("message", (data, isBinary) => {
-      if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary: isBinary });
-    });
-    upstream.on("message", (data, isBinary) => {
-      if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary });
-    });
-    client.on("close", closeBoth);
-    client.on("error", closeBoth);
-    upstream.on("close", closeBoth);
-    upstream.on("error", closeBoth);
-  } catch {
-    client.close(1011, "Unable to connect browser handoff");
-  }
-}
-
 server.on("upgrade", (req, socket, head) => {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || `localhost:${port}`}`);
@@ -2218,7 +2195,12 @@ server.on("upgrade", (req, socket, head) => {
       return;
     }
     browserVncServer.handleUpgrade(req, socket, head, (client) => {
-      void relayBrowserVnc(client, session);
+      void relayBrowserVnc(client, {
+        resolveDaemonBase: () => resolvePreviewHost(session, 8790),
+        headers: daemonAuthorizationHeaders(),
+        allowLegacyBearer: true,
+        onError: (message) => console.warn(`[browser-vnc] ${message}`),
+      });
     });
   } catch {
     socket.destroy();

@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../desktop.dart';
+
 typedef OpenChatCallback = void Function(String instanceId);
 
 class TaskNotifications {
@@ -31,7 +33,7 @@ class TaskNotifications {
       'Working · ${_fmt(_elapsed)} · $_tools tool${_tools == 1 ? '' : 's'}';
 
   static Future<void> init() async {
-    if (_ready) return;
+    if (_ready || isDesktop) return;
     try {
       const android = AndroidInitializationSettings('@drawable/ic_stat_vectra');
       const ios = DarwinInitializationSettings();
@@ -49,7 +51,7 @@ class TaskNotifications {
   }
 
   static Future<void> initForeground() async {
-    if (_fgReady) return;
+    if (_fgReady || isDesktop) return;
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: progressChannel,

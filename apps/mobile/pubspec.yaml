@@ -57,6 +57,12 @@ dependencies:
   flutter_svg: ^2.2.1
   webview_flutter: ^4.13.0
 
+dependency_overrides:
+  # Real audioplayers_linux needs GStreamer headers. This laptop has GTK but
+  # not gstreamer-devel; chat still works, in-app audio is a no-op.
+  audioplayers_linux:
+    path: packages/audioplayers_linux_stub
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
