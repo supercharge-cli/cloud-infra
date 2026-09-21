@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 type Props = {
   wsUrl: string;
@@ -15,6 +15,7 @@ type Props = {
 export function BrowserHandoffView({ wsUrl, onDisconnected }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState("Connecting secure browser handoff…");
+  const notifyDisconnected = useEffectEvent(() => onDisconnected?.());
 
   useEffect(() => {
     let disposed = false;
@@ -32,14 +33,14 @@ export function BrowserHandoffView({ wsUrl, onDisconnected }: Props) {
       rfb.addEventListener("connect", () => setStatus("You are controlling the browser. Return control when finished."));
       rfb.addEventListener("disconnect", () => {
         setStatus("Browser handoff ended.");
-        onDisconnected?.();
+        notifyDisconnected();
       });
     }).catch(() => setStatus("Unable to load the browser handoff client."));
     return () => {
       disposed = true;
       rfb?.disconnect();
     };
-  }, [onDisconnected, wsUrl]);
+  }, [wsUrl]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-3">

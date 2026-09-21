@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../api/client.dart';
+import '../desktop.dart';
 import '../api/models.dart';
 import '../chat/cli_update.dart';
 import '../state/session.dart';
@@ -86,6 +87,12 @@ class _InstancesScreenState extends State<InstancesScreen> {
     final runtime = request.runtime;
     if (request.paid) {
       if (!mounted) return;
+      if (isDesktop) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Pay and create extra workspaces on the phone app.')),
+        );
+        return;
+      }
       await _afterPush(
         context.push(
           '/billing',
@@ -469,14 +476,15 @@ class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         if (!widget.canCreateFree)
           FilledButton(
-            onPressed: () => _submit(paid: true),
-            child: const Text('Pay & create'),
+            onPressed: isDesktop ? null : () => _submit(paid: true),
+            child: Text(isDesktop ? 'Pay on phone' : 'Pay & create'),
           )
         else ...[
-          OutlinedButton(
-            onPressed: () => _submit(paid: true),
-            child: const Text('Pay extra'),
-          ),
+          if (!isDesktop)
+            OutlinedButton(
+              onPressed: () => _submit(paid: true),
+              child: const Text('Pay extra'),
+            ),
           FilledButton(
             onPressed: () => _submit(paid: false),
             child: const Text('Create free'),

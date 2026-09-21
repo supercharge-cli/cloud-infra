@@ -13,6 +13,7 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../api/client.dart';
+import '../desktop.dart';
 import '../api/models.dart';
 import '../chat/chat_store.dart';
 import '../chat/cli_update.dart';
@@ -85,6 +86,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final pending = <DraftAttach>[];
   final computer = ComputerState();
   bool _computerOpen = false;
+  bool _browserViewerOpen = false;
   bool _browserListening = false;
   Timer? _liveTick;
 
@@ -92,14 +94,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String get id => widget.instanceId;
   bool get working => turnStartedAt != null;
   String get instanceName => inst?.name ?? widget.instance?.name ?? 'Chat';
-  AgentRuntime get runtime => inst?.runtime ?? widget.instance?.runtime ?? AgentRuntime.supercharge;
-  bool get _isSupercharge =>
-      runtime == AgentRuntime.supercharge;
+  AgentRuntime get runtime =>
+      inst?.runtime ?? widget.instance?.runtime ?? AgentRuntime.supercharge;
+  bool get _isSupercharge => runtime == AgentRuntime.supercharge;
 
-  Duration get elapsed =>
-      turnStartedAt == null ? Duration.zero : DateTime.now().difference(turnStartedAt!);
+  Duration get elapsed => turnStartedAt == null
+      ? Duration.zero
+      : DateTime.now().difference(turnStartedAt!);
 
-  int get progressPct => TaskNotifications.softPercent(tools: toolCount, elapsed: elapsed);
+  int get progressPct =>
+      TaskNotifications.softPercent(tools: toolCount, elapsed: elapsed);
 
   @override
   void initState() {
@@ -121,7 +125,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       unawaited(_catchUp());
       return;
     }
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
       backgrounded = true;
       _browserSub?.cancel();
       _browserSub = null;
@@ -140,7 +145,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() {
       connecting = true;
       paymentBlocked = false;
-      connectLabel = inst?.isPaused == true ? 'Waking paused sandbox…' : 'Connecting to sandbox…';
+      connectLabel = inst?.isPaused == true
+          ? 'Waking paused sandbox…'
+          : 'Connecting to sandbox…';
     });
     final snap = await store.load();
     if (mounted && snap.events.isNotEmpty) {
@@ -151,7 +158,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         answered
           ..clear()
           ..addAll(snap.answered);
-        lastServerId = _isServerSeq(snap.lastServerId) ? snap.lastServerId : null;
+        lastServerId = _isServerSeq(snap.lastServerId)
+            ? snap.lastServerId
+            : null;
         connecting = false;
         computer.replay(events);
       });
@@ -166,7 +175,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       inst = await api.getInstance(id);
       if (mounted) {
-        setState(() => commands = defaultBotCommandsFor(inst?.runtime ?? AgentRuntime.supercharge));
+        setState(
+          () => commands = defaultBotCommandsFor(
+            inst?.runtime ?? AgentRuntime.supercharge,
+          ),
+        );
       }
       if (inst?.needsPayment == true) {
         if (!mounted) return;
@@ -210,35 +223,44 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     unawaited(_hydrateFromRemote());
     _listen();
-    api.commands(id).then((c) {
-      if (mounted && c.isNotEmpty) setState(() => commands = c);
-    }).catchError((_) {});
-    api.chatStatus(id).then((s) {
-      if (!mounted) return;
-      setState(() {
-        final u = s['usage'];
-        if (u is Map) {
-          usageUsed = (u['used'] as num?)?.toInt();
-          usageMax = (u['max'] as num?)?.toInt();
-          usagePct = (u['pct'] as num?)?.toInt();
-          usageLabel = u['label'] as String?;
-        }
-        final t = s['turn'];
-        if (t is Map && t['busy'] == true) {
-          final started = (t['startedAt'] as num?)?.toInt();
-          turnStartedAt = started != null && started > 0
-              ? DateTime.fromMillisecondsSinceEpoch(started)
-              : DateTime.now();
-          toolCount = (t['tools'] as num?)?.toInt() ?? toolCount;
-          computer.setAgentWorking(true);
-        }
-      });
-    }).catchError((_) {});
-    api.cliVersion(id).then((c) {
-      if (!mounted) return;
-      setState(() => cli = c);
-      unawaited(_maybeOfferCliUpdate(c));
-    }).catchError((_) {});
+    api
+        .commands(id)
+        .then((c) {
+          if (mounted && c.isNotEmpty) setState(() => commands = c);
+        })
+        .catchError((_) {});
+    api
+        .chatStatus(id)
+        .then((s) {
+          if (!mounted) return;
+          setState(() {
+            final u = s['usage'];
+            if (u is Map) {
+              usageUsed = (u['used'] as num?)?.toInt();
+              usageMax = (u['max'] as num?)?.toInt();
+              usagePct = (u['pct'] as num?)?.toInt();
+              usageLabel = u['label'] as String?;
+            }
+            final t = s['turn'];
+            if (t is Map && t['busy'] == true) {
+              final started = (t['startedAt'] as num?)?.toInt();
+              turnStartedAt = started != null && started > 0
+                  ? DateTime.fromMillisecondsSinceEpoch(started)
+                  : DateTime.now();
+              toolCount = (t['tools'] as num?)?.toInt() ?? toolCount;
+              computer.setAgentWorking(true);
+            }
+          });
+        })
+        .catchError((_) {});
+    api
+        .cliVersion(id)
+        .then((c) {
+          if (!mounted) return;
+          setState(() => cli = c);
+          unawaited(_maybeOfferCliUpdate(c));
+        })
+        .catchError((_) {});
     unawaited(TaskNotifications.requestPermissions());
     unawaited(_refreshConversations());
   }
@@ -249,39 +271,45 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final generation = ++_eventGeneration;
     final cancellation = EventStreamCancellation();
     _eventCancellation = cancellation;
-    _sub = _eventLoop(generation, cancellation).listen((ev) {
-      if (!mounted || generation != _eventGeneration) return;
-      setState(() {
-        connecting = false;
-        reconnecting = false;
-        _ingest(ev);
-      });
-      if (pinnedToLatest) _scrollToEnd();
-    }, onError: (e) {
-      if (!mounted) return;
-      if (backgrounded) {
-        setState(() => reconnecting = true);
-        return;
-      }
-      final pay = e is ApiException && e.paymentRequired;
-      setState(() {
-        connecting = false;
-        reconnecting = false;
-        paymentBlocked = pay;
-        error = e.toString();
-      });
-    });
+    _sub = _eventLoop(generation, cancellation).listen(
+      (ev) {
+        if (!mounted || generation != _eventGeneration) return;
+        setState(() {
+          connecting = false;
+          reconnecting = false;
+          _ingest(ev);
+        });
+        if (pinnedToLatest) _scrollToEnd();
+      },
+      onError: (e) {
+        if (!mounted) return;
+        if (backgrounded) {
+          setState(() => reconnecting = true);
+          return;
+        }
+        final pay = e is ApiException && e.paymentRequired;
+        setState(() {
+          connecting = false;
+          reconnecting = false;
+          paymentBlocked = pay;
+          error = e.toString();
+        });
+      },
+    );
   }
 
   void _checkLivePause() {
     final at = computer.lastFrameAt;
-    if (computer.live && at != null && DateTime.now().difference(at).inSeconds >= 3) {
+    if (computer.live &&
+        at != null &&
+        DateTime.now().difference(at).inSeconds >= 3) {
       computer.markLivePaused();
     }
   }
 
   void _syncBrowserStream() {
-    final want = !disposed &&
+    final want =
+        !disposed &&
         !backgrounded &&
         !paymentBlocked &&
         (_computerOpen || computer.isBrowser || computer.live || working);
@@ -305,21 +333,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       setState(_checkLivePause);
     });
     _browserSub?.cancel();
-    _browserSub = _browserLoop().listen((frame) {
-      if (!mounted) return;
-      setState(() {
-        if (frame.type == 'frame' && frame.bytes != null && frame.bytes!.isNotEmpty) {
-          computer.setLiveFrame(frame.bytes!);
-        } else if (frame.type == 'status') {
-          computer.setLiveStatus(connected: frame.connected, screencasting: frame.screencasting);
-        }
-      });
-    }, onError: (_) {
-      _browserListening = false;
-      if (mounted) setState(computer.markLivePaused);
-    }, onDone: () {
-      _browserListening = false;
-    });
+    _browserSub = _browserLoop().listen(
+      (frame) {
+        if (!mounted) return;
+        setState(() {
+          if (frame.type == 'frame' &&
+              frame.bytes != null &&
+              frame.bytes!.isNotEmpty) {
+            computer.setLiveFrame(frame.bytes!);
+          } else if (frame.type == 'status') {
+            computer.setLiveStatus(
+              connected: frame.connected,
+              screencasting: frame.screencasting,
+            );
+          }
+        });
+      },
+      onError: (_) {
+        _browserListening = false;
+        if (mounted) setState(computer.markLivePaused);
+      },
+      onDone: () {
+        _browserListening = false;
+      },
+    );
   }
 
   Stream<ComputerFrame> _browserLoop() async* {
@@ -340,14 +377,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _isServerSeq(String? value) =>
       value != null && value.isNotEmpty && RegExp(r'^\d+$').hasMatch(value);
 
-  Stream<AppChatEvent> _eventLoop(int generation, EventStreamCancellation cancellation) async* {
+  Stream<AppChatEvent> _eventLoop(
+    int generation,
+    EventStreamCancellation cancellation,
+  ) async* {
     var delay = 1;
     var connectedBefore = false;
-    bool active() => !disposed && generation == _eventGeneration && !cancellation.isCancelled;
+    bool active() =>
+        !disposed &&
+        generation == _eventGeneration &&
+        !cancellation.isCancelled;
     while (active()) {
       try {
         var receivedReady = false;
-        await for (final ev in api.events(id, since: _isServerSeq(lastServerId) ? lastServerId : null, cancellation: cancellation)) {
+        await for (final ev in api.events(
+          id,
+          since: _isServerSeq(lastServerId) ? lastServerId : null,
+          cancellation: cancellation,
+        )) {
           if (!active()) return;
           delay = 1;
           if (ev.type == 'ready' && !receivedReady) {
@@ -421,7 +468,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (ev.type == 'background') {
       final session = ev.sessionId;
       backgroundTasks.removeWhere((_, task) => task['sessionId'] == session);
-      for (final task in (ev.raw['tasks'] as List? ?? const []).whereType<Map>()) {
+      for (final task
+          in (ev.raw['tasks'] as List? ?? const []).whereType<Map>()) {
         final value = Map<String, dynamic>.from(task);
         backgroundTasks['${value['sessionId']}:${value['taskId']}'] = value;
       }
@@ -429,7 +477,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     if (ev.type == 'runtime') {
       if (ev.state == 'error') {
-        error = ev.text.isEmpty ? 'Agent runtime stopped. Send a new message to reconnect.' : ev.text;
+        error = ev.text.isEmpty
+            ? 'Agent runtime stopped. Send a new message to reconnect.'
+            : ev.text;
         unawaited(_pollTurnStatus());
       }
       return;
@@ -462,8 +512,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (ev.tools != null) toolCount = ev.tools!;
         if (ev.etaMs != null) etaMs = ev.etaMs;
         computer.setAgentWorking(true);
-      } else if (working || sending) {
+      } else if (working || sending || showKickoff) {
         _endTurn();
+      } else {
+        computer.setAgentWorking(false);
       }
       return;
     }
@@ -472,7 +524,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       usageMax = ev.max;
       usagePct = ev.pct;
       usageLabel = ev.label ?? ev.text;
-      if ((usageLabel == null || usageLabel!.isEmpty) && usageUsed != null && usageMax != null) {
+      if ((usageLabel == null || usageLabel!.isEmpty) &&
+          usageUsed != null &&
+          usageMax != null) {
         usageLabel = '${_fmtTokens(usageUsed!)} / ${_fmtTokens(usageMax!)}';
       }
       return;
@@ -480,10 +534,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (!ev.local && _isServerSeq(ev.id) && _alreadyHave(ev)) return;
     if (ev.type == 'user' && !ev.local) {
       final text = ev.text.trim();
-      final dup = events.any((e) =>
-          e.type == 'user' &&
-          e.text.trim() == text &&
-          (e.local || (ev.ts > 0 && e.ts > 0 && (e.ts - ev.ts).abs() < 20000)));
+      final dup = events.any(
+        (e) =>
+            e.type == 'user' &&
+            e.text.trim() == text &&
+            (e.local ||
+                (ev.ts > 0 && e.ts > 0 && (e.ts - ev.ts).abs() < 20000)),
+      );
       if (dup) {
         _persist();
         return;
@@ -492,7 +549,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (ev.type == 'progress') {
       showKickoff = false;
       if (ev.tools != null) toolCount = math.max(toolCount, ev.tools!);
-      final live = events.lastIndexWhere((e) => e.type == 'progress' && !e.local);
+      final live = events.lastIndexWhere(
+        (e) => e.type == 'progress' && !e.local,
+      );
       if (live >= 0) {
         events[live] = ev;
       } else {
@@ -506,7 +565,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     if (ev.type == 'done') {
-      if (working) _endTurn();
+      if (working || sending || showKickoff) _endTurn();
       return;
     }
     if (ev.type == 'error') {
@@ -537,13 +596,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       sending = false;
       showKickoff = false;
     }
-    if ((ev.type == 'ask' || ev.type == 'approve') && !answered.contains(ev.ref ?? ev.id)) {
-      unawaited(TaskNotifications.showPermissionNeed(
-        instanceId: id,
-        name: instanceName,
-        body: ev.text,
-        kind: ev.type,
-      ));
+    if ((ev.type == 'ask' || ev.type == 'approve') &&
+        !answered.contains(ev.ref ?? ev.id)) {
+      unawaited(
+        TaskNotifications.showPermissionNeed(
+          instanceId: id,
+          name: instanceName,
+          body: ev.text,
+          kind: ev.type,
+        ),
+      );
     }
     if (ev.type == 'text' && ev.text.isNotEmpty) {
       lastAssistantText = ev.text;
@@ -567,7 +629,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (ev.type == 'tool') {
       showKickoff = false;
       if (ev.state != 'done') toolCount += 1;
-      final i = events.lastIndexWhere((e) => e.type == 'tool' && e.state != 'done');
+      final i = events.lastIndexWhere(
+        (e) => e.type == 'tool' && e.state != 'done',
+      );
       if (i >= 0 && ev.state == 'done') {
         events[i] = ev;
         _persist();
@@ -600,12 +664,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     events.add(ev);
     if (ev.type == 'file' && ev.fileId != null && ev.localPath == null) {
-      unawaited(_ensureLocalFile(ev, auto: ev.isImage).then((_) {
-        if (!mounted) return;
-        if (ev.isImage && ev.localPath != null) {
-          setState(() => computer.setStill(path: ev.localPath, url: ev.url));
-        }
-      }));
+      unawaited(
+        _ensureLocalFile(ev, auto: ev.isImage).then((_) {
+          if (!mounted) return;
+          if (ev.isImage && ev.localPath != null) {
+            setState(() => computer.setStill(path: ev.localPath, url: ev.url));
+          }
+        }),
+      );
     }
     _persist();
     unawaited(_notifyProgress());
@@ -675,22 +741,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       for (final m in msgs.whereType<Map>()) {
         final role = '${m['role'] ?? ''}';
         final content = m['content'];
-        final text = content is String ? content : (content == null ? '' : content.toString());
+        final text = content is String
+            ? content
+            : (content == null ? '' : content.toString());
         if (text.trim().isEmpty) continue;
         final type = role == 'user' ? 'user' : 'text';
-        final exists = events.any((e) =>
-            (type == 'user' ? e.type == 'user' : (e.type == 'text' || e.type == 'error')) &&
-            e.text.trim() == text.trim());
+        final exists = events.any(
+          (e) =>
+              (type == 'user'
+                  ? e.type == 'user'
+                  : (e.type == 'text' || e.type == 'error')) &&
+              e.text.trim() == text.trim(),
+        );
         if (exists) continue;
-        events.add(AppChatEvent({
-          'type': type,
-          'role': role,
-          'text': text,
-          'format': 'markdown',
-          'final': type == 'text',
-          'id': 'db-$sid-${events.length}',
-          'ts': DateTime.now().millisecondsSinceEpoch,
-        }));
+        events.add(
+          AppChatEvent({
+            'type': type,
+            'role': role,
+            'text': text,
+            'format': 'markdown',
+            'final': type == 'text',
+            'id': 'db-$sid-${events.length}',
+            'ts': DateTime.now().millisecondsSinceEpoch,
+          }),
+        );
         added = true;
       }
       if (added && mounted) {
@@ -772,12 +846,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (working) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Stop the current task before switching conversations.')),
+        const SnackBar(
+          content: Text(
+            'Stop the current task before switching conversations.',
+          ),
+        ),
       );
       return;
     }
     Navigator.of(context).maybePop();
-    await store.save(events: events, answered: answered, lastServerId: lastServerId);
+    await store.save(
+      events: events,
+      answered: answered,
+      lastServerId: lastServerId,
+    );
     try {
       await api.switchConversation(id, item.sessionId);
     } catch (_) {}
@@ -806,17 +888,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             final text = content is String
                 ? content
                 : content == null
-                    ? ''
-                    : content.toString();
+                ? ''
+                : content.toString();
             if (text.isEmpty) continue;
-            events.add(AppChatEvent({
-              'type': role == 'user' ? 'user' : 'text',
-              'role': role,
-              'text': text,
-              'format': 'markdown',
-              'id': 'resume-${item.sessionId}-${events.length}',
-              'ts': DateTime.now().millisecondsSinceEpoch,
-            }));
+            events.add(
+              AppChatEvent({
+                'type': role == 'user' ? 'user' : 'text',
+                'role': role,
+                'text': text,
+                'format': 'markdown',
+                'id': 'resume-${item.sessionId}-${events.length}',
+                'ts': DateTime.now().millisecondsSinceEpoch,
+              }),
+            );
           }
         });
       } catch (_) {}
@@ -836,19 +920,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             children: [
               const ListTile(
-                title: Text('Conversation history', style: TextStyle(fontWeight: FontWeight.w700)),
+                title: Text(
+                  'Conversation history',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
                 subtitle: Text('Previous chats stay here after New chat'),
               ),
               ListTile(
                 leading: const Icon(Icons.edit_square, color: Vc.green),
-                title: const Text('New chat', style: TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: const Text('Keeps this conversation in history', style: TextStyle(color: Vc.muted, fontSize: 12)),
+                title: const Text(
+                  'New chat',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: const Text(
+                  'Keeps this conversation in history',
+                  style: TextStyle(color: Vc.muted, fontSize: 12),
+                ),
                 onTap: () => unawaited(_startNewChat()),
               ),
               if (items.isEmpty)
                 const Padding(
                   padding: EdgeInsets.fromLTRB(16, 0, 16, 24),
-                  child: Text('No other conversations yet. New chat will keep this one here.', style: TextStyle(color: Vc.muted)),
+                  child: Text(
+                    'No other conversations yet. New chat will keep this one here.',
+                    style: TextStyle(color: Vc.muted),
+                  ),
                 )
               else
                 ConstrainedBox(
@@ -860,15 +956,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ListTile(
                           selected: c.sessionId == store.activeSessionId,
                           leading: Icon(
-                            c.status == 'closed' ? Icons.history : Icons.chat_bubble_outline,
-                            color: c.sessionId == store.activeSessionId ? Vc.green : Vc.muted,
+                            c.status == 'closed'
+                                ? Icons.history
+                                : Icons.chat_bubble_outline,
+                            color: c.sessionId == store.activeSessionId
+                                ? Vc.green
+                                : Vc.muted,
                           ),
-                          title: Text(c.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          title: Text(
+                            c.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                           subtitle: Text(
                             '${c.status} · ${c.sessionId}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 11, color: Vc.muted),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Vc.muted,
+                            ),
                           ),
                           onTap: () => _openConversation(c),
                         ),
@@ -883,7 +990,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _persist() {
-    store.scheduleSave(events: events, answered: answered, lastServerId: lastServerId);
+    store.scheduleSave(
+      events: events,
+      answered: answered,
+      lastServerId: lastServerId,
+    );
   }
 
   void _beginTurn() {
@@ -905,13 +1016,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (statusTicks % 4 == 0) unawaited(_pollTurnStatus());
     });
     _syncBrowserStream();
-    unawaited(TaskNotifications.startTurn(
-      instanceId: id,
-      name: instanceName,
-      apiBase: api.baseUrl,
-      token: api.token,
-      since: _isServerSeq(lastServerId) ? lastServerId : null,
-    ));
+    unawaited(
+      TaskNotifications.startTurn(
+        instanceId: id,
+        name: instanceName,
+        apiBase: api.baseUrl,
+        token: api.token,
+        since: _isServerSeq(lastServerId) ? lastServerId : null,
+      ),
+    );
   }
 
   void _endTurn({bool error = false, String? body}) {
@@ -981,10 +1094,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final groups = <List<AppChatEvent>>[];
     for (final ev in events) {
       if (ev.type == 'computer') continue;
-      if ((ev.type == 'ask' || ev.type == 'approve') && answered.contains(ev.ref ?? ev.id)) {
+      if ((ev.type == 'ask' || ev.type == 'approve') &&
+          answered.contains(ev.ref ?? ev.id)) {
         continue;
       }
-      if (ev.type == 'tool' && groups.isNotEmpty && groups.last.first.type == 'tool') {
+      if (ev.type == 'tool' &&
+          groups.isNotEmpty &&
+          groups.last.first.type == 'tool') {
         groups.last.add(ev);
       } else {
         groups.add([ev]);
@@ -1012,7 +1128,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _scroll.removeListener(_onUserScroll);
     _scroll.dispose();
     computer.dispose();
-    unawaited(store.save(events: events, answered: answered, lastServerId: lastServerId));
+    unawaited(
+      store.save(
+        events: events,
+        answered: answered,
+        lastServerId: lastServerId,
+      ),
+    );
     if (turnStartedAt == null) {
       unawaited(TaskNotifications.cancelSilent());
     }
@@ -1049,35 +1171,41 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _applySuperchargeUpdate() async {
     setState(() => sending = true);
-    events.add(AppChatEvent({
-      'type': 'user',
-      'text': '/update yes',
-      'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
-      'ts': DateTime.now().millisecondsSinceEpoch,
-      'format': 'markdown',
-    }, local: true));
+    events.add(
+      AppChatEvent({
+        'type': 'user',
+        'text': '/update yes',
+        'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
+        'ts': DateTime.now().millisecondsSinceEpoch,
+        'format': 'markdown',
+      }, local: true),
+    );
     try {
       final result = await api.cliUpdate(id);
       final ok = result['ok'] == true;
       final from = result['from'] ?? '?';
       final to = result['to'] ?? result['verified'] ?? '?';
-      events.add(AppChatEvent({
-        'type': 'text',
-        'text': ok
-            ? '## Supercharge updated\n\n`$from` → `$to`\n\nDaemon restarted. Chats were kept. No new E2B template.'
-            : '## Supercharge update failed\n\n```\n${result['error'] ?? result['logs'] ?? result}\n```',
-        'final': true,
-        'format': 'markdown',
-        'id': 'local-update-${DateTime.now().millisecondsSinceEpoch}',
-        'ts': DateTime.now().millisecondsSinceEpoch,
-      }, local: true));
+      events.add(
+        AppChatEvent({
+          'type': 'text',
+          'text': ok
+              ? '## Supercharge updated\n\n`$from` → `$to`\n\nDaemon restarted. Chats were kept. No new E2B template.'
+              : '## Supercharge update failed\n\n```\n${result['error'] ?? result['logs'] ?? result}\n```',
+          'final': true,
+          'format': 'markdown',
+          'id': 'local-update-${DateTime.now().millisecondsSinceEpoch}',
+          'ts': DateTime.now().millisecondsSinceEpoch,
+        }, local: true),
+      );
     } catch (e) {
-      events.add(AppChatEvent({
-        'type': 'error',
-        'text': e.toString(),
-        'id': 'local-update-err-${DateTime.now().millisecondsSinceEpoch}',
-        'ts': DateTime.now().millisecondsSinceEpoch,
-      }, local: true));
+      events.add(
+        AppChatEvent({
+          'type': 'error',
+          'text': e.toString(),
+          'id': 'local-update-err-${DateTime.now().millisecondsSinceEpoch}',
+          'ts': DateTime.now().millisecondsSinceEpoch,
+        }, local: true),
+      );
     } finally {
       if (mounted) setState(() => sending = false);
     }
@@ -1093,7 +1221,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (working) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Stop the current task before starting a new chat.')),
+        const SnackBar(
+          content: Text('Stop the current task before starting a new chat.'),
+        ),
       );
       return;
     }
@@ -1119,27 +1249,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         slashCommandName(t) == 'update' &&
         inst?.runtime == AgentRuntime.supercharge) {
       _input.clear();
-      final arg = t.trim().toLowerCase().replaceFirst(RegExp(r'^/update\s*'), '');
+      final arg = t.trim().toLowerCase().replaceFirst(
+        RegExp(r'^/update\s*'),
+        '',
+      );
       if (arg == 'no' || arg == 'n' || arg == 'dismiss' || arg == 'later') {
         await _dismissCliUpdate();
         return;
       }
-      if (arg == 'yes' || arg == 'y' || arg == 'apply' || arg == 'install' || arg == 'ok') {
+      if (arg == 'yes' ||
+          arg == 'y' ||
+          arg == 'apply' ||
+          arg == 'install' ||
+          arg == 'ok') {
         await _applySuperchargeUpdate();
         return;
       }
       try {
         final info = await api.cliVersion(id);
         if (mounted) setState(() => cli = info);
-        events.add(AppChatEvent({
-          'type': 'text',
-          'text':
-              '## Supercharge update\n\nRunning `${info['current'] ?? '?'}` · latest `${info['latest'] ?? '?'}`.\n\nReply **`/update yes`** to install daemon+CLI and restart (chats kept, no new template).',
-          'final': true,
-          'format': 'markdown',
-          'id': 'local-update-check-${DateTime.now().millisecondsSinceEpoch}',
-          'ts': DateTime.now().millisecondsSinceEpoch,
-        }, local: true));
+        events.add(
+          AppChatEvent({
+            'type': 'text',
+            'text':
+                '## Supercharge update\n\nRunning `${info['current'] ?? '?'}` · latest `${info['latest'] ?? '?'}`.\n\nReply **`/update yes`** to install daemon+CLI and restart (chats kept, no new template).',
+            'final': true,
+            'format': 'markdown',
+            'id': 'local-update-check-${DateTime.now().millisecondsSinceEpoch}',
+            'ts': DateTime.now().millisecondsSinceEpoch,
+          }, local: true),
+        );
         setState(() {});
       } catch (e) {
         if (mounted) setState(() => error = e.toString());
@@ -1148,7 +1287,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final drafts = List<DraftAttach>.from(pending);
     final cmd = slashCommandName(t);
-    final agentTurn = drafts.isNotEmpty || cmd == null || commandStartsAgentTurn(cmd, runtime: runtime);
+    final agentTurn =
+        drafts.isNotEmpty ||
+        cmd == null ||
+        commandStartsAgentTurn(cmd, runtime: runtime);
     final newLane = isNewLaneCommand(t, runtime: runtime);
     _input.clear();
     HapticFeedback.lightImpact();
@@ -1160,27 +1302,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       pending.clear();
       if (t.isNotEmpty && !newLane) {
-        events.add(AppChatEvent({
-          'type': 'user',
-          'text': t,
-          'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
-          'ts': DateTime.now().millisecondsSinceEpoch,
-          'format': 'markdown',
-        }, local: true));
+        events.add(
+          AppChatEvent({
+            'type': 'user',
+            'text': t,
+            'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
+            'ts': DateTime.now().millisecondsSinceEpoch,
+            'format': 'markdown',
+          }, local: true),
+        );
       }
       for (final f in drafts) {
-        events.add(AppChatEvent({
-          'type': 'file',
-          'role': 'user',
-          'text': drafts.length == 1 ? t : '',
-          'name': f.name,
-          'kind': f.isImage ? 'photo' : 'document',
-          'mime': f.mime,
-          'size': f.size,
-          'localPath': f.path,
-          'id': f.id,
-          'ts': DateTime.now().millisecondsSinceEpoch,
-        }, local: true));
+        events.add(
+          AppChatEvent({
+            'type': 'file',
+            'role': 'user',
+            'text': drafts.length == 1 ? t : '',
+            'name': f.name,
+            'kind': f.isImage ? 'photo' : 'document',
+            'mime': f.mime,
+            'size': f.size,
+            'localPath': f.path,
+            'id': f.id,
+            'ts': DateTime.now().millisecondsSinceEpoch,
+          }, local: true),
+        );
       }
     });
     _persist();
@@ -1194,7 +1340,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           id,
           caption: t,
           files: [
-            for (final f in drafts) (name: f.name, bytes: f.bytes, mime: f.mime),
+            for (final f in drafts)
+              (name: f.name, bytes: f.bytes, mime: f.mime),
           ],
         );
       }
@@ -1220,16 +1367,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final bytes = await f.readAsBytes();
       if (bytes.isEmpty) continue;
       final mime = f.xFile.mimeType;
-      final localId = 'draft-${DateTime.now().millisecondsSinceEpoch}-${f.name}';
-      final path = await store.saveMedia(name: f.name, bytes: bytes, id: localId);
-      pending.add(DraftAttach(
-        id: localId,
+      final localId =
+          'draft-${DateTime.now().millisecondsSinceEpoch}-${f.name}';
+      final path = await store.saveMedia(
         name: f.name,
-        bytes: Uint8List.fromList(bytes),
-        path: path,
-        mime: mime,
-        kind: looksLikeImage(name: f.name, mime: mime) ? 'photo' : 'document',
-      ));
+        bytes: bytes,
+        id: localId,
+      );
+      pending.add(
+        DraftAttach(
+          id: localId,
+          name: f.name,
+          bytes: Uint8List.fromList(bytes),
+          path: path,
+          mime: mime,
+          kind: looksLikeImage(name: f.name, mime: mime) ? 'photo' : 'document',
+        ),
+      );
     }
     if (mounted) setState(() {});
   }
@@ -1251,7 +1405,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (mounted) setState(() {});
     try {
       final file = await api.downloadFile(id, fileId);
-      final path = await store.saveMedia(name: file.name, bytes: file.bytes, id: fileId);
+      final path = await store.saveMedia(
+        name: file.name,
+        bytes: file.bytes,
+        id: fileId,
+      );
       if (!mounted) return;
       setState(() {
         ev.setLocalPath(path);
@@ -1269,11 +1427,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _sharePath(String path, String name) async {
-    await SharePlus.instance.share(ShareParams(files: [XFile(path)], text: name));
+    await SharePlus.instance.share(
+      ShareParams(files: [XFile(path)], text: name),
+    );
   }
 
   Future<void> _saveImage(String path) async {
     try {
+      if (isDesktop) {
+        Directory? dest;
+        try {
+          dest = await getDownloadsDirectory();
+        } catch (_) {}
+        dest ??= await getApplicationDocumentsDirectory();
+        final name = File(path).uri.pathSegments.last;
+        final out = '${dest.path}/$name';
+        await File(path).copy(out);
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Saved $out')));
+        return;
+      }
       final ok = await Gal.requestAccess();
       if (ok == false) {
         if (!mounted) return;
@@ -1282,7 +1457,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       await Gal.putImage(path);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved to gallery')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Saved to gallery')));
     } catch (e) {
       if (!mounted) return;
       setState(() => error = e.toString());
@@ -1302,7 +1479,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final out = '${dest.path}/${ev.name ?? File(path).uri.pathSegments.last}';
       await File(path).copy(out);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved $out')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Saved $out')));
     } catch (e) {
       if (!mounted) return;
       setState(() => error = e.toString());
@@ -1381,8 +1560,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           decoration: const InputDecoration(hintText: 'Type your own answer'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Send')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, c.text.trim()),
+            child: const Text('Send'),
+          ),
         ],
       ),
     );
@@ -1404,8 +1589,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           decoration: const InputDecoration(hintText: 'provider/model-id'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Use')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, c.text.trim()),
+            child: const Text('Use'),
+          ),
         ],
       ),
     );
@@ -1446,7 +1637,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           answered.contains(e.ref ?? e.id)) {
         return true;
       }
-      if (e.type == 'user' || e.type == 'text' || e.type == 'ask' || e.type == 'tool') {
+      if (e.type == 'user' ||
+          e.type == 'text' ||
+          e.type == 'ask' ||
+          e.type == 'tool') {
         return false;
       }
     }
@@ -1460,7 +1654,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: Text(
           text,
           textAlign: TextAlign.center,
-          style: const TextStyle(color: Vc.muted, fontSize: 13, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            color: Vc.muted,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
@@ -1498,12 +1696,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 height: MediaQuery.of(ctx).size.height * 0.7,
                 child: Column(
                   children: [
-                    const ListTile(title: Text('Commands', style: TextStyle(fontWeight: FontWeight.w700))),
+                    const ListTile(
+                      title: Text(
+                        'Commands',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                       child: TextField(
-                        decoration: const InputDecoration(hintText: 'Search /commands'),
-                        onChanged: (v) => setModal(() => q = v.trim().toLowerCase()),
+                        decoration: const InputDecoration(
+                          hintText: 'Search /commands',
+                        ),
+                        onChanged: (v) =>
+                            setModal(() => q = v.trim().toLowerCase()),
                       ),
                     ),
                     Expanded(
@@ -1513,15 +1719,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             ListTile(
                               dense: true,
                               visualDensity: VisualDensity.compact,
-                              title: Text(c.slash, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                              subtitle: Text(c.description, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 12)),
+                              title: Text(
+                                c.slash,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              subtitle: Text(
+                                c.description,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Vc.muted,
+                                  fontSize: 12,
+                                ),
+                              ),
                               onTap: () {
                                 Navigator.pop(ctx);
                                 _pickCommand(c);
                               },
                             ),
                           if (filtered.isEmpty)
-                            const ListTile(title: Text('No matching commands', style: TextStyle(color: Vc.muted))),
+                            const ListTile(
+                              title: Text(
+                                'No matching commands',
+                                style: TextStyle(color: Vc.muted),
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -1543,7 +1768,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           child: GestureDetector(
             onLongPress: () {
               Clipboard.setData(ClipboardData(text: ev.text));
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('Copied')));
             },
             child: Container(
               margin: const EdgeInsets.fromLTRB(64, 8, 16, 8),
@@ -1564,7 +1791,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Approval needed', style: TextStyle(fontWeight: FontWeight.w700, color: Vc.amber)),
+              const Text(
+                'Approval needed',
+                style: TextStyle(fontWeight: FontWeight.w700, color: Vc.amber),
+              ),
               const SizedBox(height: 8),
               ChatMarkdown(data: ev.text),
               const SizedBox(height: 8),
@@ -1605,7 +1835,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               }
             },
             onShare: () {
-              if (ev.localPath != null) unawaited(_sharePath(ev.localPath!, ev.name ?? 'image'));
+              if (ev.localPath != null) {
+                unawaited(_sharePath(ev.localPath!, ev.name ?? 'image'));
+              }
             },
             onRetry: () => _ensureLocalFile(ev, auto: true),
           );
@@ -1616,7 +1848,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           onOpen: () => unawaited(_openFile(ev)),
           onDownload: () => _downloadFile(ev),
           onShare: () {
-            if (ev.localPath != null) unawaited(_sharePath(ev.localPath!, ev.name ?? 'file'));
+            if (ev.localPath != null) {
+              unawaited(_sharePath(ev.localPath!, ev.name ?? 'file'));
+            }
           },
         );
       case 'error':
@@ -1632,7 +1866,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                ev.kind == 'thinking' || ev.text == 'Working…' ? 'Thinking' : 'Working',
+                ev.kind == 'thinking' || ev.text == 'Working…'
+                    ? 'Thinking'
+                    : 'Working',
                 style: const TextStyle(
                   color: Vc.muted,
                   fontSize: 11,
@@ -1664,7 +1900,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return GestureDetector(
           onLongPress: () {
             Clipboard.setData(ClipboardData(text: shown));
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('Copied')));
           },
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
@@ -1741,7 +1979,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             : () {
                                 final abs = start + i + j;
                                 _resolve(ev);
-                                api.answer(id, ref: ev.ref, index: abs, answer: choices[abs]);
+                                api.answer(
+                                  id,
+                                  ref: ev.ref,
+                                  index: abs,
+                                  answer: choices[abs],
+                                );
                               },
                         child: Text(
                           '${start + i + j + 1}. ${slice[i + j]}',
@@ -1759,14 +2002,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             Row(
               children: [
                 TextButton(
-                  onPressed: page <= 0 ? null : () => setState(() => pickerPage[key] = page - 1),
+                  onPressed: page <= 0
+                      ? null
+                      : () => setState(() => pickerPage[key] = page - 1),
                   child: const Text('◀ Prev'),
                 ),
                 Expanded(
-                  child: Text('${page + 1} / $pages', textAlign: TextAlign.center, style: const TextStyle(color: Vc.muted, fontSize: 12)),
+                  child: Text(
+                    '${page + 1} / $pages',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Vc.muted, fontSize: 12),
+                  ),
                 ),
                 TextButton(
-                  onPressed: page >= pages - 1 ? null : () => setState(() => pickerPage[key] = page + 1),
+                  onPressed: page >= pages - 1
+                      ? null
+                      : () => setState(() => pickerPage[key] = page + 1),
                   child: const Text('Next ▶'),
                 ),
               ],
@@ -1775,7 +2026,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             dense: true,
             enabled: !locked,
             contentPadding: EdgeInsets.zero,
-            title: const Text('Type your own…', style: TextStyle(color: Vc.green)),
+            title: const Text(
+              'Type your own…',
+              style: TextStyle(color: Vc.green),
+            ),
             onTap: locked ? null : () => _customAnswer(ev),
           ),
         ],
@@ -1790,11 +2044,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final key = ev.ref ?? ev.id;
     if (locked) {
       final name = '${ev.raw['pickedLabel'] ?? ev.raw['picked'] ?? ''}'.trim();
-      final isModel = ev.kind == 'model' || (ev.title ?? '').toLowerCase() == 'model';
+      final isModel =
+          ev.kind == 'model' || (ev.title ?? '').toLowerCase() == 'model';
       if (name.isEmpty) {
         return _switchNote(isModel ? 'Model switched' : 'Selection saved');
       }
-      return _switchNote(isModel ? 'Model switched to $name' : 'Switched to $name');
+      return _switchNote(
+        isModel ? 'Model switched to $name' : 'Switched to $name',
+      );
     }
     final total = opts.length;
     final pages = total == 0 ? 1 : ((total + pageSize - 1) / pageSize).floor();
@@ -1810,7 +2067,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             subtitle: Text(
               [
                 if (ev.text.isNotEmpty) ev.text,
-                if (total > pageSize) '${start + 1}–${start + slice.length} of $total',
+                if (total > pageSize)
+                  '${start + 1}–${start + slice.length} of $total',
               ].where((s) => s.trim().isNotEmpty).join(' · '),
               style: const TextStyle(color: Vc.muted, fontSize: 12),
             ),
@@ -1831,33 +2089,59 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   unawaited(_customModel(ev));
                                   return;
                                 }
-                                setState(() => _rememberPick(ev, value, label: '${o['label'] ?? o['value']}'));
+                                setState(
+                                  () => _rememberPick(
+                                    ev,
+                                    value,
+                                    label: '${o['label'] ?? o['value']}',
+                                  ),
+                                );
                                 _persist();
-                                api.pick(id, ref: ev.ref, value: value, kind: ev.kind);
+                                api.pick(
+                                  id,
+                                  ref: ev.ref,
+                                  value: value,
+                                  kind: ev.kind,
+                                );
                               },
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: o['current'] == true ? Vc.green : Colors.white,
-                          side: BorderSide(color: o['current'] == true ? Vc.green : Vc.cardBorder),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                          foregroundColor: o['current'] == true
+                              ? Vc.green
+                              : Colors.white,
+                          side: BorderSide(
+                            color: o['current'] == true
+                                ? Vc.green
+                                : Vc.cardBorder,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 10,
+                          ),
                         ),
                         child: Text(
                           '${o['label'] ?? o['value']}',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                if (slice.skip(i).length == 1) const Expanded(child: SizedBox()),
+                if (slice.skip(i).length == 1)
+                  const Expanded(child: SizedBox()),
               ],
             ),
           if (pages > 1)
             Row(
               children: [
                 TextButton(
-                  onPressed: page <= 0 ? null : () => setState(() => pickerPage[key] = page - 1),
+                  onPressed: page <= 0
+                      ? null
+                      : () => setState(() => pickerPage[key] = page - 1),
                   child: const Text('◀ Prev'),
                 ),
                 Expanded(
@@ -1868,7 +2152,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 TextButton(
-                  onPressed: page >= pages - 1 ? null : () => setState(() => pickerPage[key] = page + 1),
+                  onPressed: page >= pages - 1
+                      ? null
+                      : () => setState(() => pickerPage[key] = page + 1),
                   child: const Text('Next ▶'),
                 ),
               ],
@@ -1877,7 +2163,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             dense: true,
             enabled: !locked,
             contentPadding: EdgeInsets.zero,
-            title: const Text('Custom model…', style: TextStyle(color: Vc.green)),
+            title: const Text(
+              'Custom model…',
+              style: TextStyle(color: Vc.green),
+            ),
             onTap: locked ? null : () => unawaited(_customModel(ev)),
           ),
         ],
@@ -1939,13 +2228,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   bool _handleHref(String href) {
-    if (!isPreviewUrl(href) && !href.contains('localhost') && !href.contains('127.0.0.1')) {
+    if (!isPreviewUrl(href) &&
+        !href.contains('localhost') &&
+        !href.contains('127.0.0.1')) {
       return false;
     }
     final sid = _sandboxId;
-    final url = isPreviewUrl(href)
-        ? href
-        : rewriteLocalhostUrls(href, sid);
+    final url = isPreviewUrl(href) ? href : rewriteLocalhostUrls(href, sid);
     _openPreview(url);
     return true;
   }
@@ -1991,67 +2280,76 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _runComputerCommand(String command) async {
     final cmd = command.trim();
     if (cmd.isEmpty) return;
-    computer.apply(AppChatEvent({
-      'type': 'computer',
-      'tab': 'terminal',
-      'kind': 'shell',
-      'state': 'start',
-      'command': cmd,
-      'label': cmd,
-    }));
+    computer.apply(
+      AppChatEvent({
+        'type': 'computer',
+        'tab': 'terminal',
+        'kind': 'shell',
+        'state': 'start',
+        'command': cmd,
+        'label': cmd,
+      }),
+    );
     try {
       final result = await api.exec(id, command: cmd);
-      computer.apply(AppChatEvent({
-        'type': 'computer',
-        'tab': 'terminal',
-        'kind': 'shell',
-        'state': 'done',
-        'command': cmd,
-        'stdout': [result.stdout, result.stderr].where((s) => s.trim().isNotEmpty).join('\n'),
-        'exitCode': result.exitCode,
-        'success': result.ok,
-      }));
+      computer.apply(
+        AppChatEvent({
+          'type': 'computer',
+          'tab': 'terminal',
+          'kind': 'shell',
+          'state': 'done',
+          'command': cmd,
+          'stdout': [
+            result.stdout,
+            result.stderr,
+          ].where((s) => s.trim().isNotEmpty).join('\n'),
+          'exitCode': result.exitCode,
+          'success': result.ok,
+        }),
+      );
     } catch (e) {
-      computer.apply(AppChatEvent({
-        'type': 'computer',
-        'tab': 'terminal',
-        'kind': 'shell',
-        'state': 'done',
-        'command': cmd,
-        'stdout': e.toString(),
-        'success': false,
-      }));
+      computer.apply(
+        AppChatEvent({
+          'type': 'computer',
+          'tab': 'terminal',
+          'kind': 'shell',
+          'state': 'done',
+          'command': cmd,
+          'stdout': e.toString(),
+          'success': false,
+        }),
+      );
     }
   }
 
   Future<void> _openBrowserHandoff() async {
+    if (_browserViewerOpen) return;
     computer.tab = 'browser';
     _syncBrowserStream();
+    _browserViewerOpen = true;
     try {
-      final wsUrl = await api.openAiBrowserVnc(id);
-      if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => BrowserHandoffScreen(
-            wsUrl: wsUrl,
-            viewOnly: true,
-            onTakeOver: () async {
-              await api.startBrowserHandoff(id);
-            },
+            api: api,
+            instanceId: id,
+            onContinue: _sendBrowserContinuation,
           ),
         ),
       );
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$error')),
-        );
-      }
     } finally {
-      try {
-        await api.stopBrowserHandoff(id);
-      } catch (_) {}
+      _browserViewerOpen = false;
+      if (mounted) _syncBrowserStream();
     }
+  }
+
+  Future<void> _sendBrowserContinuation(String prompt) async {
+    final text = prompt.trim();
+    if (text.isEmpty) return;
+    if (working || sending || showKickoff) {
+      setState(_endTurn);
+    }
+    await _send(text);
   }
 
   void _openPreview([String? url]) {
@@ -2090,14 +2388,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 dense: true,
                 visualDensity: VisualDensity.compact,
                 minVerticalPadding: 0,
-                title: Text(c.slash, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                subtitle: Text(c.description, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 11)),
+                title: Text(
+                  c.slash,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+                subtitle: Text(
+                  c.description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Vc.muted, fontSize: 11),
+                ),
                 onTap: () => _pickCommand(c),
               ),
             if (filtered.isEmpty)
               const ListTile(
                 dense: true,
-                title: Text('No matching commands', style: TextStyle(color: Vc.muted)),
+                title: Text(
+                  'No matching commands',
+                  style: TextStyle(color: Vc.muted),
+                ),
               ),
           ],
         ),
@@ -2107,12 +2419,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final cliInfo = CliVersion.fromJson(cli);
+    final cliInfo = CliVersion.fromJson(cli, runtime: runtime.apiValue);
     final updateReady = cliInfo.updateAvailable && !hideCliUpdate;
     final palette = showCommandPalette(_input.text);
-    return WithForegroundTask(
-      child: AppScaffold(
-        currentInstanceId: id,
+    final body = AppScaffold(
+      currentInstanceId: id,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2121,7 +2432,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               instanceName,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: -0.3),
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.3,
+              ),
             ),
             if (_headerClock != null)
               Text(
@@ -2140,10 +2455,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               padding: const EdgeInsets.only(right: 4),
               child: Center(
                 child: Tooltip(
-                  message: usagePct != null ? 'Context $usagePct% of model window' : 'Context usage',
+                  message: usagePct != null
+                      ? 'Context $usagePct% of model window'
+                      : 'Context usage',
                   child: Text(
                     usagePct != null ? '$_usageText · $usagePct%' : _usageText!,
-                    style: TextStyle(color: _usageColor, fontSize: 12, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      color: _usageColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -2190,34 +2511,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     ? EmptyState(
                         icon: Icons.lock_outline,
                         title: 'Subscription needed',
-                        detail: 'Renew this instance to keep chatting with the sandbox.',
+                        detail:
+                            'Renew this instance to keep chatting with the sandbox.',
                       )
                     : events.isEmpty && !connecting && !showKickoff
-                        ? const EmptyState(
-                            icon: Icons.chat_bubble_outline,
-                            title: 'What should we work on?',
-                            detail: 'Ask anything. Attach a file or type / for commands.',
-                          )
-                        : Builder(
-                            builder: (ctx) {
-                              final groups = _grouped();
-                              return ListView.builder(
-                                controller: _scroll,
-                                reverse: true,
-                                padding: const EdgeInsets.only(bottom: 8, top: 8),
-                                itemCount: groups.length,
-                                itemBuilder: (ctx, i) {
-                                  final logical = groups.length - 1 - i;
-                                  final batch = groups[logical];
-                                  if (batch.first.type == 'tool') {
-                                    final lastGroup = logical == groups.length - 1;
-                                    return ToolFold(tools: batch, expanded: working && lastGroup);
-                                  }
-                                  return _bubble(batch.first);
-                                },
-                              );
+                    ? const EmptyState(
+                        icon: Icons.chat_bubble_outline,
+                        title: 'What should we work on?',
+                        detail:
+                            'Ask anything. Attach a file or type / for commands.',
+                      )
+                    : Builder(
+                        builder: (ctx) {
+                          final groups = _grouped();
+                          return ListView.builder(
+                            controller: _scroll,
+                            reverse: true,
+                            padding: const EdgeInsets.only(bottom: 8, top: 8),
+                            itemCount: groups.length,
+                            itemBuilder: (ctx, i) {
+                              final logical = groups.length - 1 - i;
+                              final batch = groups[logical];
+                              if (batch.first.type == 'tool') {
+                                final lastGroup = logical == groups.length - 1;
+                                return ToolFold(
+                                  tools: batch,
+                                  expanded: working && lastGroup,
+                                );
+                              }
+                              return _bubble(batch.first);
                             },
-                          ),
+                          );
+                        },
+                      ),
               ),
               if (pending.isNotEmpty)
                 DraftTray(
@@ -2231,7 +2557,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: FilledButton(
-                      onPressed: () => context.push('/billing', extra: BillingArgs(instanceId: id)),
+                      onPressed: () => context.push(
+                        '/billing',
+                        extra: BillingArgs(instanceId: id),
+                      ),
                       child: const Text('Renew subscription'),
                     ),
                   ),
@@ -2254,81 +2583,116 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                        if ((working || showKickoff) &&
-                            !events.any((e) => e.type == 'progress' && e.text.trim().isNotEmpty))
-                          const Padding(
-                            padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
-                            child: Text(
-                              'Thinking…',
-                              style: TextStyle(color: Vc.muted, fontSize: 13, fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Vc.elevated,
-                            borderRadius: BorderRadius.circular(26),
-                            border: Border.all(color: Vc.cardBorder),
-                          ),
-                          padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              IconButton(
-                                tooltip: 'Attach',
-                                onPressed: sending ? null : _attach,
-                                icon: const Icon(Icons.add, color: Vc.muted, size: 22),
-                              ),
-                              Expanded(
-                                child: TextField(
-                                  controller: _input,
-                                  minLines: 1,
-                                  maxLines: 6,
-                                  textInputAction: TextInputAction.newline,
-                                  decoration: const InputDecoration(
-                                    hintText: 'Message',
-                                    border: InputBorder.none,
-                                    enabledBorder: InputBorder.none,
-                                    focusedBorder: InputBorder.none,
-                                    filled: false,
-                                    contentPadding: EdgeInsets.fromLTRB(0, 10, 8, 10),
+                            if ((working || showKickoff) &&
+                                !events.any(
+                                  (e) =>
+                                      e.type == 'progress' &&
+                                      e.text.trim().isNotEmpty,
+                                ))
+                              const Padding(
+                                padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
+                                child: Text(
+                                  'Thinking…',
+                                  style: TextStyle(
+                                    color: Vc.muted,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ),
-                              IconButton(
-                                tooltip: 'Commands',
-                                onPressed: _commands,
-                                icon: const Icon(Icons.alternate_email, color: Vc.muted, size: 20),
+                            Container(
+                              decoration: BoxDecoration(
+                                color: Vc.elevated,
+                                borderRadius: BorderRadius.circular(26),
+                                border: Border.all(color: Vc.cardBorder),
                               ),
-                              Material(
-                                color: sending || (_input.text.trim().isEmpty && pending.isEmpty)
-                                    ? Vc.card
-                                    : Colors.white,
-                                shape: const CircleBorder(),
-                                child: IconButton(
-                                  onPressed: sending || (_input.text.trim().isEmpty && pending.isEmpty)
-                                      ? null
-                                      : () => _send(),
-                                  icon: sending
-                                      ? const SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(strokeWidth: 2, color: Vc.muted),
-                                        )
-                                      : Icon(
-                                          Icons.arrow_upward_rounded,
-                                          size: 20,
-                                          color: sending || (_input.text.trim().isEmpty && pending.isEmpty)
-                                              ? Vc.faint
-                                              : Colors.black,
+                              padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Attach',
+                                    onPressed: sending ? null : _attach,
+                                    icon: const Icon(
+                                      Icons.add,
+                                      color: Vc.muted,
+                                      size: 22,
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _input,
+                                      minLines: 1,
+                                      maxLines: 6,
+                                      textInputAction: TextInputAction.newline,
+                                      decoration: const InputDecoration(
+                                        hintText: 'Message',
+                                        border: InputBorder.none,
+                                        enabledBorder: InputBorder.none,
+                                        focusedBorder: InputBorder.none,
+                                        filled: false,
+                                        contentPadding: EdgeInsets.fromLTRB(
+                                          0,
+                                          10,
+                                          8,
+                                          10,
                                         ),
-                                ),
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Commands',
+                                    onPressed: _commands,
+                                    icon: const Icon(
+                                      Icons.alternate_email,
+                                      color: Vc.muted,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  Material(
+                                    color:
+                                        sending ||
+                                            (_input.text.trim().isEmpty &&
+                                                pending.isEmpty)
+                                        ? Vc.card
+                                        : Colors.white,
+                                    shape: const CircleBorder(),
+                                    child: IconButton(
+                                      onPressed:
+                                          sending ||
+                                              (_input.text.trim().isEmpty &&
+                                                  pending.isEmpty)
+                                          ? null
+                                          : () => _send(),
+                                      icon: sending
+                                          ? const SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Vc.muted,
+                                              ),
+                                            )
+                                          : Icon(
+                                              Icons.arrow_upward_rounded,
+                                              size: 20,
+                                              color:
+                                                  sending ||
+                                                      (_input.text
+                                                              .trim()
+                                                              .isEmpty &&
+                                                          pending.isEmpty)
+                                                  ? Vc.faint
+                                                  : Colors.black,
+                                            ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
+                      ),
                     ],
                   ),
                 ),
@@ -2347,13 +2711,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     onTap: _jumpToLatest,
                     borderRadius: BorderRadius.circular(999),
                     child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(Icons.arrow_downward, size: 16, color: Vc.green),
                           SizedBox(width: 6),
-                          Text('Jump to latest', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                          Text(
+                            'Jump to latest',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -2368,7 +2741,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
         ],
       ),
-    ),
     );
+    if (isDesktop) return body;
+    return WithForegroundTask(child: body);
   }
 }

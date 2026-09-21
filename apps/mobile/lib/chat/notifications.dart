@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../desktop.dart';
 import 'event_stream.dart';
 
 typedef OpenChatCallback = void Function(String instanceId);
@@ -33,7 +34,7 @@ class TaskNotifications {
       'Working · ${_fmt(_elapsed)} · $_tools tool${_tools == 1 ? '' : 's'}';
 
   static Future<void> init() async {
-    if (_ready) return;
+    if (_ready || isDesktop) return;
     try {
       const android = AndroidInitializationSettings('@drawable/ic_stat_vectra');
       const ios = DarwinInitializationSettings();
@@ -44,14 +45,17 @@ class TaskNotifications {
           if (id != null && id.isNotEmpty) onOpenChat?.call(id);
         },
       );
-      final androidPlugin = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      final androidPlugin = _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
       await androidPlugin?.requestNotificationsPermission();
       _ready = true;
     } catch (_) {}
   }
 
   static Future<void> initForeground() async {
-    if (_fgReady) return;
+    if (_fgReady || isDesktop) return;
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: progressChannel,
@@ -113,10 +117,16 @@ class TaskNotifications {
       await requestPermissions();
       await FlutterForegroundTask.saveData(key: 'apiBase', value: apiBase);
       await FlutterForegroundTask.saveData(key: 'token', value: token ?? '');
-      await FlutterForegroundTask.saveData(key: 'instanceId', value: instanceId);
+      await FlutterForegroundTask.saveData(
+        key: 'instanceId',
+        value: instanceId,
+      );
       await FlutterForegroundTask.saveData(key: 'name', value: name);
       await FlutterForegroundTask.saveData(key: 'since', value: since ?? '');
-      await FlutterForegroundTask.saveData(key: 'startedMs', value: DateTime.now().millisecondsSinceEpoch);
+      await FlutterForegroundTask.saveData(
+        key: 'startedMs',
+        value: DateTime.now().millisecondsSinceEpoch,
+      );
       await FlutterForegroundTask.saveData(key: 'tools', value: 0);
       if (Platform.isAndroid) {
         await initForeground();
@@ -232,7 +242,12 @@ class TaskNotifications {
       if (Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
         await FlutterForegroundTask.stopService();
       }
-      await showDone(instanceId: instanceId, name: name, body: body, error: error);
+      await showDone(
+        instanceId: instanceId,
+        name: name,
+        body: body,
+        error: error,
+      );
     } catch (_) {}
   }
 
@@ -273,7 +288,9 @@ class TaskNotifications {
   }) async {
     await init();
     final snippet = body.trim().isEmpty
-        ? (kind == 'ask' ? 'The agent needs an answer.' : 'The agent needs approval.')
+        ? (kind == 'ask'
+              ? 'The agent needs an answer.'
+              : 'The agent needs approval.')
         : body.trim();
     await _plugin.show(
       id: permissionId,
@@ -283,7 +300,8 @@ class TaskNotifications {
         android: AndroidNotificationDetails(
           permissionChannel,
           'Approvals',
-          channelDescription: 'Heads-up when the agent asks for permission or a choice',
+          channelDescription:
+              'Heads-up when the agent asks for permission or a choice',
           importance: Importance.high,
           priority: Priority.high,
           playSound: true,
@@ -313,7 +331,8 @@ class TaskNotifications {
     await _plugin.show(
       id: cliUpdateId,
       title: '$product $latest is out',
-      body: '$name is on ${current.isEmpty ? 'an older CLI' : current}. Tap to open chat and update.',
+      body:
+          '$name is on ${current.isEmpty ? 'an older CLI' : current}. Tap to open chat and update.',
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           cliUpdateChannel,
@@ -370,12 +389,14 @@ class _VectraTaskHandler extends TaskHandler {
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     _stopped = false;
     _started = DateTime.fromMillisecondsSinceEpoch(
-      await FlutterForegroundTask.getData<int>(key: 'startedMs') ?? DateTime.now().millisecondsSinceEpoch,
+      await FlutterForegroundTask.getData<int>(key: 'startedMs') ??
+          DateTime.now().millisecondsSinceEpoch,
     );
     _since = await FlutterForegroundTask.getData<String>(key: 'since') ?? '';
     _name = await FlutterForegroundTask.getData<String>(key: 'name') ?? 'Chat';
     _tools = await FlutterForegroundTask.getData<int>(key: 'tools') ?? 0;
-    _instanceId = await FlutterForegroundTask.getData<String>(key: 'instanceId') ?? '';
+    _instanceId =
+        await FlutterForegroundTask.getData<String>(key: 'instanceId') ?? '';
     await _initNotif();
     unawaited(_loop());
   }
@@ -424,11 +445,9 @@ class _VectraTaskHandler extends TaskHandler {
     if (base == null || base.isEmpty || id == null || id.isEmpty) return;
     _instanceId = id;
 
-    final uri = Uri.parse('$base/api/instances/$id/chat/events').replace(
-      queryParameters: {
-        if (_since.isNotEmpty) 'since': _since,
-      },
-    );
+    final uri = Uri.parse(
+      '$base/api/instances/$id/chat/events',
+    ).replace(queryParameters: {if (_since.isNotEmpty) 'since': _since});
     final client = HttpClient();
     _http = client;
     try {

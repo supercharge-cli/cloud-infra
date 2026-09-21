@@ -47,7 +47,11 @@ class ComputerBar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
-                const Icon(Icons.keyboard_arrow_down_rounded, size: 22, color: Vc.faint),
+                const Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  size: 22,
+                  color: Vc.faint,
+                ),
               ],
             ),
           ),
@@ -132,7 +136,10 @@ class _ComputerPageState extends State<ComputerPage> {
                             textAlign: TextAlign.center,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                         PopupMenuButton<String>(
@@ -166,17 +173,26 @@ class _ComputerPageState extends State<ComputerPage> {
                                 border: Border.all(color: Vc.cardBorder),
                               ),
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(
-                                      state.isBrowser ? Icons.public : Icons.desktop_windows_outlined,
+                                      state.isBrowser
+                                          ? Icons.public
+                                          : Icons.desktop_windows_outlined,
                                       size: 18,
                                       color: Colors.white,
                                     ),
                                     const SizedBox(width: 2),
-                                    const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: Vc.faint),
+                                    const Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      size: 16,
+                                      color: Vc.faint,
+                                    ),
                                   ],
                                 ),
                               ),
@@ -185,7 +201,7 @@ class _ComputerPageState extends State<ComputerPage> {
                         ),
                         if (widget.onBrowserHandoff != null)
                           IconButton(
-                            tooltip: 'Take control of the browser',
+                            tooltip: 'Watch the AI browser',
                             onPressed: () => widget.onBrowserHandoff?.call(),
                             icon: const Icon(Icons.ads_click, size: 20),
                           ),
@@ -212,15 +228,27 @@ class _ComputerPageState extends State<ComputerPage> {
                                     widget.instanceName,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 12, color: Vc.muted),
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Vc.muted,
+                                    ),
                                   ),
                                 ),
                               ),
-                              const Divider(height: 1, color: Color(0xFF2A2E36)),
+                              const Divider(
+                                height: 1,
+                                color: Color(0xFF2A2E36),
+                              ),
                               Expanded(
                                 child: state.isBrowser
-                                    ? ComputerBrowserView(state: state, compact: false)
-                                    : ComputerTerminalView(state: state, compact: false),
+                                    ? ComputerBrowserView(
+                                        state: state,
+                                        compact: false,
+                                      )
+                                    : ComputerTerminalView(
+                                        state: state,
+                                        compact: false,
+                                      ),
                               ),
                             ],
                           ),
@@ -237,18 +265,26 @@ class _ComputerPageState extends State<ComputerPage> {
                             child: TextField(
                               controller: _cmd,
                               enabled: !_running,
-                              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 13,
+                              ),
                               decoration: const InputDecoration(
                                 hintText: 'Run a command…',
                                 isDense: true,
-                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
                               ),
                               onSubmitted: (_) => unawaited(_run()),
                             ),
                           ),
                           const SizedBox(width: 8),
                           FilledButton(
-                            onPressed: _running ? null : () => unawaited(_run()),
+                            onPressed: _running
+                                ? null
+                                : () => unawaited(_run()),
                             child: Text(_running ? '…' : 'Run'),
                           ),
                         ],
@@ -260,7 +296,7 @@ class _ComputerPageState extends State<ComputerPage> {
                       child: FilledButton.icon(
                         onPressed: () => widget.onBrowserHandoff?.call(),
                         icon: const Icon(Icons.ads_click, size: 18),
-                        label: const Text('Take control'),
+                        label: const Text('Watch AI browser'),
                       ),
                     ),
                   Padding(
@@ -289,14 +325,20 @@ class _ComputerPageState extends State<ComputerPage> {
                             children: [
                               Text(
                                 state.usingLabel,
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                               const SizedBox(height: 2),
                               Text(
                                 state.usingDetail,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 13, color: Vc.muted),
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Vc.muted,
+                                ),
                               ),
                             ],
                           ),
@@ -313,7 +355,9 @@ class _ComputerPageState extends State<ComputerPage> {
                           width: 8,
                           height: 8,
                           decoration: BoxDecoration(
-                            color: state.live || state.agentWorking ? Vc.green : Vc.faint,
+                            color: state.live || state.agentWorking
+                                ? Vc.green
+                                : Vc.faint,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -322,11 +366,15 @@ class _ComputerPageState extends State<ComputerPage> {
                           state.live
                               ? 'Live'
                               : state.livePaused
-                                  ? 'Live paused'
-                                  : state.agentWorking
-                                      ? 'Live'
-                                      : 'Idle',
-                          style: const TextStyle(fontSize: 13, color: Vc.muted, fontWeight: FontWeight.w600),
+                              ? 'Live paused'
+                              : state.agentWorking
+                              ? 'Live'
+                              : 'Idle',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Vc.muted,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ),
@@ -342,7 +390,11 @@ class _ComputerPageState extends State<ComputerPage> {
 }
 
 class _ViewMenuRow extends StatelessWidget {
-  const _ViewMenuRow({required this.icon, required this.label, required this.selected});
+  const _ViewMenuRow({
+    required this.icon,
+    required this.label,
+    required this.selected,
+  });
   final IconData icon;
   final String label;
   final bool selected;
@@ -392,14 +444,22 @@ class ComputerThumb extends StatelessWidget {
           children: [
             const ColoredBox(color: Color(0xFF09090B)),
             if (state.hasPreview)
-              ComputerBrowserView(state: state, compact: true, fit: BoxFit.cover)
+              ComputerBrowserView(
+                state: state,
+                compact: true,
+                fit: BoxFit.cover,
+              )
             else
               Padding(
                 padding: const EdgeInsets.all(5),
                 child: Align(
                   alignment: Alignment.topLeft,
                   child: Text(
-                    state.isBrowser ? 'browser' : (state.lines.isEmpty ? '\$ _' : '\$ ${state.peekLabel}'),
+                    state.isBrowser
+                        ? 'browser'
+                        : (state.lines.isEmpty
+                              ? '\$ _'
+                              : '\$ ${state.peekLabel}'),
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -419,7 +479,11 @@ class ComputerThumb extends StatelessWidget {
 }
 
 class ComputerTerminalView extends StatelessWidget {
-  const ComputerTerminalView({super.key, required this.state, this.compact = false});
+  const ComputerTerminalView({
+    super.key,
+    required this.state,
+    this.compact = false,
+  });
   final ComputerState state;
   final bool compact;
 
@@ -427,12 +491,20 @@ class ComputerTerminalView extends StatelessWidget {
   Widget build(BuildContext context) {
     if (state.lines.isEmpty) {
       return const Center(
-        child: Text('No commands yet', style: TextStyle(color: Vc.faint, fontSize: 13)),
+        child: Text(
+          'No commands yet',
+          style: TextStyle(color: Vc.faint, fontSize: 13),
+        ),
       );
     }
     final fontSize = compact ? 10.0 : 12.5;
     return ListView.builder(
-      padding: EdgeInsets.fromLTRB(compact ? 8 : 14, compact ? 6 : 12, compact ? 8 : 14, compact ? 8 : 16),
+      padding: EdgeInsets.fromLTRB(
+        compact ? 8 : 14,
+        compact ? 6 : 12,
+        compact ? 8 : 14,
+        compact ? 8 : 16,
+      ),
       itemCount: state.lines.length,
       itemBuilder: (ctx, i) {
         final line = state.lines[i];
