@@ -17,6 +17,7 @@ void main() {
     expect(html, isNot(contains('data:text/javascript')));
     expect(html, contains('Connecting to the AI browser'));
     expect(html, contains('Could not connect to the AI browser'));
+    expect(html, contains('event.detail.reason'));
     expect(html, contains("if(!wasConnected)notify('suspended')"));
     expect(html, contains('"generation":3'));
   });

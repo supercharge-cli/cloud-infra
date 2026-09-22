@@ -1427,6 +1427,7 @@ const server = createServer(async (req, res) => {
         sessions: sessions.size,
         hasE2BKey: Boolean(process.env.E2B_API_KEY),
         authRequired: Boolean(authToken),
+        capabilities: { browserVncTicketRelay: true },
         lifecycle: {
           onTimeout: lifecycleOnTimeout,
           autoResume: lifecycleAutoResume,

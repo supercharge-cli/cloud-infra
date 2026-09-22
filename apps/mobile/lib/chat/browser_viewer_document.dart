@@ -123,8 +123,10 @@ function connect(url,generation){
       if(ended){notify('suspended');return;}
       if(client!==rfb)return;
       connected=false;applyMode();
+      const reason=String(event.detail.reason||'').trim();
+      const safeReason=/^(Browser VNC|Unable to establish|Viewer connection)/.test(reason)?reason:'';
       const text=event.detail.clean?'Browser view disconnected. Reconnect to watch again.'
-        :'Could not connect to the AI browser. Reconnect for a fresh ticket. The sandbox and gateway must support browser VNC.';
+        :safeReason||'Could not connect to the AI browser. Reconnect for a fresh ticket. The sandbox and gateway must support browser VNC.';
       message(text);notify('disconnected',{message:text});
     });
     client.addEventListener('credentialsrequired',()=>{
