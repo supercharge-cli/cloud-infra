@@ -2264,7 +2264,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 if (tab == 'browser') _syncBrowserStream();
               },
               onRunCommand: _runComputerCommand,
-              onBrowserHandoff: _isSupercharge ? _openBrowserHandoff : null,
+              onManualBrowserControl: _isSupercharge
+                  ? _openBrowserHandoff
+                  : null,
             ),
             transitionsBuilder: (ctx, anim, sec, child) {
               return FadeTransition(opacity: anim, child: child);

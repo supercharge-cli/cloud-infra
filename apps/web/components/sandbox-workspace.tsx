@@ -256,6 +256,20 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
     }
   }
 
+  const handleHandoffDisconnected = useCallback(() => {
+    setHandoffWsUrl('');
+    void fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'stop' }),
+    }).then((response) => {
+      if (!response.ok) throw new Error(`Return control failed (${response.status})`);
+      setMessage('Manual control ended. Watching the AI browser again.');
+    }).catch((error) => {
+      setMessage(`Manual control disconnected. Return control before continuing: ${(error as Error).message}`);
+    });
+  }, [instanceId]);
+
   async function setBrowserHandoff(action: 'start' | 'stop') {
     if (handoffBusy) return;
     setHandoffBusy(true);
@@ -279,7 +293,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
       const ticketData = await ticket.json().catch(() => ({}));
       if (!ticket.ok || !ticketData.wsUrl) throw new Error(ticketData.error || 'Browser handoff ticket failed');
       setHandoffWsUrl(String(ticketData.wsUrl));
-      setMessage('Browser handoff is active in this tab. Complete any login or verification, then return control.');
+      setMessage('Manual browser control is active in this tab. Complete the required step, then return control to the AI.');
     } catch (error) {
       setMessage((error as Error).message);
     } finally {
@@ -331,23 +345,23 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
         <div className="overflow-hidden rounded-xl border border-zinc-800 bg-black">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2 text-xs text-zinc-400">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-              <span>Computer stream · {browserStatus}</span>
+              <span>Watching AI browser · {browserStatus}</span>
               {runtime === 'supercharge' ? <span className="text-emerald-400">E2B Playwright</span> : null}
             </div>
             {sandboxId ? <span className="font-mono text-zinc-600">{sandboxId.slice(0, 16)}…</span> : null}
           </div>
           {runtime === 'supercharge' ? (
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 bg-amber-500/5 p-3 text-xs">
-              <p className="text-amber-200/80">Use handoff only for login, MFA, OAuth, CAPTCHA, or another action that requires you. It opens inside this browser tab and expires automatically.</p>
+              <p className="text-amber-200/80">You are watching the AI&apos;s live E2B browser below. Open manual control only for login, MFA, OAuth, CAPTCHA, or another step that requires your input.</p>
               <div className="flex gap-2">
-                <button type="button" disabled={disabled || handoffBusy || Boolean(handoffWsUrl)} onClick={() => void setBrowserHandoff('start')} className="rounded border border-amber-400/50 px-3 py-1.5 text-amber-100 hover:bg-amber-400/10 disabled:opacity-50">Take control</button>
-                <button type="button" disabled={disabled || handoffBusy || !handoffWsUrl} onClick={() => void setBrowserHandoff('stop')} className="rounded border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Return control</button>
+                <button type="button" disabled={disabled || handoffBusy || Boolean(handoffWsUrl)} onClick={() => void setBrowserHandoff('start')} className="rounded border border-amber-400/50 px-3 py-1.5 text-amber-100 hover:bg-amber-400/10 disabled:opacity-50">Manual control</button>
+                <button type="button" disabled={disabled || handoffBusy || !handoffWsUrl} onClick={() => void setBrowserHandoff('stop')} className="rounded border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Return to AI</button>
               </div>
             </div>
           ) : null}
           {handoffWsUrl ? (
             <div className="min-h-[520px] bg-zinc-950">
-              <BrowserHandoffView wsUrl={handoffWsUrl} onDisconnected={() => setHandoffWsUrl('')} />
+              <BrowserHandoffView wsUrl={handoffWsUrl} onDisconnected={handleHandoffDisconnected} />
             </div>
           ) : (
           <>

@@ -69,7 +69,7 @@ class ComputerPage extends StatefulWidget {
     required this.onClose,
     required this.onSelectTab,
     this.onRunCommand,
-    this.onBrowserHandoff,
+    this.onManualBrowserControl,
   });
 
   final ComputerState state;
@@ -77,7 +77,7 @@ class ComputerPage extends StatefulWidget {
   final VoidCallback onClose;
   final ValueChanged<String> onSelectTab;
   final Future<void> Function(String command)? onRunCommand;
-  final Future<void> Function()? onBrowserHandoff;
+  final Future<void> Function()? onManualBrowserControl;
 
   @override
   State<ComputerPage> createState() => _ComputerPageState();
@@ -199,12 +199,15 @@ class _ComputerPageState extends State<ComputerPage> {
                             ),
                           ),
                         ),
-                        if (widget.onBrowserHandoff != null)
-                          IconButton(
-                            tooltip: 'Watch the AI browser',
-                            onPressed: () => widget.onBrowserHandoff?.call(),
-                            icon: const Icon(Icons.ads_click, size: 20),
+                        IconButton(
+                          tooltip: 'Watch the AI browser',
+                          onPressed: () => widget.onSelectTab('browser'),
+                          icon: Icon(
+                            Icons.visibility_outlined,
+                            size: 20,
+                            color: state.isBrowser ? Vc.greenSoft : null,
                           ),
+                        ),
                       ],
                     ),
                   ),
@@ -290,13 +293,34 @@ class _ComputerPageState extends State<ComputerPage> {
                         ],
                       ),
                     )
-                  else if (state.isBrowser && widget.onBrowserHandoff != null)
+                  else if (state.isBrowser)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                      child: FilledButton.icon(
-                        onPressed: () => widget.onBrowserHandoff?.call(),
-                        icon: const Icon(Icons.ads_click, size: 18),
-                        label: const Text('Watch AI browser'),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: null,
+                              icon: const Icon(Icons.visibility, size: 18),
+                              label: Text(
+                                state.live
+                                    ? 'Watching AI browser live'
+                                    : state.livePaused
+                                    ? 'Live view paused'
+                                    : 'Waiting for AI browser',
+                              ),
+                            ),
+                          ),
+                          if (widget.onManualBrowserControl != null) ...[
+                            const SizedBox(width: 8),
+                            FilledButton.icon(
+                              onPressed: () =>
+                                  widget.onManualBrowserControl?.call(),
+                              icon: const Icon(Icons.ads_click, size: 18),
+                              label: const Text('Manual control'),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   Padding(
@@ -324,7 +348,9 @@ class _ComputerPageState extends State<ComputerPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                state.usingLabel,
+                                state.isBrowser
+                                    ? 'Watching AI browser'
+                                    : state.usingLabel,
                                 style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w700,
@@ -332,7 +358,11 @@ class _ComputerPageState extends State<ComputerPage> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                state.usingDetail,
+                                state.isBrowser && state.live
+                                    ? state.browserUrl ??
+                                          state.browserLabel ??
+                                          'Live E2B browser'
+                                    : state.usingDetail,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
