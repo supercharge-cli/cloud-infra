@@ -141,9 +141,11 @@ function connect(url,generation){
   }
 }
 window.SuperchargeBrowser={suspend(){
-  ended=true;connected=false;
+  ended=true;
+  const wasConnected=connected;
+  connected=false;
   if(rfb){rfb.viewOnly=true;rfb.focusOnClick=false;rfb.disconnect();}
-  else notify('suspended');
+  if(!wasConnected)notify('suspended');
   message('Browser input disabled. Returning control…');applyMode();return true;
 }};
 function update(next){
