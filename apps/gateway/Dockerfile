@@ -27,7 +27,10 @@ COPY package.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 
-RUN chown -R node:node /app
+RUN mkdir -p /var/lib/vectra-gateway/lifecycle && chown -R node:node /app /var/lib/vectra-gateway
+
+ENV VECTRA_LIFECYCLE_STATE_DIR=/var/lib/vectra-gateway/lifecycle
+VOLUME /var/lib/vectra-gateway
 
 USER node
 

@@ -3,14 +3,35 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../theme.dart';
+import '../desktop.dart';
+import '../screens/preview.dart';
 
 MarkdownStyleSheet chatMarkdownSheet(BuildContext context) {
   return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
     p: const TextStyle(color: Colors.white, height: 1.55, fontSize: 16),
-    h1: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 22, height: 1.3),
-    h2: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 19, height: 1.3),
-    h3: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16, height: 1.3),
-    h4: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
+    h1: const TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.w700,
+      fontSize: 22,
+      height: 1.3,
+    ),
+    h2: const TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.w700,
+      fontSize: 19,
+      height: 1.3,
+    ),
+    h3: const TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.w600,
+      fontSize: 16,
+      height: 1.3,
+    ),
+    h4: const TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.w600,
+      fontSize: 15,
+    ),
     strong: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white),
     em: const TextStyle(fontStyle: FontStyle.italic, color: Colors.white),
     a: const TextStyle(color: Vc.green, decoration: TextDecoration.underline),
@@ -32,7 +53,10 @@ MarkdownStyleSheet chatMarkdownSheet(BuildContext context) {
     ),
     blockquotePadding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
     listBullet: const TextStyle(color: Vc.green, fontSize: 15),
-    tableHead: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white),
+    tableHead: const TextStyle(
+      fontWeight: FontWeight.w700,
+      color: Colors.white,
+    ),
     tableBody: const TextStyle(color: Colors.white, fontSize: 13),
     tableBorder: TableBorder.all(color: Vc.cardBorder, width: 0.6),
     horizontalRuleDecoration: const BoxDecoration(
@@ -68,7 +92,24 @@ class ChatMarkdown extends StatelessWidget {
       onTapLink: (text, href, title) {
         if (href == null) return;
         if (onTapHref != null && onTapHref!(href)) return;
-        launchUrl(Uri.parse(href), mode: LaunchMode.externalApplication);
+        final url = Uri.tryParse(href);
+        if (url == null ||
+            !{'http', 'https'}.contains(url.scheme) ||
+            url.host.isEmpty) {
+          return;
+        }
+        if (isDesktop) {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => PreviewBrowserScreen(
+                instanceName: url.host,
+                initialUrl: url.toString(),
+              ),
+            ),
+          );
+        } else {
+          launchUrl(url, mode: LaunchMode.externalApplication);
+        }
       },
     );
   }

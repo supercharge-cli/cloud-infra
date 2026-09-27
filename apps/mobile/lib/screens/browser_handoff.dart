@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../api/client.dart';
@@ -11,6 +10,8 @@ import '../chat/browser_handoff.dart';
 import '../chat/browser_viewer_document.dart';
 import '../chat/desktop_browser_viewer.dart';
 import '../desktop.dart';
+import '../desktop/native.dart';
+import '../desktop/inline_browser.dart';
 
 class BrowserHandoffScreen extends StatefulWidget {
   const BrowserHandoffScreen({
@@ -31,6 +32,7 @@ class BrowserHandoffScreen extends StatefulWidget {
 class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
   late final BrowserHandoffController _control;
   final _notes = TextEditingController();
+  final _viewerKey = GlobalKey();
   WebViewController? _web;
   DesktopBrowserViewer? _desktop;
   String? _module;
@@ -114,8 +116,7 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
           return;
         }
         _desktop = viewer;
-        setState(() => _ready = true);
-        await _openDesktop();
+        if (mounted) setState(() => _ready = true);
       } else {
         setState(() => _ready = true);
         await _loadNativeViewer();
@@ -126,21 +127,6 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
           () => _viewerError = 'Could not open the browser viewer: $error',
         );
       }
-    }
-  }
-
-  Future<void> _openDesktop() async {
-    final viewer = _desktop;
-    if (viewer == null) return;
-    try {
-      final opened = await launchUrl(
-        viewer.url,
-        mode: LaunchMode.externalApplication,
-      );
-      if (!opened) throw StateError('No system browser could open the viewer.');
-      if (mounted) setState(() => _viewerError = null);
-    } catch (error) {
-      if (mounted) setState(() => _viewerError = '$error');
     }
   }
 
@@ -266,10 +252,20 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
     if (!_control.hasControl && _control.error == null) _notes.clear();
   }
 
+  Rect? _viewerBounds() {
+    final object = _viewerKey.currentContext?.findRenderObject();
+    if (object is! RenderBox || !object.hasSize) return null;
+    return object.localToGlobal(Offset.zero) & object.size;
+  }
+
   Future<void> _requestClose() async {
     if (_closing || _control.busy) return;
     var continueAi = false;
     if (_control.hasControl && _control.canContinue) {
+      if (isDesktop) {
+        await DesktopNative.inlineHide(DesktopNative.viewerSurface);
+      }
+      if (!mounted) return;
       final choice = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
@@ -293,7 +289,25 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
           ],
         ),
       );
-      if (choice == null || !mounted) return;
+      if (choice == null || !mounted) {
+        if (isDesktop && mounted && _desktop != null) {
+          setState(() => _ready = true);
+          await DesktopNative.inlineCommand(
+            DesktopNative.viewerSurface,
+            'reload',
+          );
+          final bounds = _viewerBounds();
+          if (bounds != null && mounted) {
+            final ratio = View.of(context).devicePixelRatio;
+            await DesktopNative.inlineShow(
+              DesktopNative.viewerSurface,
+              bounds,
+              ratio,
+            );
+          }
+        }
+        return;
+      }
       continueAi = choice == 'continue';
     }
     setState(() => _closing = true);
@@ -306,6 +320,9 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
       return;
     }
     await _desktop?.close();
+    if (isDesktop) {
+      await DesktopNative.inlineDispose(DesktopNative.viewerSurface);
+    }
     if (!mounted) return;
     setState(() => _allowPop = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -316,6 +333,9 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
   Future<void> _disposeViewer() async {
     await _control.close();
     await _desktop?.close();
+    if (isDesktop) {
+      await DesktopNative.inlineDispose(DesktopNative.viewerSurface);
+    }
     _control.dispose();
   }
 
@@ -372,50 +392,13 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
                 ),
               Expanded(
                 child: isDesktop
-                    ? Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 520),
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.public,
-                                  size: 44,
-                                  color: Colors.white70,
-                                ),
-                                const SizedBox(height: 20),
-                                Text(
-                                  _connected
-                                      ? 'Connected to the AI browser'
-                                      : 'Watch the AI’s actual browser',
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 12),
-                                const Text(
-                                  'The bundled noVNC viewer opens in your system browser. It shows the sandbox browser the AI is using, not your project preview. You can take control and return it from either window.',
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 20),
-                                FilledButton.icon(
-                                  onPressed: _ready ? _openDesktop : null,
-                                  icon: const Icon(Icons.open_in_browser),
-                                  label: Text(
-                                    _ready
-                                        ? 'Open browser viewer'
-                                        : 'Preparing viewer…',
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      )
+                    ? _desktop == null
+                          ? const Center(child: CircularProgressIndicator())
+                          : InlineBrowserView(
+                              key: _viewerKey,
+                              surface: DesktopNative.viewerSurface,
+                              url: _desktop!.url.toString(),
+                            )
                     : Stack(
                         children: [
                           WebViewWidget(controller: _web!),
@@ -432,9 +415,9 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
                   children: [
                     Text(
                       _control.hasControl
-                          ? 'Stay in this same browser tab. The AI will inspect its current state before continuing. Avoid running tasks from another client during control.'
+                          ? 'Stay in this browser view. The AI will inspect its current state before continuing. Avoid running tasks from another client during control.'
                           : !_connected
-                          ? 'Reconnect the browser viewer before taking control. The Computer preview can remain live even when the separate VNC tunnel is unavailable.'
+                          ? 'Reconnect the browser viewer before taking control. The Computer preview may remain live if the VNC tunnel is unavailable.'
                           : 'Watching does not interrupt the AI. Take control stops its current task before enabling your input.',
                       style: const TextStyle(
                         fontSize: 12,

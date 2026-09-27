@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { restartDaemon } from "@/lib/gateway-client";
-import { getInstance, updateInstance } from "@/lib/store";
+import { getInstance, publicInstance, updateInstance } from "@/lib/store";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -27,7 +27,7 @@ export async function POST(_req: Request, ctx: Ctx) {
       aiConfigured: result.ok || inst.aiConfigured,
       telegramConfigured: result.ok || inst.telegramConfigured,
     });
-    return NextResponse.json({ ok: result.ok, logs: result.logs, instance });
+    return NextResponse.json({ ok: result.ok, logs: result.logs, instance: instance ? publicInstance(instance) : null });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }

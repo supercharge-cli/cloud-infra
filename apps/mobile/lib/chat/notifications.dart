@@ -34,12 +34,17 @@ class TaskNotifications {
       'Working · ${_fmt(_elapsed)} · $_tools tool${_tools == 1 ? '' : 's'}';
 
   static Future<void> init() async {
-    if (_ready || isDesktop) return;
+    if (_ready || Platform.isWindows) return;
     try {
       const android = AndroidInitializationSettings('@drawable/ic_stat_vectra');
       const ios = DarwinInitializationSettings();
       await _plugin.initialize(
-        settings: const InitializationSettings(android: android, iOS: ios),
+        settings: const InitializationSettings(
+          android: android,
+          iOS: ios,
+          macOS: ios,
+          linux: LinuxInitializationSettings(defaultActionName: 'Open chat'),
+        ),
         onDidReceiveNotificationResponse: (res) {
           final id = res.payload;
           if (id != null && id.isNotEmpty) onOpenChat?.call(id);
@@ -106,6 +111,8 @@ class TaskNotifications {
     required String apiBase,
     String? token,
     String? since,
+    String? botId,
+    String? chatId,
   }) async {
     try {
       _activeId = instanceId;
@@ -115,6 +122,7 @@ class TaskNotifications {
       _pct = 8;
       await init();
       await requestPermissions();
+      if (isDesktop) return;
       await FlutterForegroundTask.saveData(key: 'apiBase', value: apiBase);
       await FlutterForegroundTask.saveData(key: 'token', value: token ?? '');
       await FlutterForegroundTask.saveData(
@@ -123,6 +131,8 @@ class TaskNotifications {
       );
       await FlutterForegroundTask.saveData(key: 'name', value: name);
       await FlutterForegroundTask.saveData(key: 'since', value: since ?? '');
+      await FlutterForegroundTask.saveData(key: 'botId', value: botId ?? '');
+      await FlutterForegroundTask.saveData(key: 'chatId', value: chatId ?? '');
       await FlutterForegroundTask.saveData(
         key: 'startedMs',
         value: DateTime.now().millisecondsSinceEpoch,
@@ -152,7 +162,7 @@ class TaskNotifications {
     required int tools,
     required int pct,
   }) async {
-    if (_activeId != instanceId) return;
+    if (_activeId != instanceId || isDesktop) return;
     _name = name;
     _elapsed = elapsed;
     _tools = tools;
@@ -258,6 +268,7 @@ class TaskNotifications {
     bool error = false,
   }) async {
     await init();
+    if (!_ready) return;
     final snippet = (body == null || body.trim().isEmpty)
         ? (error ? 'The turn ended with an error.' : 'Task finished.')
         : body.trim();
@@ -275,6 +286,8 @@ class TaskNotifications {
           icon: '@drawable/ic_stat_vectra',
         ),
         iOS: const DarwinNotificationDetails(),
+        macOS: const DarwinNotificationDetails(),
+        linux: const LinuxNotificationDetails(defaultActionName: 'Open chat'),
       ),
       payload: instanceId,
     );
@@ -287,6 +300,7 @@ class TaskNotifications {
     String kind = 'approve',
   }) async {
     await init();
+    if (!_ready) return;
     final snippet = body.trim().isEmpty
         ? (kind == 'ask'
               ? 'The agent needs an answer.'
@@ -310,6 +324,11 @@ class TaskNotifications {
           icon: '@drawable/ic_stat_vectra',
           category: AndroidNotificationCategory.alarm,
         ),
+        linux: const LinuxNotificationDetails(
+          urgency: LinuxNotificationUrgency.critical,
+          defaultActionName: 'Open chat',
+        ),
+        macOS: const DarwinNotificationDetails(),
         iOS: const DarwinNotificationDetails(
           presentAlert: true,
           presentSound: true,
@@ -328,6 +347,7 @@ class TaskNotifications {
     String product = 'CLI',
   }) async {
     await init();
+    if (!_ready) return;
     await _plugin.show(
       id: cliUpdateId,
       title: '$product $latest is out',
@@ -343,6 +363,8 @@ class TaskNotifications {
           icon: '@drawable/ic_stat_vectra',
         ),
         iOS: DarwinNotificationDetails(),
+        macOS: DarwinNotificationDetails(),
+        linux: LinuxNotificationDetails(defaultActionName: 'Open chat'),
       ),
       payload: instanceId,
     );
@@ -445,9 +467,15 @@ class _VectraTaskHandler extends TaskHandler {
     if (base == null || base.isEmpty || id == null || id.isEmpty) return;
     _instanceId = id;
 
-    final uri = Uri.parse(
-      '$base/api/instances/$id/chat/events',
-    ).replace(queryParameters: {if (_since.isNotEmpty) 'since': _since});
+    final bot = await FlutterForegroundTask.getData<String>(key: 'botId');
+    final chat = await FlutterForegroundTask.getData<String>(key: 'chatId');
+    final uri = Uri.parse('$base/api/instances/$id/chat/events').replace(
+      queryParameters: {
+        if (_since.isNotEmpty) 'since': _since,
+        if (bot != null && bot.isNotEmpty) 'botId': bot,
+        if (chat != null && chat.isNotEmpty) 'chatId': chat,
+      },
+    );
     final client = HttpClient();
     _http = client;
     try {

@@ -13,7 +13,7 @@ import {
   SANDBOX_TG_WEBHOOK_PORT,
 } from "@/lib/sandbox-telegram";
 import { parseSavedProviders } from "@/lib/saved-providers";
-import { ensureWakeSecret, getInstance, updateInstance } from "@/lib/store";
+import { ensureWakeSecret, getInstance, publicInstance, updateInstance } from "@/lib/store";
 import { publicBaseUrl, wakeWebhookUrl } from "@/lib/telegram-webhook";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -260,7 +260,7 @@ export async function PUT(req: Request, ctx: Ctx) {
       logs,
       instance: instance
         ? {
-            ...instance,
+            ...publicInstance(instance),
             telegramBotToken: instance.telegramBotToken
               ? "[stored]"
               : undefined,

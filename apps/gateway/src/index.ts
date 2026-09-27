@@ -10,6 +10,8 @@ import { Sandbox } from "e2b";
 import { WebSocketServer } from "ws";
 import { relayBrowserVnc } from "./browser-vnc.js";
 import { runtimeHasWork } from "./runtime-activity.js";
+import { cycleRequired, cycleThreshold, sandboxRunStartedAt, runContinuousCycle } from "./continuous-run.js";
+import { LifecycleStore, type LifecycleRecord } from "./lifecycle-store.js";
 
 type SandboxLike = {
   sandboxId?: string;
@@ -173,7 +175,7 @@ const maxContinuousMs = (() => {
   if (raw === "0" || raw === "off" || raw === "false") return 0;
   const n = Number(raw || 23 * 60 * 60 * 1000);
   return Number.isFinite(n) && n > 0
-    ? Math.max(60_000, n)
+    ? cycleThreshold(n)
     : 23 * 60 * 60 * 1000;
 })();
 /**
@@ -217,6 +219,7 @@ const browserVncTickets = new Map<
 const defaultWorkspaceRoot =
   process.env.XIBECODE_SANDBOX_WORKSPACE_ROOT?.trim() || "/home/user/workspace";
 const cycleWaiters = new Map<string, Promise<void>>();
+const lifecycleStore = new LifecycleStore(process.env.VECTRA_LIFECYCLE_STATE_DIR || "/var/lib/vectra-gateway/lifecycle");
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -224,6 +227,39 @@ function sleep(ms: number): Promise<void> {
 
 function shQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+async function rememberRun(session: SessionRecord, info: { startedAt?: Date | string; state?: string }, resumedAt?: number): Promise<void> {
+  if (session.runtime !== "supercharge") return;
+  const result = await lifecycleStore.withLock(session.sandboxId, async () => {
+    const existing = await lifecycleStore.read(session.sandboxId);
+    if (existing && existing.phase !== "running") return existing;
+    const record: LifecycleRecord = existing ?? {
+      sandboxId:session.sandboxId, sessionId:session.sessionId, runtime:session.runtime,
+      workspaceRoot:session.workspaceRoot, runStartedAt:sandboxRunStartedAt(info) ?? 0,
+      cycleCount:0, phase:"running", updatedAt:Date.now(),
+    };
+    if (!existing || resumedAt !== undefined) {
+      record.runStartedAt = resumedAt ?? record.runStartedAt;
+      record.updatedAt = Date.now();
+      await lifecycleStore.write(record);
+    }
+    return record;
+  });
+  const recorded = result.value ?? await lifecycleStore.read(session.sandboxId);
+  if (recorded) {
+    session.continuousRunStartedAt = recorded.runStartedAt;
+    session.cycleCount = recorded.cycleCount;
+  }
+}
+
+async function refreshMaintenance(session: SessionRecord): Promise<void> {
+  const record = await lifecycleStore.read(session.sandboxId);
+  if (record && record.phase !== "running") {
+    await resetContinuousRunCycle(session, "recover-maintenance");
+    const current = await lifecycleStore.read(session.sandboxId);
+    if (current?.phase !== "running") throw new Error("Sandbox maintenance is in progress; retry shortly");
+  }
 }
 
 /**
@@ -311,7 +347,7 @@ async function resolvePreviewHost(
 ): Promise<string> {
   const getter = session.sandbox.getHost;
   if (typeof getter === "function") {
-    const resolved = await getter(targetPort);
+    const resolved = await getter.call(session.sandbox, targetPort);
     const normalized = normalizePreviewHost(resolved);
     if (normalized) return normalized;
   }
@@ -377,60 +413,45 @@ async function readJson<T>(req: IncomingMessage): Promise<T> {
  * Before the E2B 24h continuous-run hard limit: pause (full memory+fs), then connect
  * to resume. That resets the continuous window so long agent sessions can keep going.
  */
-async function resetContinuousRunCycle(
-  session: SessionRecord,
-  reason: string,
-): Promise<void> {
-  const existing = cycleWaiters.get(session.sessionId);
-  if (existing) {
-    await existing;
-    return;
-  }
-
+async function resetContinuousRunCycle(session: SessionRecord, reason: string): Promise<void> {
+  const sandboxId = session.sandboxId;
+  const existing = cycleWaiters.get(sandboxId);
+  if (existing) { await existing; return; }
   const job = (async () => {
     session.cycleResetting = true;
-    const elapsedH = (
-      (Date.now() - session.continuousRunStartedAt) /
-      3_600_000
-    ).toFixed(2);
-    console.log(
-      `[xibecode-e2b-gateway] continuous-run cycle (${reason}): pause→resume sandbox=${session.sandboxId} after ${elapsedH}h`,
-    );
     try {
-      // 1) Pause — preserves filesystem + memory (default keepMemory)
-      if (typeof session.sandbox.pause === "function") {
-        await session.sandbox.pause();
-      } else {
-        await Sandbox.pause(session.sandboxId);
+      const result = await runContinuousCycle(lifecycleStore, {
+        sandboxId, sessionId:session.sessionId, runtime:session.runtime, workspaceRoot:session.workspaceRoot,
+      }, {
+        info: () => Sandbox.getInfo(sandboxId, { requestTimeoutMs: 30_000 }),
+        pause: () => Sandbox.pause(sandboxId, { requestTimeoutMs: 120_000 }),
+        connect: async () => { session.sandbox = await Sandbox.connect(sandboxId, {
+          timeoutMs: sandboxTimeoutMs, requestTimeoutMs:120_000,
+        }) as unknown as SandboxLike; },
+        refreshTimeout: () => Sandbox.setTimeout(sandboxId, sandboxTimeoutMs, { requestTimeoutMs:30_000 }),
+        maintenance: async (action) => {
+          const response = await superchargeDaemonFetch(session, "/v1/app/maintenance", {
+            method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({action}),
+            signal:AbortSignal.timeout(action === "interrupt" ? 120_000 : 15_000),
+          });
+          if (!response.ok) throw new Error(`Daemon maintenance ${action} failed (HTTP ${response.status})`);
+          const data = await response.json() as {ok?:boolean; busy?:boolean};
+          if (data.ok !== true) throw new Error(`Daemon did not acknowledge ${action}`);
+          return data;
+        },
+      }, {thresholdMs:maxContinuousMs || 23 * 60 * 60_000});
+      if (result) {
+        session.continuousRunStartedAt = result.runStartedAt;
+        session.cycleCount = result.cycleCount;
+        session.lastCycleResetAt = Date.now();
+        console.log(`[vectra-gateway] cycle ${result.cycleCount} confirmed sandbox=${sandboxId} (${reason})`);
       }
-
-      // 2) Resume — resets E2B continuous runtime window (Pro ~24h)
-      const resumed = await Sandbox.connect(session.sandboxId, {
-        timeoutMs: sandboxTimeoutMs,
-        requestTimeoutMs: 120_000,
-      });
-      session.sandbox = resumed as unknown as SandboxLike;
-      session.continuousRunStartedAt = Date.now();
-      session.cycleCount += 1;
-      session.lastCycleResetAt = Date.now();
-      session.updatedAt = Date.now();
-      await refreshSandboxTimeout(session);
-      console.log(
-        `[xibecode-e2b-gateway] continuous-run cycle #${session.cycleCount} done sandbox=${session.sandboxId}`,
-      );
-    } catch (err) {
-      console.error(
-        `[xibecode-e2b-gateway] continuous-run cycle failed sandbox=${session.sandboxId}:`,
-        (err as Error)?.message || err,
-      );
-      throw err;
     } finally {
       session.cycleResetting = false;
-      cycleWaiters.delete(session.sessionId);
+      cycleWaiters.delete(sandboxId);
     }
   })();
-
-  cycleWaiters.set(session.sessionId, job);
+  cycleWaiters.set(sandboxId, job);
   await job;
 }
 
@@ -456,15 +477,20 @@ async function reconnectSandbox(
 ): Promise<void> {
   // connect() resumes if paused; timeoutMs is the new idle window after resume.
   // requestTimeoutMs: memory restore can exceed the default 60s handshake.
+  const before = await Sandbox.getInfo(session.sandboxId);
+  const resumedAt = before.state === "paused" ? Date.now() : undefined;
   const connected = await Sandbox.connect(session.sandboxId, {
     timeoutMs: Math.max(sandboxTimeoutMs, 120_000),
     requestTimeoutMs: 120_000,
   });
   session.sandbox = connected as unknown as SandboxLike;
-  session.continuousRunStartedAt = Date.now();
   session.updatedAt = Date.now();
   // Docs: change timeout after resume via setTimeout()
   await refreshSandboxTimeout(session);
+  const info = await Sandbox.getInfo(session.sandboxId);
+  await rememberRun(session, info, resumedAt);
+  await refreshMaintenance(session);
+  if (info.state !== "running") throw new Error(`Sandbox resume not confirmed (${info.state})`);
   console.log(
     `[xibecode-e2b-gateway] reconnected sandbox=${session.sandboxId} via Sandbox.connect (${reason})`,
   );
@@ -524,9 +550,12 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
   let state = "unknown";
   let resumed = false;
   let sandboxAutoResume = lifecycleAutoResume;
+  await cycleWaiters.get(session.sandboxId);
+  let infoForRunStart: { startedAt?: Date | string; state?: string } = {};
 
   try {
     const info = await Sandbox.getInfo(session.sandboxId);
+    infoForRunStart = info;
     state = String((info as { state?: string }).state || "unknown");
     const life = (
       info as { lifecycle?: { onTimeout?: string; autoResume?: boolean } }
@@ -556,6 +585,8 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
   }
 
   if (state === "running") {
+    await rememberRun(session, infoForRunStart);
+    await refreshMaintenance(session);
     // Probe first (also covers mid-pause race). setTimeout only after probe succeeds.
     try {
       await probeWithSdkActivity(session, 30_000);
@@ -582,9 +613,13 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
     session.sandbox?.commands?.run
   ) {
     try {
+      const resumedAt = Date.now();
       await probeWithSdkActivity(session, 90_000);
       await refreshSandboxTimeout(session);
-      session.continuousRunStartedAt = Date.now();
+      const resumedInfo = await Sandbox.getInfo(session.sandboxId);
+      if (resumedInfo.state !== "running") throw new Error(`Auto-resume not confirmed (${resumedInfo.state})`);
+      await rememberRun(session, resumedInfo, resumedAt);
+      await refreshMaintenance(session);
       session.updatedAt = Date.now();
       console.log(
         `[xibecode-e2b-gateway] auto-resumed sandbox=${session.sandboxId} via commands.run (lifecycle.autoResume)`,
@@ -617,9 +652,9 @@ async function ensureSandboxRunning(session: SessionRecord): Promise<{
 async function touchSession(session: SessionRecord): Promise<void> {
   await ensureSandboxRunning(session);
 
-  if (maxContinuousMs > 0) {
-    const elapsed = Date.now() - session.continuousRunStartedAt;
-    if (elapsed >= maxContinuousMs) {
+  if (session.runtime === "supercharge" && maxContinuousMs > 0) {
+    const info = await Sandbox.getInfo(session.sandboxId);
+    if (cycleRequired(info, maxContinuousMs, Date.now(), session.continuousRunStartedAt)) {
       await resetContinuousRunCycle(session, `>=${maxContinuousMs}ms`);
     }
   }
@@ -657,8 +692,11 @@ async function createSession(input: {
   const profile = runtimeProfile(runtime);
   let sandbox: SandboxLike;
   let sandboxId: string;
+  let actualStartedAt: number | null = null;
 
   if (wantSandbox) {
+    const prior = await Sandbox.getInfo(wantSandbox);
+    actualStartedAt = prior.state === "paused" ? Date.now() : null;
     // Re-attach existing VM (filesystem + optional paused memory).
     // connect() resumes if paused; timeoutMs becomes the post-resume idle window.
     sandbox = (await Sandbox.connect(wantSandbox, {
@@ -736,6 +774,13 @@ async function createSession(input: {
     workspaceRoot: requestedWorkspaceRoot,
     syncStageFile: `/tmp/xibecode-sync-${sessionId}.b64`,
   };
+  if (runtime === "supercharge") {
+    const info = await Sandbox.getInfo(sandboxId);
+    await rememberRun(session, info, actualStartedAt ?? undefined);
+    if (info.cpuCount !== 16 || info.memoryMB !== 16384) {
+      console.warn(`[vectra-gateway] resource mismatch sandbox=${sandboxId}: ${info.cpuCount} vCPU / ${info.memoryMB} MiB (expected 16/16384)`);
+    }
+  }
   sessions.set(sessionId, session);
 
   // After connect/create the sandbox is running — pin idle TTL (docs: setTimeout after resume).
@@ -763,6 +808,7 @@ async function createSession(input: {
     }
   }
 
+  if (runtime === "supercharge") await refreshMaintenance(session);
   return session;
 }
 
@@ -1378,6 +1424,10 @@ async function recreateSandboxInSession(session: SessionRecord): Promise<{
   session.sandboxId = newSandboxId;
   session.updatedAt = Date.now();
   session.continuousRunStartedAt = Date.now();
+  if (session.runtime === "supercharge") {
+    await rememberRun(session, await Sandbox.getInfo(newSandboxId), session.continuousRunStartedAt);
+    await lifecycleStore.remove(oldSandboxId);
+  }
   logs.push("session now points at new sandbox");
 
   try {
@@ -1399,6 +1449,7 @@ async function recreateSandboxInSession(session: SessionRecord): Promise<{
 }
 
 async function closeSession(session: SessionRecord): Promise<void> {
+  if (session.runtime === "supercharge") await lifecycleStore.remove(session.sandboxId);
   try {
     await session.sandbox.kill?.();
   } catch {
@@ -2213,6 +2264,25 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
+async function recoverLifecycleSessions(): Promise<void> {
+  for (const record of await lifecycleStore.list()) {
+    if (record.runtime !== "supercharge" || sessions.has(record.sessionId)) continue;
+    try {
+      const info = await Sandbox.getInfo(record.sandboxId);
+      if (info.state === "paused" && record.phase === "running") continue;
+      await createSession({ sessionId:record.sessionId, sandboxId:record.sandboxId,
+        workspaceRoot:record.workspaceRoot, strategy:"sandbox_full", runtime:"supercharge" });
+    } catch (error) {
+      console.warn(`[vectra-gateway] lifecycle recovery ${record.sandboxId}: ${(error as Error).message}`);
+    }
+  }
+}
+
+void recoverLifecycleSessions().catch((error) => console.error("Lifecycle recovery unavailable", error));
+setInterval(() => {
+  void recoverLifecycleSessions().catch((error) => console.error("Lifecycle recovery unavailable", error));
+}, 60_000).unref?.();
+
 const activityChecks = new Set<string>();
 setInterval(() => {
   for (const session of sessions.values()) {
@@ -2242,9 +2312,14 @@ if (maxContinuousMs > 0) {
   );
   setInterval(() => {
     for (const session of sessions.values()) {
-      const elapsed = Date.now() - session.continuousRunStartedAt;
-      if (elapsed < maxContinuousMs) continue;
-      void resetContinuousRunCycle(session, "background-tick").catch((err) => {
+      if (session.runtime !== "supercharge" || session.cycleResetting) continue;
+      void (async () => {
+        const info = await Sandbox.getInfo(session.sandboxId);
+        const record = await lifecycleStore.read(session.sandboxId);
+        if (record?.phase !== "running" || cycleRequired(info, maxContinuousMs, Date.now(), record?.runStartedAt)) {
+          await resetContinuousRunCycle(session, "background-tick");
+        }
+      })().catch((err) => {
         console.error(
           `[xibecode-e2b-gateway] background cycle failed session=${session.sessionId}:`,
           (err as Error)?.message || err,

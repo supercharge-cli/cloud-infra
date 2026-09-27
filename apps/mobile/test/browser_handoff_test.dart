@@ -33,7 +33,10 @@ class _Client extends VectraClient {
   }
 
   @override
-  Future<Map<String, dynamic>> chatStatus(String id) async {
+  Future<Map<String, dynamic>> chatStatus(
+    String id, {
+    String? sessionId,
+  }) async {
     if (statusFailure != null) {
       calls.add('status:error');
       throw statusFailure!;
@@ -49,7 +52,7 @@ class _Client extends VectraClient {
   }
 
   @override
-  Future<void> stopChat(String id) async {
+  Future<void> stopChat(String id, {String? botId, String? chatId}) async {
     calls.add('stop');
     if (stopFailure != null) throw stopFailure!;
   }

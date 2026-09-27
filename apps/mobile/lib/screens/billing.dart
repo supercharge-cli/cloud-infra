@@ -5,6 +5,8 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../api/models.dart';
 import '../desktop.dart';
+import '../desktop/native.dart';
+import '../desktop/shortcuts.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/side_panel.dart';
@@ -56,12 +58,7 @@ class _BillingScreenState extends State<BillingScreen> {
   }
 
   Future<void> _pay(String currency) async {
-    if (isDesktop) {
-      setState(() {
-        error = 'Pay on the Vectra Cloud mobile app. Desktop does not run Razorpay checkout.';
-      });
-      return;
-    }
+    if (busy) return;
     setState(() {
       busy = true;
       error = null;
@@ -75,16 +72,42 @@ class _BillingScreenState extends State<BillingScreen> {
         currency: currency,
         runtime: args.runtime,
       );
-      _rzp!.open({
+      final options = <String, dynamic>{
         'key': order['keyId'],
         'amount': order['amount'],
         'currency': order['currency'] ?? currency,
         'name': 'Vectra Cloud',
-        'description': args.renew ? 'Renew ${args.instanceId}' : 'New instance ${args.name ?? ''}',
+        'description': args.renew
+            ? 'Renew ${args.instanceId}'
+            : 'New instance ${args.name ?? ''}',
         'order_id': order['orderId'],
         'prefill': {'email': session.user?.email ?? ''},
         'theme': {'color': '#22C55E'},
-      });
+      };
+      if (isDesktop) {
+        final result = await DesktopNative.checkout(options);
+        if (!mounted) return;
+        if (result?['error'] != null) throw StateError('${result!['error']}');
+        if (result != null && result['cancelled'] != true) {
+          final verified = await session.client.verifyPayment(
+            orderId: '${result['razorpay_order_id'] ?? ''}',
+            paymentId: '${result['razorpay_payment_id'] ?? ''}',
+            signature: '${result['razorpay_signature'] ?? ''}',
+          );
+          if (!mounted) return;
+          final instance = verified['instance'];
+          if (instance is Map && instance['id'] != null) {
+            final created = CloudInstance.fromJson(
+              Map<String, dynamic>.from(instance),
+            );
+            context.go('/chat/${created.id}', extra: created);
+          } else {
+            context.go('/');
+          }
+        }
+      } else {
+        _rzp!.open(options);
+      }
     } catch (e) {
       error = e.toString();
     }
@@ -130,71 +153,98 @@ class _BillingScreenState extends State<BillingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = args.renew ? 'Renew instance' : (args.name == null ? 'Billing' : 'Pay & create');
+    final title = args.renew
+        ? 'Renew instance'
+        : (args.name == null ? 'Billing' : 'Pay & create');
     return AppScaffold(
       currentInstanceId: args.instanceId,
+      commands: {DesktopCommand.refresh: busy ? null : _load},
       appBar: AppBar(title: Text(title)),
       body: Stack(
-          children: [
-            if (loading)
-              const Center(child: CircularProgressIndicator(color: Vc.green))
-            else
-              ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  if (error != null) ...[
-                    Text(error!, style: const TextStyle(color: Vc.red)),
-                    const SizedBox(height: 16),
-                  ],
-                  VcPanel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('VECTRA CLOUD', style: TextStyle(color: Vc.green, fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w800)),
-                        const SizedBox(height: 8),
-                        Text(plan.label ?? 'Workspace plan', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${plan.inrLabel} or ${plan.usdLabel} · ${plan.periodDays ?? 30} days',
-                          style: const TextStyle(color: Vc.muted, height: 1.4),
-                        ),
-                        if (args.name != null) ...[
-                          const SizedBox(height: 10),
-                          Text('Instance: ${args.name}', style: const TextStyle(color: Vc.muted)),
-                          Text('Runtime: ${args.runtime.label}', style: const TextStyle(color: Vc.muted)),
-                        ],
-                        const SizedBox(height: 18),
-                        if (isDesktop)
-                          const Text(
-                            'Payments stay on the phone app. Use this desktop app to chat and run sandboxes you already have.',
-                            style: TextStyle(color: Vc.muted, height: 1.4),
-                          )
-                        else ...[
-                          FilledButton(
-                            onPressed: busy ? null : () => _pay('INR'),
-                            child: SizedBox(width: double.infinity, child: Text(plan.inrButton, textAlign: TextAlign.center)),
-                          ),
-                          const SizedBox(height: 8),
-                          OutlinedButton(
-                            onPressed: busy ? null : () => _pay('USD'),
-                            child: SizedBox(width: double.infinity, child: Text(plan.usdButton, textAlign: TextAlign.center)),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    isDesktop
-                        ? 'Open Vectra Cloud on your phone to pay, create, or renew a workspace.'
-                        : 'Checkout opens Razorpay on this device. After payment the instance is created or renewed automatically.',
-                    style: const TextStyle(color: Vc.muted, height: 1.4),
-                  ),
+        children: [
+          if (loading)
+            const Center(child: CircularProgressIndicator(color: Vc.green))
+          else
+            ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (error != null) ...[
+                  Text(error!, style: const TextStyle(color: Vc.red)),
+                  const SizedBox(height: 16),
                 ],
-              ),
-            if (busy) const BusyOverlay(message: 'Processing payment…'),
-          ],
-        ),
+                VcPanel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'VECTRA CLOUD',
+                        style: TextStyle(
+                          color: Vc.green,
+                          fontSize: 11,
+                          letterSpacing: 1.4,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        plan.label ?? 'Workspace plan',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${plan.inrLabel} or ${plan.usdLabel} · ${plan.periodDays ?? 30} days',
+                        style: const TextStyle(color: Vc.muted, height: 1.4),
+                      ),
+                      if (args.name != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'Instance: ${args.name}',
+                          style: const TextStyle(color: Vc.muted),
+                        ),
+                        Text(
+                          'Runtime: ${args.runtime.label}',
+                          style: const TextStyle(color: Vc.muted),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                      FilledButton(
+                        onPressed: busy ? null : () => _pay('INR'),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: Text(
+                            plan.inrButton,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton(
+                        onPressed: busy ? null : () => _pay('USD'),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: Text(
+                            plan.usdButton,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Secure checkout opens inside the app. After payment is verified by the server, the workspace is created or renewed automatically.',
+                  style: const TextStyle(color: Vc.muted, height: 1.4),
+                ),
+              ],
+            ),
+          if (busy) const BusyOverlay(message: 'Processing payment…'),
+        ],
+      ),
     );
   }
 }

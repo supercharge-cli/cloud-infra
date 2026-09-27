@@ -1,7 +1,17 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 
-/// Linux/Windows/macOS desktop builds of the same Flutter app.
 bool get isDesktop =>
-    Platform.isLinux || Platform.isWindows || Platform.isMacOS;
+    !kIsWeb &&
+    switch (defaultTargetPlatform) {
+      TargetPlatform.linux ||
+      TargetPlatform.windows ||
+      TargetPlatform.macOS => true,
+      _ => false,
+    };
 
-bool get isMobileApp => Platform.isAndroid || Platform.isIOS;
+bool get isMobileApp =>
+    !kIsWeb &&
+    switch (defaultTargetPlatform) {
+      TargetPlatform.android || TargetPlatform.iOS => true,
+      _ => false,
+    };

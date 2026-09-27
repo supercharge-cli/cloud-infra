@@ -14,6 +14,7 @@ class ConversationMeta {
     required this.updatedAt,
     this.status = 'active',
     this.parentSessionId,
+    this.botId = 'main',
   });
 
   final String sessionId;
@@ -22,24 +23,27 @@ class ConversationMeta {
   int updatedAt;
   String status;
   String? parentSessionId;
+  String botId;
 
   factory ConversationMeta.fromJson(Map<String, dynamic> j) => ConversationMeta(
-        sessionId: '${j['sessionId'] ?? ''}',
-        title: '${j['title'] ?? 'Conversation'}',
-        createdAt: (j['createdAt'] as num?)?.toInt() ?? 0,
-        updatedAt: (j['updatedAt'] as num?)?.toInt() ?? 0,
-        status: '${j['status'] ?? 'active'}',
-        parentSessionId: j['parentSessionId'] as String?,
-      );
+    sessionId: '${j['sessionId'] ?? ''}',
+    title: '${j['title'] ?? 'Conversation'}',
+    createdAt: (j['createdAt'] as num?)?.toInt() ?? 0,
+    updatedAt: (j['updatedAt'] as num?)?.toInt() ?? 0,
+    status: '${j['status'] ?? 'active'}',
+    parentSessionId: j['parentSessionId'] as String?,
+    botId: '${j['botId'] ?? 'main'}',
+  );
 
   Map<String, dynamic> toJson() => {
-        'sessionId': sessionId,
-        'title': title,
-        'createdAt': createdAt,
-        'updatedAt': updatedAt,
-        'status': status,
-        if (parentSessionId != null) 'parentSessionId': parentSessionId,
-      };
+    'sessionId': sessionId,
+    'title': title,
+    'createdAt': createdAt,
+    'updatedAt': updatedAt,
+    'status': status,
+    'botId': botId,
+    if (parentSessionId != null) 'parentSessionId': parentSessionId,
+  };
 }
 
 class ChatSnapshot {
@@ -56,12 +60,37 @@ class ChatSnapshot {
 }
 
 class ChatStore {
-  ChatStore(this.instanceId);
+  ChatStore(this.instanceId, {this.onWriteError});
   final String instanceId;
+  final void Function(Object, StackTrace)? onWriteError;
 
   Timer? _writeTimer;
   String? activeSessionId;
   List<ConversationMeta> conversations = [];
+  Future<void> _writeQueue = Future<void>.value();
+
+  Future<void> _enqueueWrite(Future<void> Function() write) {
+    final next = _writeQueue.then((_) => write());
+    _writeQueue = next.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stack) {},
+    );
+    return next;
+  }
+
+  Future<void> _replaceFile(File target, String content) async {
+    await target.parent.create(recursive: true);
+    final temporaryDirectory = await target.parent.createTemp(
+      '.${target.uri.pathSegments.last}.tmp-',
+    );
+    try {
+      final temporaryFile = File('${temporaryDirectory.path}/content');
+      await temporaryFile.writeAsString(content, flush: true);
+      await temporaryFile.rename(target.path);
+    } finally {
+      await temporaryDirectory.delete(recursive: true);
+    }
+  }
 
   Future<Directory> root() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -86,6 +115,7 @@ class ChatStore {
   File _indexFile(Directory root) => File('${root.path}/conversations.json');
 
   Future<void> _loadIndex() async {
+    await _writeQueue;
     try {
       final file = _indexFile(await root());
       if (!await file.exists()) return;
@@ -93,23 +123,26 @@ class ChatStore {
       if (data is! Map) return;
       activeSessionId = data['activeSessionId'] as String?;
       final list = (data['conversations'] as List?) ?? const [];
-      conversations = list
-          .whereType<Map>()
-          .map((e) => ConversationMeta.fromJson(Map<String, dynamic>.from(e)))
-          .where((c) => c.sessionId.isNotEmpty)
-          .toList()
-        ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      conversations =
+          list
+              .whereType<Map>()
+              .map(
+                (e) => ConversationMeta.fromJson(Map<String, dynamic>.from(e)),
+              )
+              .where((c) => c.sessionId.isNotEmpty)
+              .toList()
+            ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     } catch (_) {}
   }
 
-  Future<void> _saveIndex() async {
-    final file = _indexFile(await root());
-    final tmp = File('${file.path}.tmp');
-    await tmp.writeAsString(jsonEncode({
+  Future<void> _saveIndex() {
+    final encoded = jsonEncode({
       'activeSessionId': activeSessionId,
       'conversations': conversations.map((c) => c.toJson()).toList(),
-    }));
-    await tmp.rename(file.path);
+    });
+    return _enqueueWrite(() async {
+      await _replaceFile(_indexFile(await root()), encoded);
+    });
   }
 
   ChatSnapshot _decodeSnapshot(Object? data, {String? sessionId}) {
@@ -118,7 +151,12 @@ class ChatStore {
     final events = list
         .whereType<Map>()
         .map((e) => AppChatEvent.fromJson(Map<String, dynamic>.from(e)))
-        .where((e) => e.type != 'typing' && e.type != 'progress' && e.type != 'conversation')
+        .where(
+          (e) =>
+              e.type != 'typing' &&
+              e.type != 'progress' &&
+              e.type != 'conversation',
+        )
         .toList();
     final answered = ((data['answered'] as List?) ?? const [])
         .map((e) => '$e')
@@ -131,7 +169,10 @@ class ChatStore {
     );
   }
 
-  Future<ChatSnapshot> load({String? sessionId}) async {
+  Future<ChatSnapshot> load({
+    String? sessionId,
+    bool fallbackToLegacy = true,
+  }) async {
     await _loadIndex();
     final id = sessionId ?? activeSessionId;
     try {
@@ -140,17 +181,38 @@ class ChatStore {
       final legacy = _eventsFile(dir);
       final file = (keyed != null && await keyed.exists())
           ? keyed
-          : (await legacy.exists() ? legacy : null);
+          : (fallbackToLegacy && await legacy.exists() ? legacy : null);
       if (file == null) return ChatSnapshot(events: [], sessionId: id);
       final data = jsonDecode(await file.readAsString());
+      if (file == legacy &&
+          id != null &&
+          data is Map &&
+          data['sessionId'] != null &&
+          data['sessionId'] != id) {
+        return ChatSnapshot(events: [], sessionId: id);
+      }
       return _decodeSnapshot(data, sessionId: id);
     } catch (_) {
       return ChatSnapshot(events: [], sessionId: id);
     }
   }
 
-  Future<void> mergeRemote(List<ConversationMeta> remote, {String? active}) async {
+  Future<void> selectConversation(String sessionId) async {
+    cancelScheduledSave();
+    await _writeQueue;
     await _loadIndex();
+    activeSessionId = sessionId;
+    await _saveIndex();
+  }
+
+  Future<void> mergeRemote(
+    List<ConversationMeta> remote, {
+    String? active,
+    bool selectActive = true,
+  }) async {
+    final selected = activeSessionId;
+    await _loadIndex();
+    if (!selectActive && selected != null) activeSessionId = selected;
     final byId = {for (final c in conversations) c.sessionId: c};
     for (final c in remote) {
       if (c.sessionId.isEmpty) continue;
@@ -160,13 +222,18 @@ class ChatStore {
       } else {
         prev.title = c.title.isNotEmpty ? c.title : prev.title;
         prev.status = c.status;
-        prev.updatedAt = c.updatedAt > prev.updatedAt ? c.updatedAt : prev.updatedAt;
+        prev.updatedAt = c.updatedAt > prev.updatedAt
+            ? c.updatedAt
+            : prev.updatedAt;
         prev.parentSessionId = c.parentSessionId ?? prev.parentSessionId;
+        prev.botId = c.botId;
       }
     }
     conversations = byId.values.toList()
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    if (active != null && active.isNotEmpty) activeSessionId = active;
+    if (selectActive && active != null && active.isNotEmpty) {
+      activeSessionId = active;
+    }
     await _saveIndex();
   }
 
@@ -178,6 +245,7 @@ class ChatStore {
     required Set<String> answered,
     String? lastServerId,
   }) async {
+    cancelScheduledSave();
     await _loadIndex();
     final now = DateTime.now().millisecondsSinceEpoch;
     if (previousSessionId != null && previousSessionId.isNotEmpty) {
@@ -187,15 +255,21 @@ class ChatStore {
         lastServerId: lastServerId,
         sessionId: previousSessionId,
       );
-      final existing = conversations.where((c) => c.sessionId == previousSessionId).toList();
+      final existing = conversations
+          .where((c) => c.sessionId == previousSessionId)
+          .toList();
       if (existing.isEmpty) {
-        conversations.add(ConversationMeta(
-          sessionId: previousSessionId,
-          title: _titleFrom(currentEvents, previousTitle) ?? 'Previous conversation',
-          createdAt: currentEvents.isEmpty ? now : currentEvents.first.ts,
-          updatedAt: now,
-          status: 'closed',
-        ));
+        conversations.add(
+          ConversationMeta(
+            sessionId: previousSessionId,
+            title:
+                _titleFrom(currentEvents, previousTitle) ??
+                'Previous conversation',
+            createdAt: currentEvents.isEmpty ? now : currentEvents.first.ts,
+            updatedAt: now,
+            status: 'closed',
+          ),
+        );
       } else {
         existing.first
           ..status = 'closed'
@@ -240,14 +314,35 @@ class ChatStore {
     return null;
   }
 
+  void cancelScheduledSave() {
+    _writeTimer?.cancel();
+    _writeTimer = null;
+  }
+
   void scheduleSave({
     required List<AppChatEvent> events,
     required Set<String> answered,
     String? lastServerId,
   }) {
     _writeTimer?.cancel();
+    final session = activeSessionId;
+    final snapshot = events
+        .map((event) => AppChatEvent.fromJson(event.toJson()))
+        .toList();
+    final responses = Set<String>.of(answered);
     _writeTimer = Timer(const Duration(milliseconds: 280), () {
-      unawaited(save(events: events, answered: answered, lastServerId: lastServerId));
+      save(
+        events: snapshot,
+        answered: responses,
+        sessionId: session,
+        lastServerId: lastServerId,
+      ).catchError((Object error, StackTrace stack) {
+        if (onWriteError != null) {
+          onWriteError!(error, stack);
+        } else {
+          stderr.writeln('Could not save chat history: $error');
+        }
+      });
     });
   }
 
@@ -257,8 +352,14 @@ class ChatStore {
     String? lastServerId,
     String? sessionId,
   }) async {
+    cancelScheduledSave();
     final persistable = events
-        .where((e) => e.type != 'typing' && e.type != 'progress' && e.type != 'conversation')
+        .where(
+          (e) =>
+              e.type != 'typing' &&
+              e.type != 'progress' &&
+              e.type != 'conversation',
+        )
         .toList();
     final id = sessionId ?? activeSessionId;
     final payload = {
@@ -268,27 +369,31 @@ class ChatStore {
       'answered': answered.toList(),
       'events': persistable.map((e) => e.toJson()).toList(),
     };
-    final dir = await root();
-    final targets = <File>[_eventsFile(dir)];
-    if (id != null && id.isNotEmpty) targets.add(_eventsFile(dir, id));
     final encoded = jsonEncode(payload);
-    for (final file in targets) {
-      await file.parent.create(recursive: true);
-      final tmp = File('${file.path}.tmp');
-      await tmp.writeAsString(encoded);
-      await tmp.rename(file.path);
-    }
-    if (id != null) {
-      final hit = conversations.where((c) => c.sessionId == id);
-      if (hit.isNotEmpty) {
-        hit.first.updatedAt = DateTime.now().millisecondsSinceEpoch;
-        if (hit.first.title == 'New conversation') {
-          final derived = _titleFrom(persistable, null);
-          if (derived != null) hit.first.title = derived;
-        }
-        await _saveIndex();
+    await _enqueueWrite(() async {
+      final dir = await root();
+      if (id == null || id == activeSessionId) {
+        await _replaceFile(_eventsFile(dir), encoded);
       }
-    }
+      if (id != null && id.isNotEmpty) {
+        await _replaceFile(_eventsFile(dir, id), encoded);
+      }
+      if (id != null) {
+        final hit = conversations.where((c) => c.sessionId == id);
+        if (hit.isNotEmpty) {
+          hit.first.updatedAt = DateTime.now().millisecondsSinceEpoch;
+          if (hit.first.title == 'New conversation') {
+            final derived = _titleFrom(persistable, null);
+            if (derived != null) hit.first.title = derived;
+          }
+          final index = jsonEncode({
+            'activeSessionId': activeSessionId,
+            'conversations': conversations.map((c) => c.toJson()).toList(),
+          });
+          await _replaceFile(_indexFile(dir), index);
+        }
+      }
+    });
   }
 
   Future<String> saveMedia({
@@ -298,7 +403,9 @@ class ChatStore {
   }) async {
     final dir = await mediaDir();
     final safe = name.replaceAll(RegExp(r'[/\\]'), '_');
-    final prefix = (id != null && id.isNotEmpty) ? '${id}_' : '${DateTime.now().millisecondsSinceEpoch}_';
+    final prefix = (id != null && id.isNotEmpty)
+        ? '${id}_'
+        : '${DateTime.now().millisecondsSinceEpoch}_';
     final path = '${dir.path}/$prefix$safe';
     await File(path).writeAsBytes(bytes, flush: true);
     return path;

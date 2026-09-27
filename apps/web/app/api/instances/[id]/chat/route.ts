@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { proxyInbox, requireChatInstance } from '@/lib/app-chat';
+import { prepareBotRequest } from '@/lib/bot-routing';
 
 export const maxDuration = 300;
 
@@ -13,11 +14,14 @@ export async function POST(req: Request, ctx: Ctx) {
   let body: Record<string, unknown> = {};
   try {
     body = (await req.json()) as Record<string, unknown>;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Invalid request');
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   try {
+    const rejected = await prepareBotRequest(gate.inst, body.botId, body.chatId, { sync: true, allowLegacyChatId: true });
+    if (rejected) return rejected;
     const res = await proxyInbox(gate.inst, '/v1/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

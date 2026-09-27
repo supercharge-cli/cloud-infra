@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../api/client.dart';
 import '../desktop.dart';
+import '../desktop/shortcuts.dart';
 import '../api/models.dart';
 import '../chat/cli_update.dart';
 import '../state/session.dart';
@@ -27,6 +28,15 @@ class _InstancesScreenState extends State<InstancesScreen> {
   String? error;
   String? overlay;
   final cliById = <String, CliVersion>{};
+  final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
 
   VectraClient get api => context.read<SessionController>().client;
 
@@ -54,7 +64,10 @@ class _InstancesScreenState extends State<InstancesScreen> {
   }
 
   Future<void> _checkCliUpdates() async {
-    final targets = items.where((i) => !i.pastDue && i.status != 'destroyed').take(8).toList();
+    final targets = items
+        .where((i) => !i.pastDue && i.status != 'destroyed')
+        .take(8)
+        .toList();
     for (final inst in targets) {
       try {
         final raw = await api.cliVersion(inst.id);
@@ -80,19 +93,14 @@ class _InstancesScreenState extends State<InstancesScreen> {
   Future<void> _create() async {
     final request = await showDialog<CreateInstanceRequest>(
       context: context,
-      builder: (ctx) => _CreateInstanceDialog(canCreateFree: quota.canCreateFree),
+      builder: (ctx) =>
+          _CreateInstanceDialog(canCreateFree: quota.canCreateFree),
     );
     if (request == null || request.name.isEmpty) return;
     final name = request.name;
     final runtime = request.runtime;
     if (request.paid) {
       if (!mounted) return;
-      if (isDesktop) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Pay and create extra workspaces on the phone app.')),
-        );
-        return;
-      }
       await _afterPush(
         context.push(
           '/billing',
@@ -118,7 +126,9 @@ class _InstancesScreenState extends State<InstancesScreen> {
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
       }
     } catch (e) {
       if (!mounted) return;
@@ -143,94 +153,344 @@ class _InstancesScreenState extends State<InstancesScreen> {
   Widget build(BuildContext context) {
     return AppScaffold(
       isRoot: true,
+      commands: {
+        DesktopCommand.newWorkspace: overlay == null ? _create : null,
+        DesktopCommand.refresh: overlay == null ? _reload : null,
+        DesktopCommand.search: _searchFocus.requestFocus,
+      },
       appBar: AppBar(
+        actions: isDesktop
+            ? [
+                IconButton(
+                  tooltip: 'Refresh (Ctrl+R)',
+                  onPressed: overlay == null ? _reload : null,
+                  icon: const Icon(Icons.refresh, size: 20),
+                ),
+                const SizedBox(width: 8),
+                Center(
+                  child: FilledButton.icon(
+                    onPressed: overlay == null ? _create : null,
+                    icon: const Icon(Icons.add, size: 17),
+                    label: const Text('New workspace'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ]
+            : null,
         title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Vectra Cloud', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
-            Text('Your sandboxes', style: TextStyle(fontSize: 12, color: Vc.muted, fontWeight: FontWeight.w400)),
+            Text(
+              'Vectra Cloud',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.4,
+              ),
+            ),
+            Text(
+              'Your sandboxes',
+              style: TextStyle(
+                fontSize: 12,
+                color: Vc.muted,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: overlay == null ? _create : null,
-        backgroundColor: Vc.green,
-        foregroundColor: Colors.black,
-        icon: const Icon(Icons.add),
-        label: Text(quota.canCreateFree ? 'Create' : 'Pay & create', style: const TextStyle(fontWeight: FontWeight.w800)),
-      ),
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: overlay == null ? _create : null,
+              backgroundColor: Vc.green,
+              foregroundColor: Colors.black,
+              icon: const Icon(Icons.add),
+              label: Text(
+                quota.canCreateFree ? 'Create' : 'Pay & create',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
       body: Stack(
-          children: [
-            RefreshIndicator(
-              color: Vc.green,
-              onRefresh: _reload,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-                children: [
-                  _quotaCard(),
-                  if (cliById.values.any((c) => c.updateAvailable)) ...[
-                    const SizedBox(height: 12),
-                    VcPanel(
+        children: [
+          RefreshIndicator(
+            color: Vc.green,
+            onRefresh: _reload,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+              children: [
+                _quotaCard(),
+                if (cliById.values.any((c) => c.updateAvailable)) ...[
+                  const SizedBox(height: 12),
+                  VcPanel(
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.system_update_alt,
+                          color: Vc.amber,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(() {
+                            final sc = items.any(
+                              (i) =>
+                                  i.runtime == AgentRuntime.supercharge &&
+                                  cliById[i.id]?.updateAvailable == true,
+                            );
+                            final xc = items.any(
+                              (i) =>
+                                  i.runtime != AgentRuntime.supercharge &&
+                                  cliById[i.id]?.updateAvailable == true,
+                            );
+                            if (sc && xc) {
+                              return 'A Supercharge or XibeCode CLI update is out. Open that workspace and tap Update.';
+                            }
+                            if (sc) {
+                              return 'A new Supercharge CLI is out. Open a Supercharge workspace and tap Update — same as /update.';
+                            }
+                            return 'A new XibeCode CLI is out. Open a XibeCode workspace and tap Update — same as /update.';
+                          }(), style: const TextStyle(fontSize: 13, height: 1.35)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                if (isDesktop) ...[
+                  TextField(
+                    controller: _search,
+                    focusNode: _searchFocus,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      hintText: 'Find a workspace…',
+                      prefixIcon: Icon(Icons.search, size: 19),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                if (loading)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 80),
+                    child: Center(
+                      child: CircularProgressIndicator(color: Vc.green),
+                    ),
+                  )
+                else if (error != null)
+                  Column(
+                    children: [
+                      Text(error!, style: const TextStyle(color: Vc.red)),
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        onPressed: _reload,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  )
+                else if (items.isEmpty)
+                  const EmptyState(
+                    icon: Icons.cloud_outlined,
+                    title: 'No instances yet',
+                    detail:
+                        'Create a free sandbox, then open Chat. Wake, billing, and AI config live in Control.',
+                  )
+                else if (isDesktop)
+                  _desktopList()
+                else
+                  for (final inst in items) _card(inst),
+              ],
+            ),
+          ),
+          if (overlay != null)
+            BusyOverlay(
+              message: overlay!,
+              detail: 'This can take up to a minute',
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _desktopList() {
+    final query = _search.text.trim().toLowerCase();
+    final visible = items
+        .where(
+          (item) => '${item.name} ${item.runtimeLabel} ${item.displayState}'
+              .toLowerCase()
+              .contains(query),
+        )
+        .toList();
+    if (visible.isEmpty) {
+      return const EmptyState(
+        icon: Icons.search_off,
+        title: 'No matching workspaces',
+        detail: 'Try a different name, runtime, or status.',
+      );
+    }
+    return Material(
+      color: Vc.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: Vc.cardBorder),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    'Workspace',
+                    style: TextStyle(color: Vc.muted, fontSize: 12),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    'Runtime',
+                    style: TextStyle(color: Vc.muted, fontSize: 12),
+                  ),
+                ),
+                SizedBox(
+                  width: 120,
+                  child: Text(
+                    'Status',
+                    style: TextStyle(color: Vc.muted, fontSize: 12),
+                  ),
+                ),
+                SizedBox(width: 100),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          for (final item in visible) ...[
+            InkWell(
+              onTap: () =>
+                  _afterPush(context.push('/chat/${item.id}', extra: item)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
                       child: Row(
                         children: [
-                          const Icon(Icons.system_update_alt, color: Vc.amber, size: 20),
-                          const SizedBox(width: 10),
+                          const Icon(
+                            Icons.cloud_outlined,
+                            size: 20,
+                            color: Vc.muted,
+                          ),
+                          const SizedBox(width: 12),
                           Expanded(
-                            child: Text(
-                              () {
-                                final sc = items.any((i) =>
-                                    i.runtime == AgentRuntime.supercharge &&
-                                    cliById[i.id]?.updateAvailable == true);
-                                final xc = items.any((i) =>
-                                    i.runtime != AgentRuntime.supercharge &&
-                                    cliById[i.id]?.updateAvailable == true);
-                                if (sc && xc) {
-                                  return 'A Supercharge or XibeCode CLI update is out. Open that workspace and tap Update.';
-                                }
-                                if (sc) {
-                                  return 'A new Supercharge CLI is out. Open a Supercharge workspace and tap Update — same as /update.';
-                                }
-                                return 'A new XibeCode CLI is out. Open a XibeCode workspace and tap Update — same as /update.';
-                              }(),
-                              style: const TextStyle(fontSize: 13, height: 1.35),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  item.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                if (item.lastError?.isNotEmpty == true)
+                                  Text(
+                                    item.lastError!,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Vc.red,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 16),
-                  if (loading)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 80),
-                      child: Center(child: CircularProgressIndicator(color: Vc.green)),
-                    )
-                  else if (error != null)
-                    Column(
-                      children: [
-                        Text(error!, style: const TextStyle(color: Vc.red)),
-                        const SizedBox(height: 12),
-                        OutlinedButton(onPressed: _reload, child: const Text('Retry')),
+                    Expanded(
+                      child: Text(
+                        item.runtimeLabel,
+                        style: const TextStyle(color: Vc.muted, fontSize: 12),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 120,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: StateChip(item.displayState),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Wake workspace',
+                      onPressed: overlay == null ? () => _wake(item) : null,
+                      icon: const Icon(Icons.bolt, size: 19),
+                    ),
+                    PopupMenuButton<String>(
+                      tooltip: 'Workspace actions',
+                      onSelected: (value) {
+                        if (value == 'chat') {
+                          context.push('/chat/${item.id}', extra: item);
+                        }
+                        if (value == 'files') {
+                          context.push(
+                            '/instance/${item.id}/files',
+                            extra: item,
+                          );
+                        }
+                        if (value == 'settings') {
+                          context.push('/instance/${item.id}', extra: item);
+                        }
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(value: 'chat', child: Text('Open chat')),
+                        PopupMenuItem(
+                          value: 'files',
+                          child: Text('Browse files'),
+                        ),
+                        PopupMenuItem(
+                          value: 'settings',
+                          child: Text('Workspace settings'),
+                        ),
                       ],
-                    )
-                  else if (items.isEmpty)
-                    const EmptyState(
-                      icon: Icons.cloud_outlined,
-                      title: 'No instances yet',
-                      detail: 'Create a free sandbox, then open Chat. Wake, billing, and AI config live in Control.',
-                    )
-                  else
-                    for (final inst in items) _card(inst),
-                ],
+                    ),
+                  ],
+                ),
               ),
             ),
-            if (overlay != null) BusyOverlay(message: overlay!, detail: 'This can take up to a minute'),
+            if (item != visible.last) const Divider(height: 1),
           ],
-        ),
+        ],
+      ),
     );
   }
 
   Widget _quotaCard() {
+    if (isDesktop) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 2),
+        child: Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Workspaces',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
+              ),
+            ),
+            Text(
+              '${quota.used} / ${quota.limit} free slots used',
+              style: const TextStyle(color: Vc.muted, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
     final used = quota.used;
     final limit = quota.limit <= 0 ? 1 : quota.limit;
     return VcPanel(
@@ -248,7 +508,13 @@ class _InstancesScreenState extends State<InstancesScreen> {
                   backgroundColor: Vc.elevated,
                   strokeWidth: 4,
                 ),
-                Text('$used', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                Text(
+                  '$used',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
+                ),
               ],
             ),
           ),
@@ -257,11 +523,17 @@ class _InstancesScreenState extends State<InstancesScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Free quota', style: TextStyle(color: Vc.muted, fontSize: 12)),
+                const Text(
+                  'Free quota',
+                  style: TextStyle(color: Vc.muted, fontSize: 12),
+                ),
                 const SizedBox(height: 3),
                 Text(
                   '$used / ${quota.limit} used',
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                  ),
                 ),
               ],
             ),
@@ -270,7 +542,11 @@ class _InstancesScreenState extends State<InstancesScreen> {
             Text(
               '${plan!.inrLabel}\n${plan!.usdLabel}',
               textAlign: TextAlign.right,
-              style: const TextStyle(color: Vc.muted, fontSize: 11, height: 1.35),
+              style: const TextStyle(
+                color: Vc.muted,
+                fontSize: 11,
+                height: 1.35,
+              ),
             ),
         ],
       ),
@@ -285,11 +561,14 @@ class _InstancesScreenState extends State<InstancesScreen> {
         color: Vc.card,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: inst.pastDue ? Vc.red.withValues(alpha: 0.5) : Vc.cardBorder),
+          side: BorderSide(
+            color: inst.pastDue ? Vc.red.withValues(alpha: 0.5) : Vc.cardBorder,
+          ),
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(18),
-          onTap: () => _afterPush(context.push('/chat/${inst.id}', extra: inst)),
+          onTap: () =>
+              _afterPush(context.push('/chat/${inst.id}', extra: inst)),
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Column(
@@ -302,7 +581,13 @@ class _InstancesScreenState extends State<InstancesScreen> {
                         CircleAvatar(
                           radius: 20,
                           backgroundColor: Vc.green.withValues(alpha: 0.14),
-                          child: Text(letter, style: const TextStyle(color: Vc.green, fontWeight: FontWeight.w800)),
+                          child: Text(
+                            letter,
+                            style: const TextStyle(
+                              color: Vc.green,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                         ),
                         Positioned(
                           right: 0,
@@ -316,17 +601,33 @@ class _InstancesScreenState extends State<InstancesScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(inst.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
+                          Text(
+                            inst.name,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
                           Text(
                             inst.runtimeLabel,
                             style: TextStyle(
-                              color: inst.runtime == AgentRuntime.supercharge ? Vc.green : Vc.muted,
+                              color: inst.runtime == AgentRuntime.supercharge
+                                  ? Vc.green
+                                  : Vc.muted,
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          if (inst.paidUntil != null && inst.paidUntil!.isNotEmpty)
-                            Text('Paid until ${inst.paidUntil}', style: const TextStyle(color: Vc.faint, fontSize: 11)),
+                          if (inst.paidUntil != null &&
+                              inst.paidUntil!.isNotEmpty)
+                            Text(
+                              'Paid until ${inst.paidUntil}',
+                              style: const TextStyle(
+                                color: Vc.faint,
+                                fontSize: 11,
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -348,22 +649,45 @@ class _InstancesScreenState extends State<InstancesScreen> {
                       ),
                   ],
                 ),
-                if (inst.liveMessage != null && inst.liveMessage!.isNotEmpty) ...[
+                if (inst.liveMessage != null &&
+                    inst.liveMessage!.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Text(inst.liveMessage!, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 12)),
+                  Text(
+                    inst.liveMessage!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Vc.muted, fontSize: 12),
+                  ),
                 ],
                 if (inst.lastError != null && inst.lastError!.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Text(inst.lastError!, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.red, fontSize: 12)),
+                  Text(
+                    inst.lastError!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Vc.red, fontSize: 12),
+                  ),
                 ],
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    _mini('Chat', Icons.chat_bubble_outline, () => _afterPush(context.push('/chat/${inst.id}', extra: inst))),
+                    _mini(
+                      'Chat',
+                      Icons.chat_bubble_outline,
+                      () => _afterPush(
+                        context.push('/chat/${inst.id}', extra: inst),
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     _mini('Wake', Icons.bolt, () => _wake(inst)),
                     const SizedBox(width: 8),
-                    _mini('Control', Icons.tune, () => _afterPush(context.push('/instance/${inst.id}', extra: inst))),
+                    _mini(
+                      'Control',
+                      Icons.tune,
+                      () => _afterPush(
+                        context.push('/instance/${inst.id}', extra: inst),
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -392,7 +716,17 @@ class _InstancesScreenState extends State<InstancesScreen> {
               children: [
                 Icon(icon, size: 15, color: Vc.greenSoft),
                 const SizedBox(width: 6),
-                Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -439,13 +773,23 @@ class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
         children: [
           const Text(
             'Agent image',
-            style: TextStyle(color: Vc.muted, fontSize: 12, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              color: Vc.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 8),
           SegmentedButton<AgentRuntime>(
             segments: const [
-              ButtonSegment(value: AgentRuntime.xibecode, label: Text('XibeCode')),
-              ButtonSegment(value: AgentRuntime.supercharge, label: Text('Supercharge')),
+              ButtonSegment(
+                value: AgentRuntime.xibecode,
+                label: Text('XibeCode'),
+              ),
+              ButtonSegment(
+                value: AgentRuntime.supercharge,
+                label: Text('Supercharge'),
+              ),
             ],
             selected: {_runtime},
             onSelectionChanged: (value) {
@@ -473,11 +817,14 @@ class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
         ],
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
         if (!widget.canCreateFree)
           FilledButton(
-            onPressed: isDesktop ? null : () => _submit(paid: true),
-            child: Text(isDesktop ? 'Pay on phone' : 'Pay & create'),
+            onPressed: () => _submit(paid: true),
+            child: const Text('Pay & create'),
           )
         else ...[
           if (!isDesktop)

@@ -70,6 +70,11 @@ class VectraClient {
         case 'DELETE':
           res = await http.delete(uri, headers: _headers).timeout(wait);
           break;
+        case 'PATCH':
+          res = await http
+              .patch(uri, headers: _headers, body: encoded)
+              .timeout(wait);
+          break;
         case 'PUT':
           res = await http
               .put(uri, headers: _headers, body: encoded)
@@ -239,6 +244,26 @@ class VectraClient {
     return '${data['content'] ?? data['text'] ?? ''}';
   }
 
+  Future<DownloadedFile> exportWorkspace(String id) async {
+    final response = await http
+        .get(
+          _u('/api/instances/$id/workspace/export'),
+          headers: {..._headers, 'accept': 'application/gzip'},
+        )
+        .timeout(const Duration(minutes: 5));
+    if (response.statusCode >= 400) {
+      throw ApiException(
+        response.statusCode,
+        'Could not export workspace (${response.statusCode}).',
+      );
+    }
+    return DownloadedFile(
+      bytes: response.bodyBytes,
+      name: 'workspace-$id.tar.gz',
+      mime: response.headers['content-type'] ?? 'application/gzip',
+    );
+  }
+
   Future<String?> shareWorkspaceFile(String id, String path) async {
     final data = await _json(
       'POST',
@@ -282,27 +307,65 @@ class VectraClient {
     timeout: const Duration(seconds: 280),
   );
 
-  Future<void> sendChat(String id, String text) => _json(
+  Future<void> sendChat(
+    String id,
+    String text, {
+    String? botId,
+    String? chatId,
+  }) => _json(
     'POST',
     '/api/instances/$id/chat',
-    body: {'text': text},
+    body: {'text': text, 'botId': ?botId, 'chatId': ?chatId},
     timeout: _slow,
   );
 
-  Future<Map<String, dynamic>> listConversations(String id) =>
-      _json('GET', '/api/instances/$id/chat/conversations', timeout: _fast);
+  Future<Map<String, dynamic>> listBots(String id) =>
+      _json('GET', '/api/instances/$id/bots', timeout: _fast);
+
+  Future<Map<String, dynamic>> createBot(
+    String id,
+    Map<String, dynamic> input,
+  ) => _json('POST', '/api/instances/$id/bots', body: input, timeout: _slow);
+
+  Future<Map<String, dynamic>> updateBot(
+    String id,
+    String botId,
+    Map<String, dynamic> input,
+  ) => _json(
+    'PATCH',
+    '/api/instances/$id/bots/${Uri.encodeComponent(botId)}',
+    body: input,
+    timeout: _slow,
+  );
+
+  Future<Map<String, dynamic>> listConversations(String id, {String? botId}) =>
+      _json(
+        'GET',
+        '/api/instances/$id/chat/conversations',
+        query: botId == null ? null : {'botId': botId},
+        timeout: _fast,
+      );
 
   Future<Map<String, dynamic>> getConversation(
     String id,
-    String sessionId,
-  ) => _json(
+    String sessionId, {
+    String? botId,
+  }) => _json(
     'GET',
     '/api/instances/$id/chat/conversations/${Uri.encodeComponent(sessionId)}',
+    query: botId == null ? null : {'botId': botId},
     timeout: _slow,
   );
 
-  Future<void> startNewConversation(String id) =>
-      _json('POST', '/api/instances/$id/chat/conversations', timeout: _slow);
+  Future<Map<String, dynamic>> startNewConversation(
+    String id, {
+    String? botId,
+  }) => _json(
+    'POST',
+    '/api/instances/$id/chat/conversations',
+    body: botId == null ? null : {'botId': botId},
+    timeout: _slow,
+  );
 
   Future<void> switchConversation(String id, String sessionId) => _json(
     'POST',
@@ -351,11 +414,12 @@ class VectraClient {
     }
   }
 
-  Future<void> stopChat(String id) async {
+  Future<void> stopChat(String id, {String? botId, String? chatId}) async {
     // Cooperative cancellation can take 10 seconds before the daemon replies.
     final result = await _json(
       'POST',
       '/api/instances/$id/chat/stop',
+      body: {'botId': ?botId, 'chatId': ?chatId},
       timeout: const Duration(seconds: 30),
     );
     if (result['ok'] != true) {
@@ -399,10 +463,12 @@ class VectraClient {
     String id, {
     required List<({String name, Uint8List bytes, String? mime})> files,
     String? caption,
+    String? botId,
+    String? chatId,
   }) async {
     if (files.isEmpty) {
       if (caption != null && caption.trim().isNotEmpty) {
-        await sendChat(id, caption.trim());
+        await sendChat(id, caption.trim(), botId: botId, chatId: chatId);
       }
       return;
     }
@@ -441,6 +507,8 @@ class VectraClient {
       '/api/instances/$id/chat',
       body: {
         if (caption != null && caption.isNotEmpty) 'text': caption,
+        'botId': ?botId,
+        'chatId': ?chatId,
         'files': payload,
       },
       timeout: _slow,
@@ -476,8 +544,13 @@ class VectraClient {
     );
   }
 
-  Future<Map<String, dynamic>> chatStatus(String id) =>
-      _json('GET', '/api/instances/$id/chat/status', timeout: _fast);
+  Future<Map<String, dynamic>> chatStatus(String id, {String? sessionId}) =>
+      _json(
+        'GET',
+        '/api/instances/$id/chat/status',
+        query: sessionId == null ? null : {'sessionId': sessionId},
+        timeout: _fast,
+      );
 
   Future<List<String>> models(String id) async {
     final data = await _json(
@@ -596,10 +669,14 @@ class VectraClient {
   Stream<AppChatEvent> events(
     String id, {
     String? since,
+    String? botId,
+    String? chatId,
     EventStreamCancellation? cancellation,
   }) async* {
     final uri = _u('/api/instances/$id/chat/events', {
       if (since != null && since.isNotEmpty) 'since': since,
+      'botId': ?botId,
+      'chatId': ?chatId,
     });
     final req = http.Request('GET', uri);
     req.headers.addAll({

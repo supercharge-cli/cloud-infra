@@ -28,18 +28,37 @@ class AccountScreen extends StatelessWidget {
                 CircleAvatar(
                   radius: 26,
                   backgroundColor: Vc.green.withValues(alpha: 0.18),
-                  child: Text(initial, style: const TextStyle(color: Vc.green, fontWeight: FontWeight.w800, fontSize: 20)),
+                  child: Text(
+                    initial,
+                    style: const TextStyle(
+                      color: Vc.green,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 20,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Signed in', style: TextStyle(color: Vc.muted, fontSize: 12)),
+                      const Text(
+                        'Signed in',
+                        style: TextStyle(color: Vc.muted, fontSize: 12),
+                      ),
                       const SizedBox(height: 4),
-                      Text(email, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                      Text(
+                        email,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                       const SizedBox(height: 2),
-                      Text(session.user?.role ?? 'user', style: const TextStyle(color: Vc.faint)),
+                      Text(
+                        session.user?.role ?? 'user',
+                        style: const TextStyle(color: Vc.faint),
+                      ),
                     ],
                   ),
                 ),
@@ -51,7 +70,10 @@ class AccountScreen extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: ListTile(
               title: const Text('Pollinations'),
-              subtitle: const Text('Connect once for every workspace · usage', style: TextStyle(color: Vc.muted, fontSize: 12)),
+              subtitle: const Text(
+                'Connect once for every workspace · usage',
+                style: TextStyle(color: Vc.muted, fontSize: 12),
+              ),
               trailing: const Icon(Icons.chevron_right, color: Vc.muted),
               onTap: () => context.push('/pollinations'),
             ),
@@ -60,10 +82,20 @@ class AccountScreen extends StatelessWidget {
           VcPanel(
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: ListTile(
-              title: const Text('Open website'),
-              subtitle: const Text('Dashboard in the browser', style: TextStyle(color: Vc.muted, fontSize: 12)),
-              trailing: const Icon(Icons.open_in_new, size: 18, color: Vc.muted),
-              onTap: () => launchUrl(Uri.parse('$apiBase/dashboard'), mode: LaunchMode.externalApplication),
+              title: const Text('Open website in browser'),
+              subtitle: const Text(
+                'Dashboard in the browser',
+                style: TextStyle(color: Vc.muted, fontSize: 12),
+              ),
+              trailing: const Icon(
+                Icons.open_in_new,
+                size: 18,
+                color: Vc.muted,
+              ),
+              onTap: () => launchUrl(
+                Uri.parse('$apiBase/dashboard'),
+                mode: LaunchMode.externalApplication,
+              ),
             ),
           ),
           const SizedBox(height: 20),
@@ -73,10 +105,18 @@ class AccountScreen extends StatelessWidget {
                 context: context,
                 builder: (ctx) => AlertDialog(
                   title: const Text('Sign out?'),
-                  content: const Text('You will need to sign in again on this device.'),
+                  content: const Text(
+                    'You will need to sign in again on this device.',
+                  ),
                   actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                    FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Sign out')),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Sign out'),
+                    ),
                   ],
                 ),
               );

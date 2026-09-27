@@ -1,11 +1,11 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../chat/preview_urls.dart';
 import '../desktop.dart';
+import '../desktop/native.dart';
+import '../desktop/inline_browser.dart';
 import '../theme.dart';
 
 const _ports = [3000, 5173, 8080, 4173, 5000, 8000];
@@ -43,16 +43,11 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
       text: seed?.isNotEmpty == true
           ? seed
           : (widget.sandboxId != null && widget.sandboxId!.isNotEmpty
-              ? buildPreviewUrl(sandboxId: widget.sandboxId!, port: 3000)
-              : ''),
+                ? buildPreviewUrl(sandboxId: widget.sandboxId!, port: 3000)
+                : ''),
     );
     if (isDesktop) {
-      if (_url.text.isNotEmpty) {
-        final u = Uri.tryParse(_url.text);
-        if (u != null) {
-          unawaited(launchUrl(u, mode: LaunchMode.externalApplication));
-        }
-      }
+      loading = false;
       return;
     }
     _web = WebViewController()
@@ -100,7 +95,9 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
     if (next.isEmpty) return;
     if (!next.contains('://')) next = 'https://$next';
     final uri = Uri.tryParse(next);
-    if (uri == null) {
+    if (uri == null ||
+        !{'http', 'https'}.contains(uri.scheme) ||
+        uri.host.isEmpty) {
       setState(() => error = 'Invalid URL');
       return;
     }
@@ -110,7 +107,6 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
       _url.text = next;
     });
     if (isDesktop) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (mounted) setState(() => loading = false);
       return;
     }
@@ -141,22 +137,49 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Preview', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            const Text(
+              'Preview',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
             Text(
               widget.instanceName,
-              style: const TextStyle(color: Vc.muted, fontSize: 11, fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                color: Vc.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ],
         ),
         actions: [
           IconButton(
             tooltip: 'Back',
-            onPressed: isDesktop ? null : () => _web?.goBack(),
+            onPressed: isDesktop
+                ? () => DesktopNative.inlineCommand(
+                    DesktopNative.previewSurface,
+                    'back',
+                  )
+                : () => _web?.goBack(),
             icon: const Icon(Icons.arrow_back_ios_new, size: 18),
           ),
           IconButton(
+            tooltip: 'Forward',
+            onPressed: isDesktop
+                ? () => DesktopNative.inlineCommand(
+                    DesktopNative.previewSurface,
+                    'forward',
+                  )
+                : () => _web?.goForward(),
+            icon: const Icon(Icons.arrow_forward_ios, size: 18),
+          ),
+          IconButton(
             tooltip: 'Reload',
-            onPressed: isDesktop ? () => _go(_url.text) : () => _web?.reload(),
+            onPressed: isDesktop
+                ? () => DesktopNative.inlineCommand(
+                    DesktopNative.previewSurface,
+                    'reload',
+                  )
+                : () => _web?.reload(),
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
@@ -182,7 +205,11 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
               textInputAction: TextInputAction.go,
               decoration: InputDecoration(
                 hintText: 'https://3000-{sandbox}.e2b.app',
-                prefixIcon: const Icon(Icons.language, size: 18, color: Vc.muted),
+                prefixIcon: const Icon(
+                  Icons.language,
+                  size: 18,
+                  color: Vc.muted,
+                ),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.arrow_forward, size: 18),
                   onPressed: () => _go(_url.text),
@@ -220,7 +247,10 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
           if (error != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-              child: Text(error!, style: const TextStyle(color: Vc.amber, fontSize: 12)),
+              child: Text(
+                error!,
+                style: const TextStyle(color: Vc.amber, fontSize: 12),
+              ),
             ),
           Expanded(
             child: _url.text.isEmpty
@@ -231,13 +261,11 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
                     ),
                   )
                 : isDesktop
-                    ? Center(
-                        child: FilledButton(
-                          onPressed: () => _go(_url.text),
-                          child: const Text('Open in system browser'),
-                        ),
-                      )
-                    : WebViewWidget(controller: _web!),
+                ? InlineBrowserView(
+                    surface: DesktopNative.previewSurface,
+                    url: _url.text,
+                  )
+                : WebViewWidget(controller: _web!),
           ),
         ],
       ),

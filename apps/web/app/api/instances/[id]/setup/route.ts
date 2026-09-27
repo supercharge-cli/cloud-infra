@@ -9,7 +9,7 @@ import {
   newTelegramWebhookSecret,
   SANDBOX_TG_WEBHOOK_PORT,
 } from "@/lib/sandbox-telegram";
-import { getInstance, updateInstance } from "@/lib/store";
+import { getInstance, publicInstance, updateInstance } from "@/lib/store";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -126,7 +126,7 @@ export async function POST(req: Request, ctx: Ctx) {
     return NextResponse.json({
       ok: result.ok,
       logs,
-      instance,
+      instance: instance ? publicInstance(instance) : null,
       telegramWebhookMode: webhookMode,
       sandboxTelegramWebhookUrl: sandboxWebhookUrl || null,
     });

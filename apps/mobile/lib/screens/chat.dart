@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -14,8 +15,12 @@ import 'package:share_plus/share_plus.dart';
 
 import '../api/client.dart';
 import '../desktop.dart';
+import '../desktop/native.dart';
+import '../desktop/shortcuts.dart';
+import '../desktop/chat_workspace.dart';
 import '../api/models.dart';
 import '../chat/chat_store.dart';
+import '../chat/bot_profile.dart';
 import '../chat/cli_update.dart';
 import '../chat/commands.dart';
 import '../chat/draft.dart';
@@ -46,11 +51,27 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _input = TextEditingController();
+  final _inputFocus = FocusNode();
+  final _find = TextEditingController();
+  final _findFocus = FocusNode();
+  bool _findOpen = false;
+  bool _desktopComputer = true;
   final _scroll = ScrollController();
   final events = <AppChatEvent>[];
   final answered = <String>{};
   final fetching = <String>{};
   late final ChatStore store;
+  final bots = <BotProfile>[];
+  BotProfile? selectedBot;
+  final botRunning = <String>{};
+  final botQueued = <String>{};
+  final botUnread = <String>{};
+  Timer? _botsRefresh;
+  bool _chatQueued = false;
+  bool _switchingBot = false;
+  final _botDrafts = <String, (String, List<DraftAttach>)>{};
+  final _seenBotMessages = <String, String>{};
+  final _latestBotMessages = <String, String>{};
   StreamSubscription<AppChatEvent>? _sub;
   EventStreamCancellation? _eventCancellation;
   int _eventGeneration = 0;
@@ -97,6 +118,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   AgentRuntime get runtime =>
       inst?.runtime ?? widget.instance?.runtime ?? AgentRuntime.supercharge;
   bool get _isSupercharge => runtime == AgentRuntime.supercharge;
+  bool get _botsEnabled => _isSupercharge && bots.isNotEmpty;
+  String get _selectedBotId => selectedBot?.id ?? 'main';
+  String? get _botScope =>
+      _botsEnabled && store.activeSessionId != null ? _selectedBotId : null;
+  String? get _chatScope => _botsEnabled ? store.activeSessionId : null;
+  String get _selectedBotName => selectedBot?.name ?? 'Main';
 
   Duration get elapsed => turnStartedAt == null
       ? Duration.zero
@@ -109,6 +136,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     store = ChatStore(id);
+    if (isDesktop) DesktopNative.onFilesDropped = _dropFiles;
     WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onUserScroll);
     _input.addListener(() {
@@ -119,6 +147,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (isDesktop) return;
     if (state == AppLifecycleState.resumed) {
       backgrounded = false;
       unawaited(TaskNotifications.leaveBackground());
@@ -221,38 +250,54 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         await api.wake(id);
       } catch (_) {}
     }
-    unawaited(_hydrateFromRemote());
-    _listen();
+    if (_isSupercharge) await _refreshBots();
+    if (_botsEnabled) {
+      await _refreshConversations();
+      var chat = store.conversations
+          .where(
+            (item) =>
+                item.botId == _selectedBotId &&
+                item.sessionId == store.activeSessionId,
+          )
+          .firstOrNull;
+      chat ??= store.conversations
+          .where((item) => item.botId == _selectedBotId)
+          .firstOrNull;
+      if (chat == null) {
+        try {
+          final created = await api.startNewConversation(
+            id,
+            botId: _selectedBotId,
+          );
+          final rows = (created['conversations'] as List? ?? const [])
+              .whereType<Map>()
+              .map(
+                (raw) =>
+                    ConversationMeta.fromJson(Map<String, dynamic>.from(raw)),
+              )
+              .toList();
+          await store.mergeRemote(rows, selectActive: false);
+          chat = rows
+              .where((item) => item.sessionId == created['active'])
+              .firstOrNull;
+        } catch (failure) {
+          if (mounted) setState(() => error = failure.toString());
+        }
+      }
+      if (chat != null) {
+        await _openConversation(chat);
+      }
+    } else {
+      unawaited(_hydrateFromRemote());
+      _listen();
+    }
     api
         .commands(id)
         .then((c) {
           if (mounted && c.isNotEmpty) setState(() => commands = c);
         })
         .catchError((_) {});
-    api
-        .chatStatus(id)
-        .then((s) {
-          if (!mounted) return;
-          setState(() {
-            final u = s['usage'];
-            if (u is Map) {
-              usageUsed = (u['used'] as num?)?.toInt();
-              usageMax = (u['max'] as num?)?.toInt();
-              usagePct = (u['pct'] as num?)?.toInt();
-              usageLabel = u['label'] as String?;
-            }
-            final t = s['turn'];
-            if (t is Map && t['busy'] == true) {
-              final started = (t['startedAt'] as num?)?.toInt();
-              turnStartedAt = started != null && started > 0
-                  ? DateTime.fromMillisecondsSinceEpoch(started)
-                  : DateTime.now();
-              toolCount = (t['tools'] as num?)?.toInt() ?? toolCount;
-              computer.setAgentWorking(true);
-            }
-          });
-        })
-        .catchError((_) {});
+    unawaited(_pollTurnStatus());
     api
         .cliVersion(id)
         .then((c) {
@@ -263,6 +308,87 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         .catchError((_) {});
     unawaited(TaskNotifications.requestPermissions());
     unawaited(_refreshConversations());
+    if (_botsEnabled) {
+      _botsRefresh?.cancel();
+      _botsRefresh = Timer.periodic(const Duration(seconds: 15), (_) {
+        unawaited(_refreshBots());
+        unawaited(_pollBotStatus());
+      });
+    }
+    if (isDesktop) _syncBrowserStream();
+  }
+
+  Future<void> _refreshBots() async {
+    if (!_isSupercharge || disposed) return;
+    try {
+      final raw = await api.listBots(id);
+      final list = (raw['bots'] as List?) ?? const [];
+      final remote = list
+          .whereType<Map>()
+          .map((item) => BotProfile.fromJson(Map<String, dynamic>.from(item)))
+          .where((bot) => bot.id.isNotEmpty)
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        bots
+          ..clear()
+          ..addAll(remote);
+        final current =
+            selectedBot?.id ??
+            (store.conversations
+                    .where((c) => c.sessionId == store.activeSessionId)
+                    .firstOrNull
+                    ?.botId ??
+                'main');
+        selectedBot =
+            remote.where((bot) => bot.id == current).firstOrNull ??
+            selectedBot ??
+            remote.where((bot) => bot.isMain).firstOrNull;
+      });
+    } on ApiException catch (failure) {
+      if (failure.status != 404 && mounted) {
+        setState(() => error = failure.message);
+      }
+    } catch (failure) {
+      if (mounted) setState(() => error = failure.toString());
+    }
+  }
+
+  Future<void> _pollBotStatus() async {
+    if (!_botsEnabled || disposed || backgrounded || _switchingBot) return;
+    try {
+      final raw = await api.chatStatus(id);
+      if (!mounted) return;
+      final active = ((raw['activeBotChats'] as List?) ?? const [])
+          .map((item) => '$item')
+          .toSet();
+      final queued = ((raw['queuedBotChats'] as List?) ?? const [])
+          .map((item) => '$item')
+          .toSet();
+      setState(() {
+        botRunning
+          ..clear()
+          ..addAll(active);
+        botQueued
+          ..clear()
+          ..addAll(queued);
+        for (final item
+            in ((raw['conversations'] as List?) ?? const []).whereType<Map>()) {
+          final chat = '${item['sessionId'] ?? ''}';
+          final last = '${item['lastMessageId'] ?? ''}';
+          if (last.isNotEmpty) {
+            _latestBotMessages[chat] = last;
+            if (chat == store.activeSessionId) {
+              _seenBotMessages[chat] = last;
+              botUnread.remove(chat);
+            } else if (_seenBotMessages[chat] != last) {
+              botUnread.add(chat);
+            }
+          }
+        }
+      });
+      unawaited(_refreshConversations());
+    } catch (_) {}
   }
 
   void _listen() {
@@ -312,7 +438,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         !disposed &&
         !backgrounded &&
         !paymentBlocked &&
-        (_computerOpen || computer.isBrowser || computer.live || working);
+        (_computerOpen ||
+            (isDesktop && _desktopComputer) ||
+            computer.isBrowser ||
+            computer.live ||
+            working);
     if (want) {
       _listenBrowser();
     } else {
@@ -393,6 +523,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         await for (final ev in api.events(
           id,
           since: _isServerSeq(lastServerId) ? lastServerId : null,
+          botId: _botScope,
+          chatId: _chatScope,
           cancellation: cancellation,
         )) {
           if (!active()) return;
@@ -460,6 +592,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (ev.type == 'ready' || ev.type == 'hello' || ev.type == 'ping') {
       return;
     }
+    if (ev.type == 'bots') {
+      unawaited(_refreshBots());
+      return;
+    }
+    if (ev.type == 'conversation_created' || ev.type == 'bot_job') {
+      unawaited(_refreshBots());
+      unawaited(_refreshConversations());
+      return;
+    }
+    if (ev.type == 'maintenance') {
+      reconnecting = ev.raw['state'] != 'running';
+      return;
+    }
+    if (ev.type == 'queued') {
+      _chatQueued = true;
+      botQueued.add(ev.sessionId ?? store.activeSessionId ?? '');
+      return;
+    }
     if (ev.type == 'resync') {
       unawaited(_pollTurnStatus());
       unawaited(_hydrateFromRemote());
@@ -486,24 +636,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     if (ev.type == 'snapshot') {
       _applyBackgroundSnapshot(ev.raw['backgroundTasks']);
+      _chatQueued = ev.raw['queued'] == true;
       if (ev.busy == true) {
         turnStartedAt = (ev.startedAt ?? 0) > 0
             ? DateTime.fromMillisecondsSinceEpoch(ev.startedAt!)
             : (turnStartedAt ?? DateTime.now());
         toolCount = ev.tools ?? toolCount;
         computer.setAgentWorking(true);
-      } else if (working || sending) {
+      } else if (!_chatQueued && (working || sending)) {
         _endTurn();
       }
       return;
     }
     if (ev.type == 'conversation') {
+      if (_botsEnabled) {
+        unawaited(_refreshConversations());
+        return;
+      }
       unawaited(_applyConversationEvent(ev));
       return;
     }
     if (ev.type == 'status') {
       final busy = ev.busy == true;
       if (busy) {
+        _chatQueued = false;
         if (ev.startedAt != null && ev.startedAt! > 0) {
           turnStartedAt = DateTime.fromMillisecondsSinceEpoch(ev.startedAt!);
         } else {
@@ -542,6 +698,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 (ev.ts > 0 && e.ts > 0 && (e.ts - ev.ts).abs() < 20000)),
       );
       if (dup) {
+        final optimistic = events
+            .where(
+              (e) =>
+                  e.type == 'user' &&
+                  e.local &&
+                  e.text.trim() == text &&
+                  e.raw['messageId'] == null,
+            )
+            .lastOrNull;
+        if (optimistic != null && ev.raw['messageId'] != null) {
+          optimistic.raw['messageId'] = ev.raw['messageId'];
+        }
         _persist();
         return;
       }
@@ -566,6 +734,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     if (ev.type == 'done') {
       if (working || sending || showKickoff) _endTurn();
+      _chatQueued = false;
       return;
     }
     if (ev.type == 'error') {
@@ -730,13 +899,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _hydrateFromRemote() async {
+    if (_switchingBot) return;
+    final generation = _eventGeneration;
+    final before = store.activeSessionId;
     await _refreshConversations();
+    if (!mounted ||
+        _switchingBot ||
+        generation != _eventGeneration ||
+        before != store.activeSessionId) {
+      return;
+    }
     final sid = store.activeSessionId;
     if (sid == null || sid.isEmpty) return;
     try {
-      final remote = await api.getConversation(id, sid);
+      final remote = await api.getConversation(id, sid, botId: _botScope);
       final msgs = (remote['messages'] as List?) ?? const [];
-      if (msgs.isEmpty || !mounted) return;
+      if (msgs.isEmpty ||
+          !mounted ||
+          generation != _eventGeneration ||
+          sid != store.activeSessionId) {
+        return;
+      }
       var added = false;
       for (final m in msgs.whereType<Map>()) {
         final role = '${m['role'] ?? ''}';
@@ -745,13 +928,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ? content
             : (content == null ? '' : content.toString());
         if (text.trim().isEmpty) continue;
-        final type = role == 'user' ? 'user' : 'text';
+        final type = role == 'user'
+            ? 'user'
+            : role == 'error'
+            ? 'error'
+            : 'text';
+        final messageId = '${m['id'] ?? ''}';
         final exists = events.any(
           (e) =>
               (type == 'user'
                   ? e.type == 'user'
                   : (e.type == 'text' || e.type == 'error')) &&
-              e.text.trim() == text.trim(),
+              (messageId.isNotEmpty && e.raw['messageId'] == messageId ||
+                  e.raw['messageId'] == null && e.text.trim() == text.trim()),
         );
         if (exists) continue;
         events.add(
@@ -762,6 +951,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             'format': 'markdown',
             'final': type == 'text',
             'id': 'db-$sid-${events.length}',
+            if (messageId.isNotEmpty) 'messageId': messageId,
             'ts': DateTime.now().millisecondsSinceEpoch,
           }),
         );
@@ -784,15 +974,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _pollTurnStatus() async {
-    if (_statusPolling || disposed) return;
+    if (_statusPolling || disposed || _switchingBot) return;
     _statusPolling = true;
     try {
-      final s = await api.chatStatus(id);
-      if (!mounted) return;
+      final currentChat = _chatScope;
+      final s = await api.chatStatus(id, sessionId: currentChat);
+      if (!mounted || (_botsEnabled && currentChat != _chatScope)) return;
       final t = s['turn'];
       final busy = t is Map && t['busy'] == true;
       setState(() {
         _applyBackgroundSnapshot(s['backgroundTasks']);
+        _chatQueued = t is Map && t['queued'] == true;
         final u = s['usage'];
         if (u is Map) {
           usageUsed = (u['used'] as num?)?.toInt();
@@ -809,9 +1001,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           computer.setAgentWorking(true);
         }
       });
-      if (!busy && working) {
+      if (!busy && !_chatQueued && working) {
         await _hydrateFromRemote();
-        if (mounted) setState(_endTurn);
+        if (mounted && currentChat == _chatScope) setState(_endTurn);
       }
     } catch (_) {
       // The event stream owns reconnect; polling must not create another listener.
@@ -830,91 +1022,458 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _refreshConversations() async {
     try {
-      final raw = await api.listConversations(id);
+      final botId = _botsEnabled ? _selectedBotId : null;
+      final raw = await api.listConversations(id, botId: botId);
       final active = raw['active'] as String?;
       final list = (raw['conversations'] as List?) ?? const [];
       final remote = list
           .whereType<Map>()
           .map((e) => ConversationMeta.fromJson(Map<String, dynamic>.from(e)))
           .toList();
-      await store.mergeRemote(remote, active: active);
+      await store.mergeRemote(
+        remote,
+        active: active,
+        selectActive: !_botsEnabled,
+      );
       if (mounted) setState(() {});
     } catch (_) {}
   }
 
   Future<void> _openConversation(ConversationMeta item) async {
-    if (working) {
+    if (_switchingBot || (working && !_botsEnabled)) return;
+    final oldBot = selectedBot;
+    setState(() => _switchingBot = true);
+    final oldChat = store.activeSessionId;
+    _eventCancellation?.cancel();
+    await _sub?.cancel();
+    final generation = ++_eventGeneration;
+    _tick?.cancel();
+    try {
+      await store.save(
+        events: events,
+        answered: answered,
+        lastServerId: lastServerId,
+        sessionId: oldChat,
+      );
+      if (oldChat != null) {
+        _botDrafts[oldChat] = (_input.text, List.of(pending));
+      }
+      if (!_botsEnabled) await api.switchConversation(id, item.sessionId);
+      final snap = await store.load(
+        sessionId: item.sessionId,
+        fallbackToLegacy: !_botsEnabled,
+      );
+      if (!mounted || generation != _eventGeneration) return;
+      await store.selectConversation(item.sessionId);
+      if (!mounted || generation != _eventGeneration) return;
+      setState(() {
+        selectedBot =
+            bots.where((bot) => bot.id == item.botId).firstOrNull ??
+            selectedBot;
+        events
+          ..clear()
+          ..addAll(snap.events);
+        answered
+          ..clear()
+          ..addAll(snap.answered);
+        lastServerId = _isServerSeq(snap.lastServerId)
+            ? snap.lastServerId
+            : null;
+        botUnread.remove(item.sessionId);
+        if (_latestBotMessages[item.sessionId] case final last?) {
+          _seenBotMessages[item.sessionId] = last;
+        }
+        _chatQueued = botQueued.contains(item.sessionId);
+        turnStartedAt = null;
+        sending = false;
+        showKickoff = false;
+        lastAssistantText = null;
+        toolCount = 0;
+        final draft = _botDrafts[item.sessionId];
+        _input.text = draft?.$1 ?? '';
+        pending
+          ..clear()
+          ..addAll(draft?.$2 ?? const []);
+        computer.clear();
+        computer.replay(events);
+        _switchingBot = false;
+      });
+      _listen();
+      await _hydrateFromRemote();
+      await _pollTurnStatus();
+    } catch (failure) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Stop the current task before switching conversations.',
-          ),
+      setState(() {
+        error = failure.toString();
+        selectedBot = oldBot;
+        _switchingBot = false;
+      });
+      _listen();
+    } finally {
+      if (mounted && _switchingBot) setState(() => _switchingBot = false);
+    }
+  }
+
+  Future<void> _editBot([BotProfile? bot]) async {
+    final name = TextEditingController(text: bot?.name ?? '');
+    final folder = TextEditingController(text: bot?.defaultFolder ?? '');
+    final instructions = TextEditingController(text: bot?.instructions ?? '');
+    var icon = bot?.icon ?? '🤖';
+    final createKey =
+        'app-${DateTime.now().microsecondsSinceEpoch}-${math.Random.secure().nextInt(1 << 32)}';
+    var busy = false;
+    const icons = [
+      '🤖',
+      '🔎',
+      '🛠️',
+      '🎨',
+      '📝',
+      '📊',
+      '🧠',
+      '🌐',
+      '⚡',
+      '✨',
+      '💻',
+      '🧪',
+      '🔒',
+    ];
+    try {
+      await showAdaptivePanel<void>(
+        context: context,
+        builder: (sheet) => StatefulBuilder(
+          builder: (sheet, redraw) {
+            Future<void> save({bool archive = false}) async {
+              if (busy) return;
+              redraw(() => busy = true);
+              try {
+                if (archive && bot != null) {
+                  await api.updateBot(id, bot.id, {'archived': true});
+                } else {
+                  final input = <String, dynamic>{
+                    'name': name.text.trim(),
+                    if (bot == null) 'createKey': createKey,
+                    'icon': icon,
+                    'instructions': instructions.text.trim(),
+                    if (folder.text.trim().isNotEmpty)
+                      'defaultFolder': folder.text.trim(),
+                  };
+                  if (bot == null) {
+                    await api.createBot(id, input);
+                  } else {
+                    await api.updateBot(id, bot.id, input);
+                  }
+                }
+                if (sheet.mounted) Navigator.pop(sheet);
+                await _refreshBots();
+                if (archive && bot?.id == _selectedBotId && mounted) {
+                  final main = bots.where((entry) => entry.isMain).firstOrNull;
+                  if (main != null) await _selectBot(main);
+                }
+              } catch (failure) {
+                if (sheet.mounted) {
+                  ScaffoldMessenger.of(
+                    sheet,
+                  ).showSnackBar(SnackBar(content: Text(failure.toString())));
+                }
+                if (sheet.mounted) redraw(() => busy = false);
+              }
+            }
+
+            return SafeArea(
+              child: SizedBox(
+                height: (MediaQuery.sizeOf(sheet).height * 0.78).clamp(
+                  360.0,
+                  740.0,
+                ),
+                child: Column(
+                  children: [
+                    ListTile(
+                      title: Text(
+                        bot == null ? 'Create bot' : 'Edit ${bot.name}',
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView(
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          TextField(
+                            controller: name,
+                            maxLength: 80,
+                            decoration: const InputDecoration(
+                              labelText: 'Name',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              for (final preset in icons)
+                                ChoiceChip(
+                                  label: Text(preset),
+                                  selected: icon == preset,
+                                  onSelected: (_) =>
+                                      redraw(() => icon = preset),
+                                ),
+                            ],
+                          ),
+                          TextButton.icon(
+                            icon: const Icon(Icons.image_outlined),
+                            label: const Text(
+                              'Choose icon image (up to 32 KB)',
+                            ),
+                            onPressed: () async {
+                              final picked = await FilePicker.pickFiles();
+                              if (picked.isEmpty) return;
+                              final file = picked.first;
+                              final extension = file.name
+                                  .split('.')
+                                  .last
+                                  .toLowerCase();
+                              final mime = switch (extension) {
+                                'png' => 'png',
+                                'jpg' || 'jpeg' => 'jpeg',
+                                'webp' => 'webp',
+                                _ => '',
+                              };
+                              final bytes = await file.readAsBytes();
+                              if (mime.isEmpty ||
+                                  bytes.isEmpty ||
+                                  bytes.length > 32 * 1024) {
+                                if (sheet.mounted) {
+                                  ScaffoldMessenger.of(sheet).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Choose a PNG, JPEG, or WebP image under 32 KB.',
+                                      ),
+                                    ),
+                                  );
+                                }
+                                return;
+                              }
+                              if (sheet.mounted) {
+                                redraw(
+                                  () => icon =
+                                      'data:image/$mime;base64,${base64Encode(bytes)}',
+                                );
+                              }
+                            },
+                          ),
+                          if (icon.startsWith('data:image/'))
+                            const Text('Custom image selected'),
+                          TextField(
+                            controller: folder,
+                            decoration: InputDecoration(
+                              labelText: 'Default folder',
+                              hintText: bot == null
+                                  ? '/home/user/workspace/bots/<bot-id>'
+                                  : null,
+                            ),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 8),
+                            child: Text(
+                              'Changing the folder affects new conversations only. Folders organize bots; they do not isolate files or credentials.',
+                              style: TextStyle(color: Vc.muted, fontSize: 12),
+                            ),
+                          ),
+                          TextField(
+                            controller: instructions,
+                            maxLines: 7,
+                            maxLength: 16000,
+                            decoration: const InputDecoration(
+                              labelText: 'Custom instructions',
+                              alignLabelWithHint: true,
+                            ),
+                          ),
+                          const Text(
+                            'Instruction edits apply to the next turn, after any running turn finishes.',
+                            style: TextStyle(color: Vc.muted, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          if (bot != null && !bot.isMain)
+                            TextButton(
+                              onPressed: busy
+                                  ? null
+                                  : () => save(archive: true),
+                              child: const Text('Archive'),
+                            ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: busy ? null : () => Navigator.pop(sheet),
+                            child: const Text('Cancel'),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton(
+                            onPressed: busy ? null : save,
+                            child: Text(bot == null ? 'Create' : 'Save'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
       );
+    } finally {
+      name.dispose();
+      folder.dispose();
+      instructions.dispose();
+    }
+  }
+
+  Future<void> _selectBot(BotProfile bot) async {
+    if (_switchingBot ||
+        selectedBot?.id == bot.id &&
+            store.conversations.any(
+              (item) =>
+                  item.sessionId == store.activeSessionId &&
+                  item.botId == bot.id,
+            )) {
       return;
     }
-    Navigator.of(context).maybePop();
-    await store.save(
-      events: events,
-      answered: answered,
-      lastServerId: lastServerId,
-    );
     try {
-      await api.switchConversation(id, item.sessionId);
-    } catch (_) {}
-    final snap = await store.load(sessionId: item.sessionId);
-    if (!mounted) return;
-    setState(() {
-      store.activeSessionId = item.sessionId;
-      events
-        ..clear()
-        ..addAll(snap.events);
-      answered
-        ..clear()
-        ..addAll(snap.answered);
-      lastServerId = _isServerSeq(snap.lastServerId) ? snap.lastServerId : null;
-      computer.replay(events);
-    });
-    if (snap.events.isEmpty) {
-      try {
-        final remote = await api.getConversation(id, item.sessionId);
-        final msgs = (remote['messages'] as List?) ?? const [];
-        if (!mounted) return;
-        setState(() {
-          for (final m in msgs.whereType<Map>()) {
-            final role = '${m['role'] ?? ''}';
-            final content = m['content'];
-            final text = content is String
-                ? content
-                : content == null
-                ? ''
-                : content.toString();
-            if (text.isEmpty) continue;
-            events.add(
-              AppChatEvent({
-                'type': role == 'user' ? 'user' : 'text',
-                'role': role,
-                'text': text,
-                'format': 'markdown',
-                'id': 'resume-${item.sessionId}-${events.length}',
-                'ts': DateTime.now().millisecondsSinceEpoch,
-              }),
-            );
-          }
-        });
-      } catch (_) {}
+      final data = await api.listConversations(id, botId: bot.id);
+      var remote = ((data['conversations'] as List?) ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) =>
+                ConversationMeta.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList();
+      if (remote.isEmpty) {
+        final created = await api.startNewConversation(id, botId: bot.id);
+        remote = ((created['conversations'] as List?) ?? const [])
+            .whereType<Map>()
+            .map(
+              (item) =>
+                  ConversationMeta.fromJson(Map<String, dynamic>.from(item)),
+            )
+            .toList();
+      }
+      await store.mergeRemote(remote, selectActive: false);
+      if (!mounted) return;
+      final selected = remote.where((item) => item.botId == bot.id).firstOrNull;
+      if (selected == null) {
+        throw StateError('No conversation returned for ${bot.name}');
+      }
+      await _openConversation(selected);
+    } catch (failure) {
+      if (mounted) setState(() => error = failure.toString());
     }
+  }
+
+  void _showBots() {
+    unawaited(_refreshBots());
+    showAdaptivePanel<void>(
+      context: context,
+      builder: (sheet) => SafeArea(
+        child: SizedBox(
+          height: (MediaQuery.sizeOf(sheet).height * 0.68).clamp(250.0, 600.0),
+          child: Column(
+            children: [
+              ListTile(
+                title: const Text('Bots'),
+                subtitle: const Text(
+                  'One sandbox · separate chats and default folders',
+                ),
+                trailing: IconButton(
+                  tooltip: 'New bot',
+                  onPressed: () {
+                    Navigator.pop(sheet);
+                    unawaited(_editBot());
+                  },
+                  icon: const Icon(Icons.add),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final bot in bots)
+                      ListTile(
+                        selected: bot.id == _selectedBotId,
+                        leading: CircleAvatar(
+                          child: bot.isImage
+                              ? ClipOval(
+                                  child: Image.memory(
+                                    base64Decode(bot.icon.split(',').last),
+                                    width: 36,
+                                    height: 36,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) =>
+                                        const Icon(Icons.smart_toy_outlined),
+                                  ),
+                                )
+                              : Text(bot.icon),
+                        ),
+                        title: Text(bot.name),
+                        subtitle: Text(
+                          bot.defaultFolder,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (store.conversations.any(
+                              (item) =>
+                                  item.botId == bot.id &&
+                                  botRunning.contains(item.sessionId),
+                            ))
+                              const Icon(Icons.bolt, size: 16, color: Vc.green),
+                            if (store.conversations.any(
+                              (item) =>
+                                  item.botId == bot.id &&
+                                  botUnread.contains(item.sessionId),
+                            ))
+                              const Icon(
+                                Icons.circle,
+                                size: 10,
+                                color: Vc.amber,
+                              ),
+                            IconButton(
+                              tooltip: 'Edit ${bot.name}',
+                              onPressed: () {
+                                Navigator.pop(sheet);
+                                unawaited(_editBot(bot));
+                              },
+                              icon: const Icon(Icons.tune, size: 18),
+                            ),
+                          ],
+                        ),
+                        onTap: () {
+                          Navigator.pop(sheet);
+                          unawaited(_selectBot(bot));
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _showHistory() {
     unawaited(_refreshConversations());
-    showModalBottomSheet<void>(
+    showAdaptivePanel<void>(
       context: context,
-      backgroundColor: Vc.card,
-      showDragHandle: true,
       builder: (ctx) {
-        final items = store.conversations;
+        final items = _botsEnabled
+            ? store.conversations
+                  .where((conversation) => conversation.botId == _selectedBotId)
+                  .toList()
+            : store.conversations;
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -936,7 +1495,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   'Keeps this conversation in history',
                   style: TextStyle(color: Vc.muted, fontSize: 12),
                 ),
-                onTap: () => unawaited(_startNewChat()),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  unawaited(_startNewChat());
+                },
               ),
               if (items.isEmpty)
                 const Padding(
@@ -977,7 +1539,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                               color: Vc.muted,
                             ),
                           ),
-                          onTap: () => _openConversation(c),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _openConversation(c);
+                          },
                         ),
                     ],
                   ),
@@ -1016,15 +1581,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (statusTicks % 4 == 0) unawaited(_pollTurnStatus());
     });
     _syncBrowserStream();
-    unawaited(
-      TaskNotifications.startTurn(
-        instanceId: id,
-        name: instanceName,
-        apiBase: api.baseUrl,
-        token: api.token,
-        since: _isServerSeq(lastServerId) ? lastServerId : null,
-      ),
-    );
+    {
+      unawaited(
+        TaskNotifications.startTurn(
+          instanceId: id,
+          name: _botsEnabled
+              ? '$instanceName · $_selectedBotName'
+              : instanceName,
+          botId: _botScope,
+          chatId: _chatScope,
+          apiBase: api.baseUrl,
+          token: api.token,
+          since: _isServerSeq(lastServerId) ? lastServerId : null,
+        ),
+      );
+    }
   }
 
   void _endTurn({bool error = false, String? body}) {
@@ -1040,14 +1611,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _tick = null;
     _syncBrowserStream();
     _persist();
-    unawaited(
-      TaskNotifications.finishTurn(
-        instanceId: id,
-        name: instanceName,
-        body: body ?? lastAssistantText,
-        error: error,
-      ),
-    );
+    {
+      unawaited(
+        TaskNotifications.finishTurn(
+          instanceId: id,
+          name: instanceName,
+          body: body ?? lastAssistantText,
+          error: error,
+        ),
+      );
+    }
   }
 
   Future<void> _notifyProgress() async {
@@ -1124,17 +1697,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _browserSub?.cancel();
     _tick?.cancel();
     _liveTick?.cancel();
+    _botsRefresh?.cancel();
+    store.cancelScheduledSave();
     _input.dispose();
+    if (DesktopNative.onFilesDropped == _dropFiles) {
+      DesktopNative.onFilesDropped = null;
+    }
+    _inputFocus.dispose();
+    _find.dispose();
+    _findFocus.dispose();
     _scroll.removeListener(_onUserScroll);
     _scroll.dispose();
     computer.dispose();
-    unawaited(
-      store.save(
-        events: events,
-        answered: answered,
-        lastServerId: lastServerId,
-      ),
-    );
+    store
+        .save(events: events, answered: answered, lastServerId: lastServerId)
+        .catchError((Object error, StackTrace stack) {
+          stderr.writeln('Could not save chat history on close: $error');
+        });
     if (turnStartedAt == null) {
       unawaited(TaskNotifications.cancelSilent());
     }
@@ -1218,7 +1797,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _startNewChat() async {
-    if (working) {
+    if (working || _chatQueued) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1227,9 +1806,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
       return;
     }
-    Navigator.of(context).maybePop();
     try {
-      await api.startNewConversation(id);
+      final raw = await api.startNewConversation(id, botId: _botScope);
+      if (_botsEnabled) {
+        final created = '${raw['active'] ?? ''}';
+        if (created.isNotEmpty) {
+          final fresh = ConversationMeta(
+            sessionId: created,
+            botId: _selectedBotId,
+            title: 'New conversation',
+            createdAt: DateTime.now().millisecondsSinceEpoch,
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          );
+          await store.mergeRemote([fresh], selectActive: false);
+          await _openConversation(fresh);
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => error = e.toString());
@@ -1238,8 +1830,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _send([String? text]) async {
     final t = (text ?? _input.text).trim();
-    if (sending) return;
+    if (_switchingBot ||
+        sending ||
+        (_botsEnabled && (working || _chatQueued))) {
+      return;
+    }
     if (t.isEmpty && pending.isEmpty) return;
+    if (_botsEnabled && pending.isEmpty && slashCommandName(t) == 'new') {
+      _input.clear();
+      await _startNewChat();
+      return;
+    }
     if (pending.isEmpty && slashCommandName(t) == 'history') {
       _input.clear();
       _showHistory();
@@ -1285,6 +1886,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       return;
     }
+    final sentBot = _botScope;
+    final sentChat = _chatScope;
     final drafts = List<DraftAttach>.from(pending);
     final cmd = slashCommandName(t);
     final agentTurn =
@@ -1334,11 +1937,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _scrollToEnd(force: true);
     try {
       if (drafts.isEmpty) {
-        await api.sendChat(id, t);
+        await api.sendChat(id, t, botId: sentBot, chatId: sentChat);
       } else {
         await api.uploadFiles(
           id,
           caption: t,
+          botId: sentBot,
+          chatId: sentChat,
           files: [
             for (final f in drafts)
               (name: f.name, bytes: f.bytes, mime: f.mime),
@@ -1346,15 +1951,92 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || sentChat != _chatScope) return;
       setState(() {
         _endTurn(error: true, body: e.toString());
         error = e.toString();
       });
     } finally {
-      if (!agentTurn && mounted) {
+      if (!agentTurn && mounted && sentChat == _chatScope) {
         setState(() => sending = false);
       }
+    }
+  }
+
+  void _dropFiles(List<String> paths) {
+    if (ModalRoute.of(context)?.isCurrent != true ||
+        sending ||
+        paymentBlocked) {
+      return;
+    }
+    unawaited(_attachPaths(paths));
+  }
+
+  Future<void> _attachPaths(List<String> paths) async {
+    try {
+      for (final path in paths.take(12 - pending.length)) {
+        final file = File(path);
+        if (!await file.exists()) continue;
+        if (await file.length() > 50 * 1024 * 1024) {
+          throw StateError('Files must be smaller than 50 MB.');
+        }
+        final bytes = await file.readAsBytes();
+        if (!mounted) return;
+        await _addAttachment(file.uri.pathSegments.last, bytes);
+      }
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    }
+  }
+
+  Future<void> _addAttachment(
+    String name,
+    Uint8List bytes, {
+    String? mime,
+  }) async {
+    if (pending.length >= 12 || bytes.isEmpty || sending) return;
+    final localId = 'draft-${DateTime.now().microsecondsSinceEpoch}';
+    final path = await store.saveMedia(name: name, bytes: bytes, id: localId);
+    if (!mounted || sending) return;
+    setState(
+      () => pending.add(
+        DraftAttach(
+          id: localId,
+          name: name,
+          bytes: bytes,
+          path: path,
+          mime: mime,
+          kind: looksLikeImage(name: name, mime: mime) ? 'photo' : 'document',
+        ),
+      ),
+    );
+    _inputFocus.requestFocus();
+  }
+
+  Future<void> _pasteClipboard() async {
+    try {
+      final text = await Clipboard.getData(Clipboard.kTextPlain);
+      if (!mounted) return;
+      if (text?.text?.isNotEmpty == true) {
+        final selection = _input.selection;
+        final start = selection.isValid ? selection.start : _input.text.length;
+        final end = selection.isValid ? selection.end : start;
+        final value = _input.text.replaceRange(start, end, text!.text!);
+        _input.value = TextEditingValue(
+          text: value,
+          selection: TextSelection.collapsed(offset: start + text.text!.length),
+        );
+        return;
+      }
+      final bytes = await DesktopNative.clipboardImage();
+      if (!mounted || bytes == null) return;
+      await _addAttachment(
+        'clipboard-${DateTime.now().millisecondsSinceEpoch}.png',
+        bytes,
+        mime: 'image/png',
+      );
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
     }
   }
 
@@ -1427,6 +2109,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _sharePath(String path, String name) async {
+    if (isDesktop) {
+      try {
+        final saved = await DesktopNative.saveFile(path, name);
+        if (saved != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Saved ${saved.toFilePath()}')),
+          );
+        }
+      } catch (e) {
+        if (mounted) setState(() => error = e.toString());
+      }
+      return;
+    }
     await SharePlus.instance.share(
       ShareParams(files: [XFile(path)], text: name),
     );
@@ -1435,18 +2130,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _saveImage(String path) async {
     try {
       if (isDesktop) {
-        Directory? dest;
-        try {
-          dest = await getDownloadsDirectory();
-        } catch (_) {}
-        dest ??= await getApplicationDocumentsDirectory();
-        final name = File(path).uri.pathSegments.last;
-        final out = '${dest.path}/$name';
-        await File(path).copy(out);
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Saved $out')));
+        final saved = await DesktopNative.saveFile(
+          path,
+          File(path).uri.pathSegments.last,
+        );
+        if (saved != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Saved ${saved.toFilePath()}')),
+          );
+        }
         return;
       }
       final ok = await Gal.requestAccess();
@@ -1471,6 +2163,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final path = ev.localPath;
     if (path == null || !File(path).existsSync()) return;
     try {
+      if (isDesktop) {
+        final saved = await DesktopNative.saveFile(
+          path,
+          ev.name ?? File(path).uri.pathSegments.last,
+          mime: ev.mime,
+        );
+        if (saved != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Saved ${saved.toFilePath()}')),
+          );
+        }
+        return;
+      }
       Directory? dest;
       try {
         dest = await getDownloadsDirectory();
@@ -1682,10 +2387,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _commands() {
-    showModalBottomSheet(
+    showAdaptivePanel<void>(
       context: context,
-      backgroundColor: Vc.card,
-      isScrollControlled: true,
       builder: (ctx) {
         var q = '';
         return StatefulBuilder(
@@ -2248,6 +2951,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _openComputer() {
+    if (isDesktop) {
+      setState(() => _desktopComputer = !_desktopComputer);
+      _syncBrowserStream();
+      return;
+    }
     if (_computerOpen) return;
     _computerOpen = true;
     _syncBrowserStream();
@@ -2419,19 +3127,392 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _stopTask() async {
+    if (!working && !sending && !_chatQueued) return;
+    try {
+      await api.stopChat(id, botId: _botScope, chatId: _chatScope);
+      if (mounted) {
+        setState(() {
+          _chatQueued = false;
+          _endTurn(body: 'Task stopped.');
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    }
+  }
+
+  void _showFind() {
+    setState(() => _findOpen = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _findFocus.requestFocus();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final cliInfo = CliVersion.fromJson(cli, runtime: runtime.apiValue);
     final updateReady = cliInfo.updateAvailable && !hideCliUpdate;
     final palette = showCommandPalette(_input.text);
+    final transcript = Stack(
+      children: [
+        Column(
+          children: [
+            if (isDesktop && _findOpen)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: TextField(
+                  controller: _find,
+                  focusNode: _findFocus,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: 'Find in conversation…',
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    suffixIcon: IconButton(
+                      tooltip: 'Close search',
+                      onPressed: () => setState(() {
+                        _findOpen = false;
+                        _find.clear();
+                      }),
+                      icon: const Icon(Icons.close, size: 18),
+                    ),
+                  ),
+                ),
+              ),
+            if (updateReady)
+              CliUpdateNote(
+                info: cliInfo,
+                busy: sending || working,
+                onUpdate: () => unawaited(_runCliUpdate()),
+                onDismiss: () => unawaited(_dismissCliUpdate()),
+              ),
+            if (reconnecting) const ReconnectBar(),
+            if (_chatQueued)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: Text(
+                  'Queued in this sandbox · this bot will start when a slot is free',
+                  style: TextStyle(color: Vc.amber, fontSize: 12),
+                ),
+              ),
+            if (backgroundTasks.isNotEmpty)
+              BackgroundTasksBar(tasks: backgroundTasks.values.toList()),
+            if (error != null)
+              ErrorBanner(
+                message: error!,
+                onRetry: _boot,
+                onDismiss: () => setState(() => error = null),
+              ),
+            Expanded(
+              child: paymentBlocked
+                  ? EmptyState(
+                      icon: Icons.lock_outline,
+                      title: 'Subscription needed',
+                      detail:
+                          'Renew this instance to keep chatting with the sandbox.',
+                    )
+                  : events.isEmpty && !connecting && !showKickoff
+                  ? const EmptyState(
+                      icon: Icons.chat_bubble_outline,
+                      title: 'What should we work on?',
+                      detail:
+                          'Ask anything. Attach a file or type / for commands.',
+                    )
+                  : Builder(
+                      builder: (ctx) {
+                        final query = _findOpen
+                            ? _find.text.trim().toLowerCase()
+                            : '';
+                        final groups = _grouped()
+                            .where(
+                              (batch) =>
+                                  query.isEmpty ||
+                                  batch.any(
+                                    (event) => event.text
+                                        .toLowerCase()
+                                        .contains(query),
+                                  ),
+                            )
+                            .toList();
+                        if (groups.isEmpty && query.isNotEmpty) {
+                          return const Center(
+                            child: Text(
+                              'No matching messages',
+                              style: TextStyle(color: Vc.muted),
+                            ),
+                          );
+                        }
+                        return ListView.builder(
+                          controller: _scroll,
+                          reverse: true,
+                          padding: const EdgeInsets.only(bottom: 8, top: 8),
+                          itemCount: groups.length,
+                          itemBuilder: (ctx, i) {
+                            final logical = groups.length - 1 - i;
+                            final batch = groups[logical];
+                            if (batch.first.type == 'tool') {
+                              final lastGroup = logical == groups.length - 1;
+                              return ToolFold(
+                                tools: batch,
+                                expanded: working && lastGroup,
+                              );
+                            }
+                            return _bubble(batch.first);
+                          },
+                        );
+                      },
+                    ),
+            ),
+            if (pending.isNotEmpty)
+              DraftTray(
+                items: pending,
+                onRemove: (f) => setState(() => pending.remove(f)),
+                onOpen: _openDraft,
+              ),
+            if (palette) _commandOverlay(),
+            if (paymentBlocked)
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: FilledButton(
+                    onPressed: () => context.push(
+                      '/billing',
+                      extra: BillingArgs(instanceId: id),
+                    ),
+                    child: const Text('Renew subscription'),
+                  ),
+                ),
+              )
+            else
+              SafeArea(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (!isDesktop)
+                      ListenableBuilder(
+                        listenable: computer,
+                        builder: (context, _) => ComputerBar(
+                          state: computer,
+                          title: _computerTaskTitle,
+                          onOpen: _openComputer,
+                        ),
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if ((working || showKickoff) &&
+                              !events.any(
+                                (e) =>
+                                    e.type == 'progress' &&
+                                    e.text.trim().isNotEmpty,
+                              ))
+                            const Padding(
+                              padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
+                              child: Text(
+                                'Thinking…',
+                                style: TextStyle(
+                                  color: Vc.muted,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Vc.elevated,
+                              borderRadius: BorderRadius.circular(
+                                isDesktop ? 10 : 26,
+                              ),
+                              border: Border.all(color: Vc.cardBorder),
+                            ),
+                            padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                IconButton(
+                                  tooltip: 'Attach',
+                                  onPressed: sending ? null : _attach,
+                                  icon: const Icon(
+                                    Icons.add,
+                                    color: Vc.muted,
+                                    size: 22,
+                                  ),
+                                ),
+                                Expanded(
+                                  child: DesktopComposerKeys(
+                                    controller: _input,
+                                    onSend: () => _send(),
+                                    onPaste: _pasteClipboard,
+                                    child: TextField(
+                                      controller: _input,
+                                      focusNode: _inputFocus,
+                                      minLines: 1,
+                                      maxLines: 6,
+                                      textInputAction: TextInputAction.newline,
+                                      decoration: const InputDecoration(
+                                        hintText: 'Message',
+                                        border: InputBorder.none,
+                                        enabledBorder: InputBorder.none,
+                                        focusedBorder: InputBorder.none,
+                                        filled: false,
+                                        contentPadding: EdgeInsets.fromLTRB(
+                                          0,
+                                          10,
+                                          8,
+                                          10,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (isDesktop &&
+                                    (working || sending || _chatQueued))
+                                  IconButton(
+                                    tooltip: 'Stop task (Ctrl+.)',
+                                    onPressed: _stopTask,
+                                    icon: const Icon(
+                                      Icons.stop_circle_outlined,
+                                      color: Vc.red,
+                                    ),
+                                  ),
+                                IconButton(
+                                  tooltip: 'Commands (Ctrl+K)',
+                                  onPressed: _commands,
+                                  icon: const Icon(
+                                    Icons.alternate_email,
+                                    color: Vc.muted,
+                                    size: 20,
+                                  ),
+                                ),
+                                Material(
+                                  color:
+                                      sending ||
+                                          (_input.text.trim().isEmpty &&
+                                              pending.isEmpty)
+                                      ? Vc.card
+                                      : Colors.white,
+                                  shape: const CircleBorder(),
+                                  child: IconButton(
+                                    tooltip: isDesktop
+                                        ? 'Send (Enter)'
+                                        : 'Send',
+                                    onPressed:
+                                        sending ||
+                                            (_botsEnabled &&
+                                                (working || _chatQueued)) ||
+                                            (_input.text.trim().isEmpty &&
+                                                pending.isEmpty)
+                                        ? null
+                                        : () => _send(),
+                                    icon: sending
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Vc.muted,
+                                            ),
+                                          )
+                                        : Icon(
+                                            Icons.arrow_upward_rounded,
+                                            size: 20,
+                                            color:
+                                                sending ||
+                                                    (_input.text
+                                                            .trim()
+                                                            .isEmpty &&
+                                                        pending.isEmpty)
+                                                ? Vc.faint
+                                                : Colors.black,
+                                          ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (isDesktop)
+                            const Padding(
+                              padding: EdgeInsets.fromLTRB(10, 7, 10, 0),
+                              child: Text(
+                                'Enter to send · Shift+Enter for a new line · Ctrl+K for commands',
+                                style: TextStyle(color: Vc.muted, fontSize: 11),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+        if (!pinnedToLatest && events.isNotEmpty)
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 112),
+              child: Material(
+                color: Vc.elevated,
+                borderRadius: BorderRadius.circular(999),
+                elevation: 4,
+                child: InkWell(
+                  onTap: _jumpToLatest,
+                  borderRadius: BorderRadius.circular(999),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.arrow_downward, size: 16, color: Vc.green),
+                        SizedBox(width: 6),
+                        Text(
+                          'Jump to latest',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (connecting && events.isEmpty)
+          BusyOverlay(
+            message: connectLabel,
+            detail: 'Waking the VM and opening the chat inbox',
+          ),
+      ],
+    );
     final body = AppScaffold(
       currentInstanceId: id,
+      fullWidth: true,
+      commands: {
+        DesktopCommand.newChat: working || sending || _chatQueued
+            ? null
+            : _startNewChat,
+        DesktopCommand.history: _showHistory,
+        DesktopCommand.commands: _commands,
+        DesktopCommand.focusComposer: _inputFocus.requestFocus,
+        DesktopCommand.attach: sending ? null : _attach,
+        DesktopCommand.stop: working || sending || _chatQueued
+            ? _stopTask
+            : null,
+        DesktopCommand.computer: _openComputer,
+        DesktopCommand.preview: () => _openPreview(),
+        DesktopCommand.refresh: _catchUp,
+        DesktopCommand.search: _showFind,
+      },
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              instanceName,
+              _botsEnabled ? '$instanceName · $_selectedBotName' : instanceName,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
@@ -2452,7 +3533,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ],
         ),
         actions: [
-          if (_usageText != null)
+          if (_botsEnabled)
+            IconButton(
+              tooltip: 'Bots',
+              onPressed: _showBots,
+              icon: const Icon(Icons.smart_toy_outlined),
+            ),
+          if (isDesktop) ...[
+            IconButton(
+              tooltip: 'New conversation (Ctrl+N)',
+              onPressed: working || sending || _chatQueued
+                  ? null
+                  : _startNewChat,
+              icon: const Icon(Icons.edit_square, size: 19),
+            ),
+            IconButton(
+              tooltip: 'Conversation history (Ctrl+H)',
+              onPressed: _showHistory,
+              icon: const Icon(Icons.history, size: 20),
+            ),
+            IconButton(
+              tooltip: 'Show / hide computer (Ctrl+J)',
+              onPressed: _openComputer,
+              icon: const Icon(Icons.vertical_split_outlined, size: 19),
+            ),
+          ],
+          if (_usageText != null &&
+              (!isDesktop || MediaQuery.sizeOf(context).width >= 1200))
             Padding(
               padding: const EdgeInsets.only(right: 4),
               child: Center(
@@ -2488,261 +3595,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              if (updateReady)
-                CliUpdateNote(
-                  info: cliInfo,
-                  busy: sending || working,
-                  onUpdate: () => unawaited(_runCliUpdate()),
-                  onDismiss: () => unawaited(_dismissCliUpdate()),
-                ),
-              if (reconnecting) const ReconnectBar(),
-              if (backgroundTasks.isNotEmpty)
-                BackgroundTasksBar(tasks: backgroundTasks.values.toList()),
-              if (error != null)
-                ErrorBanner(
-                  message: error!,
-                  onRetry: _boot,
-                  onDismiss: () => setState(() => error = null),
-                ),
-              Expanded(
-                child: paymentBlocked
-                    ? EmptyState(
-                        icon: Icons.lock_outline,
-                        title: 'Subscription needed',
-                        detail:
-                            'Renew this instance to keep chatting with the sandbox.',
-                      )
-                    : events.isEmpty && !connecting && !showKickoff
-                    ? const EmptyState(
-                        icon: Icons.chat_bubble_outline,
-                        title: 'What should we work on?',
-                        detail:
-                            'Ask anything. Attach a file or type / for commands.',
-                      )
-                    : Builder(
-                        builder: (ctx) {
-                          final groups = _grouped();
-                          return ListView.builder(
-                            controller: _scroll,
-                            reverse: true,
-                            padding: const EdgeInsets.only(bottom: 8, top: 8),
-                            itemCount: groups.length,
-                            itemBuilder: (ctx, i) {
-                              final logical = groups.length - 1 - i;
-                              final batch = groups[logical];
-                              if (batch.first.type == 'tool') {
-                                final lastGroup = logical == groups.length - 1;
-                                return ToolFold(
-                                  tools: batch,
-                                  expanded: working && lastGroup,
-                                );
-                              }
-                              return _bubble(batch.first);
-                            },
-                          );
-                        },
-                      ),
-              ),
-              if (pending.isNotEmpty)
-                DraftTray(
-                  items: pending,
-                  onRemove: (f) => setState(() => pending.remove(f)),
-                  onOpen: _openDraft,
-                ),
-              if (palette) _commandOverlay(),
-              if (paymentBlocked)
-                SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: FilledButton(
-                      onPressed: () => context.push(
-                        '/billing',
-                        extra: BillingArgs(instanceId: id),
-                      ),
-                      child: const Text('Renew subscription'),
-                    ),
-                  ),
-                )
-              else
-                SafeArea(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      ListenableBuilder(
-                        listenable: computer,
-                        builder: (context, _) => ComputerBar(
-                          state: computer,
-                          title: _computerTaskTitle,
-                          onOpen: _openComputer,
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if ((working || showKickoff) &&
-                                !events.any(
-                                  (e) =>
-                                      e.type == 'progress' &&
-                                      e.text.trim().isNotEmpty,
-                                ))
-                              const Padding(
-                                padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
-                                child: Text(
-                                  'Thinking…',
-                                  style: TextStyle(
-                                    color: Vc.muted,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Vc.elevated,
-                                borderRadius: BorderRadius.circular(26),
-                                border: Border.all(color: Vc.cardBorder),
-                              ),
-                              padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Attach',
-                                    onPressed: sending ? null : _attach,
-                                    icon: const Icon(
-                                      Icons.add,
-                                      color: Vc.muted,
-                                      size: 22,
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _input,
-                                      minLines: 1,
-                                      maxLines: 6,
-                                      textInputAction: TextInputAction.newline,
-                                      decoration: const InputDecoration(
-                                        hintText: 'Message',
-                                        border: InputBorder.none,
-                                        enabledBorder: InputBorder.none,
-                                        focusedBorder: InputBorder.none,
-                                        filled: false,
-                                        contentPadding: EdgeInsets.fromLTRB(
-                                          0,
-                                          10,
-                                          8,
-                                          10,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Commands',
-                                    onPressed: _commands,
-                                    icon: const Icon(
-                                      Icons.alternate_email,
-                                      color: Vc.muted,
-                                      size: 20,
-                                    ),
-                                  ),
-                                  Material(
-                                    color:
-                                        sending ||
-                                            (_input.text.trim().isEmpty &&
-                                                pending.isEmpty)
-                                        ? Vc.card
-                                        : Colors.white,
-                                    shape: const CircleBorder(),
-                                    child: IconButton(
-                                      onPressed:
-                                          sending ||
-                                              (_input.text.trim().isEmpty &&
-                                                  pending.isEmpty)
-                                          ? null
-                                          : () => _send(),
-                                      icon: sending
-                                          ? const SizedBox(
-                                              width: 16,
-                                              height: 16,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: Vc.muted,
-                                              ),
-                                            )
-                                          : Icon(
-                                              Icons.arrow_upward_rounded,
-                                              size: 20,
-                                              color:
-                                                  sending ||
-                                                      (_input.text
-                                                              .trim()
-                                                              .isEmpty &&
-                                                          pending.isEmpty)
-                                                  ? Vc.faint
-                                                  : Colors.black,
-                                            ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-          if (!pinnedToLatest && events.isNotEmpty)
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 112),
-                child: Material(
-                  color: Vc.elevated,
-                  borderRadius: BorderRadius.circular(999),
-                  elevation: 4,
-                  child: InkWell(
-                    onTap: _jumpToLatest,
-                    borderRadius: BorderRadius.circular(999),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 8,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.arrow_downward, size: 16, color: Vc.green),
-                          SizedBox(width: 6),
-                          Text(
-                            'Jump to latest',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          if (connecting && events.isEmpty)
-            BusyOverlay(
-              message: connectLabel,
-              detail: 'Waking the VM and opening the chat inbox',
-            ),
-        ],
-      ),
+      body: isDesktop
+          ? DesktopChatWorkspace(
+              chat: transcript,
+              computer: computer,
+              showComputer: _desktopComputer,
+              onCloseComputer: _openComputer,
+              onRunCommand: _runComputerCommand,
+              onManualControl: _isSupercharge ? _openBrowserHandoff : null,
+            )
+          : transcript,
     );
     if (isDesktop) return body;
     return WithForegroundTask(child: body);

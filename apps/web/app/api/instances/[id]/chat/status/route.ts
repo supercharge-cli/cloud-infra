@@ -3,12 +3,13 @@ import { proxyInbox, requireChatInstance } from '@/lib/app-chat';
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   const gate = await requireChatInstance(id);
   if (!gate.ok) return gate.response;
   try {
-    const res = await proxyInbox(gate.inst, '/v1/status');
+    const conversation = new URL(req.url).searchParams.get('sessionId');
+    const res = await proxyInbox(gate.inst, conversation ? `/v1/status?sessionId=${encodeURIComponent(conversation)}` : '/v1/status');
     return new NextResponse(await res.text(), {
       status: res.status,
       headers: { 'content-type': 'application/json' },

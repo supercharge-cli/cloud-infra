@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../theme.dart';
+import '../desktop.dart';
 
 class BusyOverlay extends StatelessWidget {
   const BusyOverlay({super.key, required this.message, this.detail});
@@ -30,20 +31,31 @@ class BusyOverlay extends StatelessWidget {
                   const SizedBox(
                     width: 36,
                     height: 36,
-                    child: CircularProgressIndicator(color: Vc.green, strokeWidth: 3),
+                    child: CircularProgressIndicator(
+                      color: Vc.green,
+                      strokeWidth: 3,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     message,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, letterSpacing: -0.2),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      letterSpacing: -0.2,
+                    ),
                   ),
                   if (detail != null) ...[
                     const SizedBox(height: 8),
                     Text(
                       detail!,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Vc.muted, fontSize: 13, height: 1.4),
+                      style: const TextStyle(
+                        color: Vc.muted,
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
                     ),
                   ],
                 ],
@@ -93,7 +105,11 @@ class StatusDot extends StatelessWidget {
         color: c,
         shape: BoxShape.circle,
         boxShadow: [
-          BoxShadow(color: c.withValues(alpha: 0.55), blurRadius: 8, spreadRadius: 0.5),
+          BoxShadow(
+            color: c.withValues(alpha: 0.55),
+            blurRadius: 8,
+            spreadRadius: 0.5,
+          ),
         ],
       ),
     );
@@ -107,7 +123,8 @@ class TypingDots extends StatefulWidget {
   State<TypingDots> createState() => _TypingDotsState();
 }
 
-class _TypingDotsState extends State<TypingDots> with SingleTickerProviderStateMixin {
+class _TypingDotsState extends State<TypingDots>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 900),
@@ -128,8 +145,18 @@ class _TypingDotsState extends State<TypingDots> with SingleTickerProviderStateM
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(widget.label, style: const TextStyle(color: Vc.muted, fontSize: 13)),
-            Text('.' * n, style: const TextStyle(color: Vc.green, fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(
+              widget.label,
+              style: const TextStyle(color: Vc.muted, fontSize: 13),
+            ),
+            Text(
+              '.' * n,
+              style: const TextStyle(
+                color: Vc.green,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ],
         );
       },
@@ -151,11 +178,22 @@ class SectionTitle extends StatelessWidget {
         children: [
           Text(
             text,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, letterSpacing: -0.2),
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+              letterSpacing: -0.2,
+            ),
           ),
           if (subtitle != null) ...[
             const SizedBox(height: 3),
-            Text(subtitle!, style: const TextStyle(color: Vc.faint, fontSize: 12, height: 1.35)),
+            Text(
+              subtitle!,
+              style: const TextStyle(
+                color: Vc.faint,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
           ],
         ],
       ),
@@ -170,21 +208,30 @@ class VcPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       width: double.infinity,
-      padding: padding ?? const EdgeInsets.all(16),
-      decoration: BoxDecoration(
+      child: Material(
         color: Vc.card,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Vc.cardBorder),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(isDesktop ? 8 : 18),
+          side: const BorderSide(color: Vc.cardBorder),
+        ),
+        child: Padding(
+          padding: padding ?? const EdgeInsets.all(16),
+          child: child,
+        ),
       ),
-      child: child,
     );
   }
 }
 
 class ErrorBanner extends StatelessWidget {
-  const ErrorBanner({super.key, required this.message, this.onRetry, this.onDismiss});
+  const ErrorBanner({
+    super.key,
+    required this.message,
+    this.onRetry,
+    this.onDismiss,
+  });
   final String message;
   final VoidCallback? onRetry;
   final VoidCallback? onDismiss;
@@ -195,12 +242,18 @@ class ErrorBanner extends StatelessWidget {
       color: const Color(0xFF450A0A),
       child: ListTile(
         dense: true,
-        title: Text(message, style: const TextStyle(color: Vc.red, fontSize: 13)),
+        title: Text(
+          message,
+          style: const TextStyle(color: Vc.red, fontSize: 13),
+        ),
         trailing: onRetry != null
             ? TextButton(onPressed: onRetry, child: const Text('Retry'))
             : (onDismiss != null
-                ? IconButton(onPressed: onDismiss, icon: const Icon(Icons.close, size: 18, color: Vc.red))
-                : null),
+                  ? IconButton(
+                      onPressed: onDismiss,
+                      icon: const Icon(Icons.close, size: 18, color: Vc.red),
+                    )
+                  : null),
         onTap: onDismiss,
       ),
     );
@@ -208,7 +261,12 @@ class ErrorBanner extends StatelessWidget {
 }
 
 class EmptyState extends StatelessWidget {
-  const EmptyState({super.key, required this.icon, required this.title, this.detail});
+  const EmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.detail,
+  });
   final IconData icon;
   final String title;
   final String? detail;
@@ -233,11 +291,19 @@ class EmptyState extends StatelessWidget {
           Text(
             title,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17, letterSpacing: -0.2),
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 17,
+              letterSpacing: -0.2,
+            ),
           ),
           if (detail != null) ...[
             const SizedBox(height: 8),
-            Text(detail!, textAlign: TextAlign.center, style: const TextStyle(color: Vc.muted, height: 1.45)),
+            Text(
+              detail!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Vc.muted, height: 1.45),
+            ),
           ],
         ],
       ),
@@ -306,7 +372,14 @@ class ControlButton extends StatelessWidget {
                 children: [
                   Icon(icon, size: 20, color: c),
                   const SizedBox(height: 4),
-                  Text(label, style: TextStyle(fontSize: 12, color: c, fontWeight: FontWeight.w600)),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: c,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -349,7 +422,9 @@ class _SecretFieldState extends State<SecretField> {
       decoration: InputDecoration(
         labelText: widget.label,
         hintText: widget.hint,
-        helperText: widget.helper ?? (set ? 'Loaded from sandbox — tap the eye to reveal' : 'Not set'),
+        helperText:
+            widget.helper ??
+            (set ? 'Loaded from sandbox — tap the eye to reveal' : 'Not set'),
         helperMaxLines: 2,
         suffixIcon: SizedBox(
           width: set ? 96 : 48,
@@ -360,15 +435,25 @@ class _SecretFieldState extends State<SecretField> {
                 IconButton(
                   tooltip: 'Copy',
                   onPressed: () {
-                    Clipboard.setData(ClipboardData(text: widget.controller.text));
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+                    Clipboard.setData(
+                      ClipboardData(text: widget.controller.text),
+                    );
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(const SnackBar(content: Text('Copied')));
                   },
                   icon: const Icon(Icons.copy, size: 18, color: Vc.muted),
                 ),
               IconButton(
                 tooltip: hide ? 'Show' : 'Hide',
                 onPressed: () => setState(() => hide = !hide),
-                icon: Icon(hide ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 20, color: Vc.muted),
+                icon: Icon(
+                  hide
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  size: 20,
+                  color: Vc.muted,
+                ),
               ),
             ],
           ),
@@ -388,10 +473,18 @@ class AppPopScope extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Leave Vectra?'),
-        content: const Text('The app will close. Running sandbox tasks keep going in a live notification.'),
+        content: const Text(
+          'The app will close. Running sandbox tasks keep going in a live notification.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Stay')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Close app')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Stay'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Close app'),
+          ),
         ],
       ),
     );

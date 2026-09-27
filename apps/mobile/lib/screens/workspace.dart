@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,9 @@ import 'package:share_plus/share_plus.dart';
 
 import '../api/client.dart';
 import '../api/models.dart';
+import '../desktop.dart';
+import '../desktop/native.dart';
+import '../desktop/shortcuts.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/side_panel.dart';
@@ -30,6 +34,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   bool loading = true;
   String? msg;
   String? overlay;
+  WorkspaceEntry? selected;
+  String? preview;
+  final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+  int _previewGeneration = 0;
 
   VectraClient get api => context.read<SessionController>().client;
   String get id => widget.instanceId;
@@ -40,6 +49,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     unawaited(_load());
   }
 
+  @override
+  void dispose() {
+    _search.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
   String get parent {
     if (path == root) return root;
     final trimmed = path.replaceAll(RegExp(r'/+$'), '');
@@ -48,10 +64,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   Future<void> _load([String? next]) async {
+    _previewGeneration++;
     setState(() {
       loading = true;
       msg = null;
-      if (next != null) path = next;
+      selected = null;
+      preview = null;
+      if (next != null) {
+        path = next;
+        _search.clear();
+      }
     });
     try {
       final list = await api.listWorkspace(id, path: path);
@@ -66,52 +88,79 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     if (mounted) setState(() => loading = false);
   }
 
-  String _join(String name) {
-    if (path.endsWith('/')) return '$path$name';
-    return '$path/$name';
-  }
+  String _join(String name) =>
+      path.endsWith('/') ? '$path$name' : '$path/$name';
 
   Future<void> _open(WorkspaceEntry entry) async {
+    if (overlay != null) return;
     final full = _join(entry.name);
     if (entry.isDir) {
       await _load(full);
       return;
     }
-    setState(() => overlay = 'Opening ${entry.name}…');
+    final generation = ++_previewGeneration;
+    setState(() {
+      selected = entry;
+      preview = null;
+      overlay = 'Opening ${entry.name}…';
+      msg = null;
+    });
     try {
       final content = await api.readWorkspaceFile(id, full);
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => _FilePreview(
-            name: entry.name,
-            path: full,
-            content: content,
-            onDownload: () => _download(entry, content),
-            onShareLink: () => _shareLink(full),
+      if (!mounted || generation != _previewGeneration) return;
+      if (isDesktop && MediaQuery.sizeOf(context).width >= 1050) {
+        setState(() => preview = content);
+      } else {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => Scaffold(
+              appBar: AppBar(
+                title: Text(entry.name),
+                actions: [
+                  IconButton(
+                    tooltip: 'Save file',
+                    onPressed: () => _download(entry, content),
+                    icon: const Icon(Icons.save_alt),
+                  ),
+                  IconButton(
+                    tooltip: 'Copy share link',
+                    onPressed: () => _shareLink(full),
+                    icon: const Icon(Icons.link),
+                  ),
+                ],
+              ),
+              body: _textPreview(content),
+            ),
           ),
-        ),
-      );
+        );
+      }
     } catch (e) {
       if (mounted) setState(() => msg = e.toString());
     }
-    if (mounted) setState(() => overlay = null);
-  }
-
-  Future<File> _writeTemp(String name, String content) async {
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/$name');
-    await file.writeAsString(content);
-    return file;
+    if (mounted && generation == _previewGeneration) {
+      setState(() => overlay = null);
+    }
   }
 
   Future<void> _download(WorkspaceEntry entry, [String? content]) async {
     setState(() => overlay = 'Saving ${entry.name}…');
     try {
-      final text = content ?? await api.readWorkspaceFile(id, _join(entry.name));
-      final file = await _writeTemp(entry.name, text);
-      if (!mounted) return;
-      await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], text: entry.name));
+      final text =
+          content ?? await api.readWorkspaceFile(id, _join(entry.name));
+      final bytes = Uint8List.fromList(utf8.encode(text));
+      if (isDesktop) {
+        final saved = await DesktopNative.saveBytes(bytes, entry.name);
+        if (mounted && saved != null) {
+          setState(() => msg = 'Saved ${saved.toFilePath()}');
+        }
+      } else {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/${DesktopNative.fileName(entry.name)}');
+        await file.writeAsBytes(bytes);
+        await SharePlus.instance.share(
+          ShareParams(files: [XFile(file.path)], text: entry.name),
+        );
+      }
     } catch (e) {
       if (mounted) setState(() => msg = e.toString());
     }
@@ -127,7 +176,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         setState(() => msg = 'Could not create a share link.');
       } else {
         await Clipboard.setData(ClipboardData(text: url));
-        setState(() => msg = 'Share link copied.');
+        if (mounted) setState(() => msg = 'Share link copied.');
       }
     } catch (e) {
       if (mounted) setState(() => msg = e.toString());
@@ -136,10 +185,29 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   Future<void> _exportAll() async {
-    final url = '${api.baseUrl}/api/instances/$id/workspace/export';
-    setState(() => overlay = 'Opening workspace archive…');
+    if (overlay != null) return;
+    setState(() => overlay = 'Preparing workspace archive…');
     try {
-      await SharePlus.instance.share(ShareParams(uri: Uri.parse(url), text: 'Workspace export'));
+      final archive = await api.exportWorkspace(id);
+      if (isDesktop) {
+        final saved = await DesktopNative.saveBytes(
+          Uint8List.fromList(archive.bytes),
+          archive.name,
+          mime: archive.mime,
+        );
+        if (mounted && saved != null) {
+          setState(() => msg = 'Saved ${saved.toFilePath()}');
+        }
+      } else {
+        final dir = await getTemporaryDirectory();
+        final file = File(
+          '${dir.path}/${DesktopNative.fileName(archive.name)}',
+        );
+        await file.writeAsBytes(archive.bytes);
+        await SharePlus.instance.share(
+          ShareParams(files: [XFile(file.path)], text: 'Workspace archive'),
+        );
+      }
     } catch (e) {
       if (mounted) setState(() => msg = e.toString());
     }
@@ -152,122 +220,252 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     return '${(n / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return AppScaffold(
-      currentInstanceId: id,
-      appBar: AppBar(
-        title: const Text('Files'),
-        actions: [
-          IconButton(onPressed: loading ? null : () => _load(), icon: const Icon(Icons.refresh)),
-          IconButton(onPressed: overlay != null ? null : _exportAll, icon: const Icon(Icons.archive_outlined)),
-        ],
+  Widget _textPreview(String text) => Scrollbar(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: SizedBox(
+        width: double.infinity,
+        child: SelectableText(
+          text.isEmpty ? '(empty file)' : text,
+          style: const TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 13,
+            height: 1.5,
+          ),
+        ),
       ),
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              if (msg != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: Text(msg!, style: const TextStyle(color: Vc.green, fontSize: 13)),
-                ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: Row(
-                  children: [
-                    if (path != root)
+    ),
+  );
+
+  Future<void> _contextMenu(
+    WorkspaceEntry entry,
+    TapDownDetails details,
+  ) async {
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        details.globalPosition.dx,
+        details.globalPosition.dy,
+        details.globalPosition.dx,
+        details.globalPosition.dy,
+      ),
+      items: [
+        const PopupMenuItem(value: 'open', child: Text('Open')),
+        if (!entry.isDir)
+          const PopupMenuItem(value: 'save', child: Text('Save as…')),
+        const PopupMenuItem(value: 'copy', child: Text('Copy path')),
+        if (!entry.isDir)
+          const PopupMenuItem(value: 'share', child: Text('Create share link')),
+      ],
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case 'open':
+        await _open(entry);
+      case 'save':
+        await _download(entry);
+      case 'copy':
+        await Clipboard.setData(ClipboardData(text: _join(entry.name)));
+      case 'share':
+        await _shareLink(_join(entry.name));
+    }
+  }
+
+  Widget _fileList() {
+    final query = _search.text.toLowerCase();
+    final visible = entries
+        .where((entry) => entry.name.toLowerCase().contains(query))
+        .toList();
+    if (loading) return const Center(child: CircularProgressIndicator());
+    if (visible.isEmpty) {
+      return Center(
+        child: Text(
+          query.isEmpty ? 'Workspace is empty.' : 'No matching files.',
+          style: const TextStyle(color: Vc.muted),
+        ),
+      );
+    }
+    return ListView.builder(
+      itemCount: visible.length,
+      itemBuilder: (context, index) {
+        final entry = visible[index];
+        return GestureDetector(
+          onSecondaryTapDown: isDesktop
+              ? (details) => _contextMenu(entry, details)
+              : null,
+          child: ListTile(
+            selected: entry.name == selected?.name,
+            selectedTileColor: Vc.green.withValues(alpha: .09),
+            leading: Icon(
+              entry.isDir
+                  ? Icons.folder_outlined
+                  : Icons.insert_drive_file_outlined,
+              size: 21,
+              color: entry.isDir ? Vc.amber : Vc.muted,
+            ),
+            title: Text(
+              entry.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: isDesktop ? 13 : 14),
+            ),
+            subtitle: isDesktop || entry.isDir
+                ? null
+                : Text(_bytes(entry.size)),
+            trailing: entry.isDir
+                ? const Icon(Icons.chevron_right, size: 18)
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isDesktop)
+                        Text(
+                          _bytes(entry.size),
+                          style: const TextStyle(color: Vc.muted, fontSize: 11),
+                        ),
                       IconButton(
-                        onPressed: () => _load(parent),
-                        icon: const Icon(Icons.arrow_upward),
+                        tooltip: 'Save as…',
+                        onPressed: overlay == null
+                            ? () => _download(entry)
+                            : null,
+                        icon: const Icon(Icons.download, size: 18),
                       ),
-                    Expanded(
-                      child: Text(
-                        path,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Vc.muted, fontSize: 12, fontFamily: 'monospace'),
+                    ],
+                  ),
+            onTap: overlay == null ? () => _open(entry) : null,
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => AppScaffold(
+    currentInstanceId: id,
+    fullWidth: true,
+    commands: {
+      DesktopCommand.refresh: overlay == null ? () => _load() : null,
+      DesktopCommand.search: _searchFocus.requestFocus,
+      DesktopCommand.save: selected == null || overlay != null
+          ? null
+          : () => _download(selected!, preview),
+      DesktopCommand.export: overlay == null ? _exportAll : null,
+    },
+    appBar: AppBar(
+      title: const Text('Files'),
+      actions: [
+        IconButton(
+          tooltip: 'Refresh (Ctrl+R)',
+          onPressed: loading ? null : () => _load(),
+          icon: const Icon(Icons.refresh),
+        ),
+        IconButton(
+          tooltip: 'Export workspace (Ctrl+Shift+S)',
+          onPressed: overlay == null ? _exportAll : null,
+          icon: const Icon(Icons.archive_outlined),
+        ),
+      ],
+    ),
+    body: Stack(
+      children: [
+        Column(
+          children: [
+            if (msg != null)
+              ErrorBanner(
+                message: msg!,
+                onDismiss: () => setState(() => msg = null),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Parent folder',
+                    onPressed: path == root || loading
+                        ? null
+                        : () => _load(parent),
+                    icon: const Icon(Icons.arrow_upward, size: 19),
+                  ),
+                  Expanded(
+                    child: SelectableText(
+                      path,
+                      maxLines: 1,
+                      style: const TextStyle(
+                        color: Vc.muted,
+                        fontFamily: 'monospace',
+                        fontSize: 12,
                       ),
                     ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: loading
-                    ? const Center(child: CircularProgressIndicator(color: Vc.green))
-                    : entries.isEmpty
-                        ? const Center(child: Text('Workspace is empty.', style: TextStyle(color: Vc.muted)))
-                        : ListView.builder(
-                            itemCount: entries.length,
-                            itemBuilder: (ctx, i) {
-                              final e = entries[i];
-                              return ListTile(
-                                leading: Icon(e.isDir ? Icons.folder : Icons.insert_drive_file_outlined, color: e.isDir ? Vc.amber : Vc.muted),
-                                title: Text(e.name),
-                                subtitle: e.isDir ? null : Text(_bytes(e.size), style: const TextStyle(color: Vc.muted, fontSize: 12)),
-                                trailing: e.isDir
-                                    ? const Icon(Icons.chevron_right, color: Vc.muted)
-                                    : IconButton(
-                                        tooltip: 'Download',
-                                        onPressed: () => _download(e),
-                                        icon: const Icon(Icons.download),
-                                      ),
-                                onTap: () => unawaited(_open(e)),
-                              );
-                            },
-                          ),
-              ),
-            ],
-          ),
-          if (overlay != null) BusyOverlay(message: overlay!, detail: 'Workspace files'),
-        ],
-      ),
-    );
-  }
-}
-
-class _FilePreview extends StatelessWidget {
-  const _FilePreview({
-    required this.name,
-    required this.path,
-    required this.content,
-    required this.onDownload,
-    required this.onShareLink,
-  });
-  final String name;
-  final String path;
-  final String content;
-  final Future<void> Function() onDownload;
-  final Future<void> Function() onShareLink;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(name),
-        actions: [
-          IconButton(onPressed: () => unawaited(onShareLink()), icon: const Icon(Icons.link)),
-          IconButton(onPressed: () => unawaited(onDownload()), icon: const Icon(Icons.download)),
-        ],
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: Text(path, style: const TextStyle(color: Vc.muted, fontSize: 12, fontFamily: 'monospace')),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: SelectableText(
-                content.isEmpty ? '(empty file)' : content,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.4),
+                  ),
+                ],
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
+            if (isDesktop)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: TextField(
+                  controller: _search,
+                  focusNode: _searchFocus,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    hintText: 'Filter files…',
+                    prefixIcon: Icon(Icons.search, size: 18),
+                  ),
+                ),
+              ),
+            const Divider(height: 1),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  if (!isDesktop || constraints.maxWidth < 800) {
+                    return _fileList();
+                  }
+                  return Row(
+                    children: [
+                      SizedBox(width: 340, child: _fileList()),
+                      const VerticalDivider(width: 1),
+                      Expanded(
+                        child: selected == null
+                            ? const Center(
+                                child: Text(
+                                  'Select a file to preview',
+                                  style: TextStyle(color: Vc.muted),
+                                ),
+                              )
+                            : Column(
+                                children: [
+                                  ListTile(
+                                    title: Text(
+                                      selected!.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    trailing: IconButton(
+                                      tooltip: 'Copy share link',
+                                      onPressed: () =>
+                                          _shareLink(_join(selected!.name)),
+                                      icon: const Icon(Icons.link, size: 18),
+                                    ),
+                                  ),
+                                  const Divider(height: 1),
+                                  Expanded(
+                                    child: preview == null
+                                        ? const Center(
+                                            child: CircularProgressIndicator(),
+                                          )
+                                        : _textPreview(preview!),
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+        if (overlay != null) BusyOverlay(message: overlay!),
+      ],
+    ),
+  );
 }

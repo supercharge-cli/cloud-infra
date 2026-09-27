@@ -2,6 +2,7 @@ import { MongoClient, type Db } from 'mongodb';
 
 let client: MongoClient | null = null;
 let db: Db | null = null;
+let connecting: Promise<Db> | null = null;
 
 /**
  * Normalize Vercel / .env paste mistakes:
@@ -42,6 +43,11 @@ export function resolveMongoDbName(): string {
 
 export async function getDb(): Promise<Db> {
   if (db) return db;
+  if (!connecting) connecting = connectDb().catch((error) => { connecting = null; throw error; });
+  return connecting;
+}
+
+async function connectDb(): Promise<Db> {
   const started = performance.now();
 
   const uri = resolveMongoUri();
@@ -60,11 +66,12 @@ export async function getDb(): Promise<Db> {
   client = new MongoClient(uri);
   await client.connect();
   console.info('[timing] mongodb connect', { ms: Math.round(performance.now() - started) });
-  db = client.db(resolveMongoDbName());
+  const candidate = client.db(resolveMongoDbName());
   const indexStarted = performance.now();
-  await ensureIndexes(db);
+  await ensureIndexes(candidate);
   console.info('[timing] mongodb indexes', { ms: Math.round(performance.now() - indexStarted) });
-  return db;
+  db = candidate;
+  return candidate;
 }
 
 /** Keep bootstrap admin writes off normal authenticated request paths. */
@@ -81,5 +88,13 @@ async function ensureIndexes(database: Db): Promise<void> {
   await database.collection('users').createIndex({ email: 1 }, { unique: true });
   await database.collection('instances').createIndex({ userId: 1, createdAt: -1 });
   await database.collection('instances').createIndex({ id: 1 }, { unique: true });
+  await database.collection('bots').createIndex({ instanceId: 1, id: 1 }, { unique: true });
+  await database.collection('bots').createIndex({ instanceId: 1, createKey: 1 }, {
+    unique: true, partialFilterExpression: { createKey: { $type: 'string' } },
+  });
+  await database.collection('bot_jobs').createIndex({ instanceId: 1, id: 1 }, { unique: true });
+  await database.collection('bot_jobs').createIndex({ instanceId: 1, requestId: 1 }, {
+    unique: true, partialFilterExpression: { requestId: { $type: 'string' } },
+  });
   await database.collection('orders').createIndex({ razorpayOrderId: 1 }, { unique: true, sparse: true });
 }

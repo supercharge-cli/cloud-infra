@@ -93,6 +93,7 @@ export type Instance = {
   daemonPort?: number;
   sessionId: string;
   sandboxId?: string;
+  botCapability?: string;
   status: InstanceStatus;
   aiConfigured: boolean;
   telegramConfigured: boolean;
@@ -287,6 +288,12 @@ export async function setUserRole(
 export async function deleteUserById(userId: string): Promise<boolean> {
   const db = await getDb();
   const r = await db.collection("users").deleteOne({ id: userId });
+  if (r.deletedCount) {
+    await Promise.all([
+      db.collection('bots').deleteMany({ userId }),
+      db.collection('bot_jobs').deleteMany({ userId }),
+    ]);
+  }
   return r.deletedCount > 0;
 }
 
@@ -325,6 +332,12 @@ export async function listInstancesForUser(
 export async function hardDeleteInstance(id: string): Promise<boolean> {
   const db = await getDb();
   const r = await db.collection("instances").deleteOne({ id });
+  if (r.deletedCount) {
+    await Promise.all([
+      db.collection('bots').deleteMany({ instanceId: id }),
+      db.collection('bot_jobs').deleteMany({ instanceId: id }),
+    ]);
+  }
   return r.deletedCount > 0;
 }
 
@@ -340,12 +353,17 @@ export async function reassignInstance(
   const next: Instance = {
     ...prev,
     userId: newUserId,
+    ...(prev.runtime === "supercharge" ? { botCapability: nanoid(48) } : {}),
     updatedAt: new Date().toISOString(),
   };
   const { _id: _drop, ...clean } = next as Instance & { _id?: unknown };
   await db
     .collection("instances")
     .updateOne({ id: instanceId }, { $set: clean });
+  await Promise.all([
+    db.collection('bots').updateMany({ instanceId }, { $set: { userId: newUserId } }),
+    db.collection('bot_jobs').updateMany({ instanceId }, { $set: { userId: newUserId } }),
+  ]);
   return clean as Instance;
 }
 
@@ -473,7 +491,7 @@ export async function listInstances(
 /** Strip secrets before sending instance JSON to the browser. */
 export function publicInstance(inst: Instance): Omit<
   Instance,
-  "telegramBotToken" | "wakeSecret" | "telegramWebhookSecret"
+  "telegramBotToken" | "wakeSecret" | "telegramWebhookSecret" | "botCapability"
 > & {
   hasWakeSecret?: boolean;
   hasTelegramWebhookSecret?: boolean;
@@ -482,6 +500,7 @@ export function publicInstance(inst: Instance): Omit<
     telegramBotToken: _t,
     wakeSecret: _w,
     telegramWebhookSecret: _s,
+    botCapability: _bot,
     _id: _drop,
     ...rest
   } = inst as Instance & {
@@ -502,6 +521,19 @@ export async function getInstance(
   return db.collection<Instance>("instances").findOne({ id, userId });
 }
 
+export async function ensureBotCapability(instance: Instance): Promise<string> {
+  if (instance.botCapability) return instance.botCapability;
+  const db = await getDb();
+  const candidate = nanoid(48);
+  await db.collection<Instance>('instances').updateOne(
+    { id: instance.id, userId: instance.userId, botCapability: { $exists: false } },
+    { $set: { botCapability: candidate } },
+  );
+  const stored = await getInstance(instance.userId, instance.id);
+  if (!stored?.botCapability) throw new Error('Bot capability is unavailable');
+  return stored.botCapability;
+}
+
 export async function createInstanceRecord(input: {
   userId: string;
   name: string;
@@ -520,6 +552,7 @@ export async function createInstanceRecord(input: {
     name: input.name.trim() || "workspace",
     sessionId: input.sessionId,
     sandboxId: input.sandboxId,
+    ...(input.runtime === "supercharge" ? { botCapability: nanoid(48) } : {}),
     runtime: input.runtime || "xibecode",
     e2bTemplate:
       input.runtime === "supercharge"
@@ -599,6 +632,12 @@ export async function deleteInstance(
 ): Promise<boolean> {
   const db = await getDb();
   const r = await db.collection("instances").deleteOne({ id, userId });
+  if (r.deletedCount) {
+    await Promise.all([
+      db.collection('bots').deleteMany({ instanceId: id }),
+      db.collection('bot_jobs').deleteMany({ instanceId: id }),
+    ]);
+  }
   return r.deletedCount > 0;
 }
 

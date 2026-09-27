@@ -24,10 +24,15 @@ class Vc {
     systemNavigationBarIconBrightness: Brightness.light,
   );
 
-  static ThemeData dark() {
+  static ThemeData dark({bool desktop = false}) {
     final base = ThemeData(
       brightness: Brightness.dark,
       useMaterial3: true,
+      fontFamily: desktop ? 'Adwaita Sans' : null,
+      fontFamilyFallback: desktop
+          ? const ['Cantarell', 'Noto Sans', 'DejaVu Sans']
+          : null,
+      visualDensity: desktop ? VisualDensity.compact : VisualDensity.standard,
       colorScheme: const ColorScheme.dark(
         primary: green,
         onPrimary: Colors.black,
@@ -39,9 +44,31 @@ class Vc {
     );
     return base.copyWith(
       scaffoldBackgroundColor: bg,
-      splashFactory: InkSparkle.splashFactory,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: bg,
+      splashFactory: desktop
+          ? NoSplash.splashFactory
+          : InkSparkle.splashFactory,
+      hoverColor: Colors.white.withValues(alpha: .06),
+      focusColor: green.withValues(alpha: .16),
+      scrollbarTheme: ScrollbarThemeData(
+        thickness: const WidgetStatePropertyAll(8),
+        radius: const Radius.circular(4),
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.hovered)
+              ? muted
+              : faint.withValues(alpha: .6),
+        ),
+      ),
+      tooltipTheme: const TooltipThemeData(
+        waitDuration: Duration(milliseconds: 400),
+      ),
+      textSelectionTheme: TextSelectionThemeData(
+        cursorColor: greenSoft,
+        selectionColor: green.withValues(alpha: .28),
+        selectionHandleColor: green,
+      ),
+      appBarTheme: AppBarTheme(
+        toolbarHeight: desktop ? 54 : null,
+        backgroundColor: desktop ? surface : bg,
         foregroundColor: Colors.white,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -59,14 +86,16 @@ class Vc {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(desktop ? 8 : 18),
           side: const BorderSide(color: cardBorder),
         ),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: card,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(desktop ? 10 : 20),
+        ),
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: elevated,
@@ -94,17 +123,20 @@ class Vc {
         labelStyle: const TextStyle(color: muted),
         hintStyle: const TextStyle(color: faint),
         helperStyle: const TextStyle(color: faint, fontSize: 12),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: desktop ? 11 : 14,
+        ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(desktop ? 6 : 14),
           borderSide: const BorderSide(color: cardBorder),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(desktop ? 6 : 14),
           borderSide: const BorderSide(color: cardBorder),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(desktop ? 6 : 14),
           borderSide: const BorderSide(color: green, width: 1.4),
         ),
       ),
@@ -116,7 +148,9 @@ class Vc {
           disabledForegroundColor: const Color(0xFF86EFAC),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(desktop ? 6 : 14),
+          ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -124,7 +158,9 @@ class Vc {
           foregroundColor: Colors.white,
           side: const BorderSide(color: cardBorder),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(desktop ? 6 : 14),
+          ),
         ),
       ),
       textButtonTheme: TextButtonThemeData(

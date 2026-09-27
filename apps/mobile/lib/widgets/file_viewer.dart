@@ -17,6 +17,10 @@ import 'package:video_player/video_player.dart';
 import '../files/kinds.dart';
 import '../files/readers.dart';
 import '../theme.dart';
+import '../desktop.dart';
+import '../desktop/native.dart';
+import '../desktop/media_player.dart';
+import '../desktop/shortcuts.dart';
 import 'markdown.dart';
 
 class FileViewerScreen extends StatefulWidget {
@@ -100,6 +104,11 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
       if (!file.existsSync()) {
         throw StateError('File is missing on this device.');
       }
+      if (isDesktop &&
+          (kind == PreviewKind.audio || kind == PreviewKind.video)) {
+        if (mounted) setState(() => loading = false);
+        return;
+      }
       final size = await file.length();
       switch (kind) {
         case PreviewKind.image:
@@ -176,7 +185,10 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
           final bytes = await _readCapped(size, cap: maxHexBytes);
           if (!mounted) return;
           setState(() {
-            text = TextLoad(text: hexDump(bytes, limit: bytes.length), truncated: size > maxHexBytes);
+            text = TextLoad(
+              text: hexDump(bytes, limit: bytes.length),
+              truncated: size > maxHexBytes,
+            );
             loading = false;
           });
       }
@@ -214,12 +226,24 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   }
 
   Future<void> _openExternal() async {
+    if (isDesktop) {
+      try {
+        await DesktopNative.openFile(widget.path);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('$e')));
+        }
+      }
+      return;
+    }
     final result = await OpenFilex.open(widget.path);
     if (!mounted) return;
     if (result.type != ResultType.done) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(result.message)));
     }
   }
 
@@ -228,10 +252,15 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     setState(() => loading = true);
     try {
       final bytes = await file.readAsBytes();
-      final extracted = await compute(_extractNamed, {'bytes': bytes, 'name': item.name});
+      final extracted = await compute(_extractNamed, {
+        'bytes': bytes,
+        'name': item.name,
+      });
       if (extracted == null) throw StateError('Could not extract ${item.name}');
       final tmp = await getTemporaryDirectory();
-      final safe = item.name.replaceAll(RegExp(r'^[\\/]+'), '').replaceAll('..', '_');
+      final safe = item.name
+          .replaceAll(RegExp(r'^[\\/]+'), '')
+          .replaceAll('..', '_');
       final out = File('${tmp.path}/vectra-preview/$safe');
       await out.parent.create(recursive: true);
       await out.writeAsBytes(extracted, flush: true);
@@ -257,63 +286,111 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Vc.bg,
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-            Text(
-              _subtitle(),
-              style: const TextStyle(color: Vc.muted, fontSize: 11, fontWeight: FontWeight.w500),
+    return DesktopCommands(
+      handlers: {
+        DesktopCommand.save:
+            widget.onSave ??
+            () => DesktopNative.saveFile(
+              widget.path,
+              widget.title,
+              mime: widget.mime,
             ),
-          ],
-        ),
-        actions: [
-          if (kind == PreviewKind.pdf && pdfPages != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Center(
-                child: Text(
-                  '${pdfPage + 1} / $pdfPages',
-                  style: const TextStyle(color: Vc.muted, fontSize: 12),
+      },
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): () =>
+              Navigator.maybePop(context),
+          const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): () =>
+              Navigator.maybePop(context),
+        },
+        child: Scaffold(
+          backgroundColor: Vc.bg,
+          appBar: AppBar(
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
+                Text(
+                  _subtitle(),
+                  style: const TextStyle(
+                    color: Vc.muted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
-          IconButton(
-            tooltip: 'Copy',
-            onPressed: _copyable == null
-                ? null
-                : () {
-                    Clipboard.setData(ClipboardData(text: _copyable!));
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
-                  },
-            icon: const Icon(Icons.copy_outlined, size: 20),
+            actions: [
+              if (kind == PreviewKind.pdf && pdfPages != null)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Center(
+                    child: Text(
+                      '${pdfPage + 1} / $pdfPages',
+                      style: const TextStyle(color: Vc.muted, fontSize: 12),
+                    ),
+                  ),
+                ),
+              IconButton(
+                tooltip: 'Copy',
+                onPressed: _copyable == null
+                    ? null
+                    : () {
+                        Clipboard.setData(ClipboardData(text: _copyable!));
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(const SnackBar(content: Text('Copied')));
+                      },
+                icon: const Icon(Icons.copy_outlined, size: 20),
+              ),
+              IconButton(
+                tooltip: 'Open in another app',
+                onPressed: _openExternal,
+                icon: const Icon(Icons.open_in_new, size: 20),
+              ),
+              if (widget.onSave != null)
+                IconButton(
+                  tooltip: 'Save',
+                  onPressed: widget.onSave,
+                  icon: const Icon(Icons.save_alt, size: 20),
+                ),
+              if (widget.onShare != null)
+                IconButton(
+                  tooltip: 'Share',
+                  onPressed: widget.onShare,
+                  icon: const Icon(Icons.share_outlined, size: 20),
+                ),
+            ],
           ),
-          IconButton(
-            tooltip: 'Open in another app',
-            onPressed: _openExternal,
-            icon: const Icon(Icons.open_in_new, size: 20),
-          ),
-          if (widget.onSave != null)
-            IconButton(tooltip: 'Save', onPressed: widget.onSave, icon: const Icon(Icons.save_alt, size: 20)),
-          if (widget.onShare != null)
-            IconButton(tooltip: 'Share', onPressed: widget.onShare, icon: const Icon(Icons.share_outlined, size: 20)),
-        ],
-      ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator(color: Vc.green, strokeWidth: 2))
-          : error != null && parsed == null && text == null && video == null && audio == null
+          body: loading
+              ? const Center(
+                  child: CircularProgressIndicator(
+                    color: Vc.green,
+                    strokeWidth: 2,
+                  ),
+                )
+              : error != null &&
+                    parsed == null &&
+                    text == null &&
+                    video == null &&
+                    audio == null
               ? _ErrorPane(message: '$error', onExternal: _openExternal)
               : _body(),
+        ),
+      ),
     );
   }
 
   String? get _copyable {
     if (text != null) return text!.text;
     if (parsed?.text != null) return parsed!.text;
-    if (parsed?.slides.isNotEmpty == true) return parsed!.slides.join('\n\n---\n\n');
+    if (parsed?.slides.isNotEmpty == true) {
+      return parsed!.slides.join('\n\n---\n\n');
+    }
     return null;
   }
 
@@ -322,9 +399,13 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     try {
       bits.add(formatBytes(file.lengthSync()));
     } catch (_) {}
-    if (parsed?.truncated == true || text?.truncated == true) bits.add('preview');
+    if (parsed?.truncated == true || text?.truncated == true) {
+      bits.add('preview');
+    }
     if (kind == PreviewKind.spreadsheet && parsed?.sheets.isNotEmpty == true) {
-      bits.add('${parsed!.sheets.length} sheet${parsed!.sheets.length == 1 ? '' : 's'}');
+      bits.add(
+        '${parsed!.sheets.length} sheet${parsed!.sheets.length == 1 ? '' : 's'}',
+      );
     }
     if (kind == PreviewKind.slides && parsed?.slides.isNotEmpty == true) {
       bits.add('${slideIndex + 1} / ${parsed!.slides.length}');
@@ -333,7 +414,17 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   }
 
   Widget _body() {
-    if (error != null && (kind == PreviewKind.document || kind == PreviewKind.spreadsheet || kind == PreviewKind.slides)) {
+    if (isDesktop && (kind == PreviewKind.audio || kind == PreviewKind.video)) {
+      return DesktopMediaPlayer(
+        path: widget.path,
+        title: widget.title,
+        audio: kind == PreviewKind.audio,
+      );
+    }
+    if (error != null &&
+        (kind == PreviewKind.document ||
+            kind == PreviewKind.spreadsheet ||
+            kind == PreviewKind.slides)) {
       return _ErrorPane(message: '$error', onExternal: _openExternal);
     }
     switch (kind) {
@@ -343,9 +434,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         return InteractiveViewer(
           minScale: 0.4,
           maxScale: 8,
-          child: Center(
-            child: SvgPicture.file(file, fit: BoxFit.contain),
-          ),
+          child: Center(child: SvgPicture.file(file, fit: BoxFit.contain)),
         );
       case PreviewKind.pdf:
         if (error != null) {
@@ -374,8 +463,13 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
       case PreviewKind.binary:
         return _CodePane(
           data: text?.text ?? '',
-          language: kind == PreviewKind.json ? 'json' : highlightLanguage(widget.title),
-          highlight: kind != PreviewKind.binary && kind != PreviewKind.text && (text?.text.length ?? 0) <= maxHighlightBytes,
+          language: kind == PreviewKind.json
+              ? 'json'
+              : highlightLanguage(widget.title),
+          highlight:
+              kind != PreviewKind.binary &&
+              kind != PreviewKind.text &&
+              (text?.text.length ?? 0) <= maxHighlightBytes,
         );
       case PreviewKind.csv:
       case PreviewKind.spreadsheet:
@@ -505,7 +599,12 @@ class _CodePane extends StatelessWidget {
                 child: Text(
                   '${i + 1}',
                   textAlign: TextAlign.right,
-                  style: const TextStyle(color: Vc.faint, fontSize: 11, fontFamily: 'monospace', height: 1.45),
+                  style: const TextStyle(
+                    color: Vc.faint,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    height: 1.45,
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -529,7 +628,11 @@ class _CodePane extends StatelessWidget {
 }
 
 class _SheetPane extends StatelessWidget {
-  const _SheetPane({required this.sheets, required this.index, required this.onIndex});
+  const _SheetPane({
+    required this.sheets,
+    required this.index,
+    required this.onIndex,
+  });
   final List<SheetData> sheets;
   final int index;
   final ValueChanged<int> onIndex;
@@ -553,7 +656,10 @@ class _SheetPane extends StatelessWidget {
               itemBuilder: (ctx, n) {
                 final selected = n == i;
                 return ChoiceChip(
-                  label: Text(sheets[n].name, style: const TextStyle(fontSize: 12)),
+                  label: Text(
+                    sheets[n].name,
+                    style: const TextStyle(fontSize: 12),
+                  ),
                   selected: selected,
                   onSelected: (_) => onIndex(n),
                   selectedColor: Vc.green.withValues(alpha: 0.2),
@@ -566,7 +672,10 @@ class _SheetPane extends StatelessWidget {
             padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('Showing a preview of this sheet.', style: TextStyle(color: Vc.muted, fontSize: 11)),
+              child: Text(
+                'Showing a preview of this sheet.',
+                style: TextStyle(color: Vc.muted, fontSize: 11),
+              ),
             ),
           ),
         Expanded(
@@ -584,8 +693,15 @@ class _SheetPane extends StatelessWidget {
                           final header = r == 0;
                           return DecoratedBox(
                             decoration: BoxDecoration(
-                              color: header ? Vc.elevated : (r.isEven ? Vc.card : Vc.surface),
-                              border: const Border(bottom: BorderSide(color: Vc.cardBorder, width: 0.6)),
+                              color: header
+                                  ? Vc.elevated
+                                  : (r.isEven ? Vc.card : Vc.surface),
+                              border: const Border(
+                                bottom: BorderSide(
+                                  color: Vc.cardBorder,
+                                  width: 0.6,
+                                ),
+                              ),
                             ),
                             child: Row(
                               children: [
@@ -593,15 +709,22 @@ class _SheetPane extends StatelessWidget {
                                   SizedBox(
                                     width: 148,
                                     child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 8,
+                                      ),
                                       child: Text(
                                         c < row.length ? row[c] : '',
                                         maxLines: 3,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
                                           fontSize: 12,
-                                          fontWeight: header ? FontWeight.w700 : FontWeight.w400,
-                                          color: header ? Colors.white : const Color(0xFFE4E4E7),
+                                          fontWeight: header
+                                              ? FontWeight.w700
+                                              : FontWeight.w400,
+                                          color: header
+                                              ? Colors.white
+                                              : const Color(0xFFE4E4E7),
                                         ),
                                       ),
                                     ),
@@ -621,7 +744,11 @@ class _SheetPane extends StatelessWidget {
 }
 
 class _SlidesPane extends StatelessWidget {
-  const _SlidesPane({required this.slides, required this.index, required this.onIndex});
+  const _SlidesPane({
+    required this.slides,
+    required this.index,
+    required this.onIndex,
+  });
   final List<String> slides;
   final int index;
   final ValueChanged<int> onIndex;
@@ -641,11 +768,21 @@ class _SlidesPane extends StatelessWidget {
               return ListView(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
                 children: [
-                  Text('Slide ${n + 1}', style: const TextStyle(color: Vc.green, fontWeight: FontWeight.w700)),
+                  Text(
+                    'Slide ${n + 1}',
+                    style: const TextStyle(
+                      color: Vc.green,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   SelectableText(
                     slides[n],
-                    style: const TextStyle(fontSize: 16, height: 1.45, color: Colors.white),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      height: 1.45,
+                      color: Colors.white,
+                    ),
                   ),
                 ],
               );
@@ -680,7 +817,11 @@ class _SlidesPane extends StatelessWidget {
 }
 
 class _ZipPane extends StatelessWidget {
-  const _ZipPane({required this.entries, required this.truncated, required this.onOpen});
+  const _ZipPane({
+    required this.entries,
+    required this.truncated,
+    required this.onOpen,
+  });
   final List<ZipItem> entries;
   final bool truncated;
   final ValueChanged<ZipItem> onOpen;
@@ -695,21 +836,34 @@ class _ZipPane extends StatelessWidget {
             padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('Showing the first files in this archive.', style: TextStyle(color: Vc.muted, fontSize: 11)),
+              child: Text(
+                'Showing the first files in this archive.',
+                style: TextStyle(color: Vc.muted, fontSize: 11),
+              ),
             ),
           ),
         Expanded(
           child: ListView.separated(
             padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
             itemCount: entries.length,
-            separatorBuilder: (_, _) => const Divider(height: 1, color: Vc.cardBorder),
+            separatorBuilder: (_, _) =>
+                const Divider(height: 1, color: Vc.cardBorder),
             itemBuilder: (ctx, i) {
               final e = entries[i];
               final kind = detectPreviewKind(name: e.name);
               return ListTile(
                 dense: true,
-                leading: Icon(e.isFile ? kindIcon(kind) : Icons.folder_outlined, color: Vc.green, size: 20),
-                title: Text(e.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
+                leading: Icon(
+                  e.isFile ? kindIcon(kind) : Icons.folder_outlined,
+                  color: Vc.green,
+                  size: 20,
+                ),
+                title: Text(
+                  e.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13),
+                ),
                 subtitle: Text(
                   e.isFile ? formatBytes(e.size) : 'folder',
                   style: const TextStyle(color: Vc.muted, fontSize: 11),
@@ -756,12 +910,18 @@ class _VideoPaneState extends State<_VideoPane> {
       color: Colors.black,
       child: Center(
         child: AspectRatio(
-          aspectRatio: controller.value.aspectRatio == 0 ? 16 / 9 : controller.value.aspectRatio,
+          aspectRatio: controller.value.aspectRatio == 0
+              ? 16 / 9
+              : controller.value.aspectRatio,
           child: Stack(
             alignment: Alignment.bottomCenter,
             children: [
               VideoPlayer(controller),
-              VideoProgressIndicator(controller, allowScrubbing: true, colors: const VideoProgressColors(playedColor: Vc.green)),
+              VideoProgressIndicator(
+                controller,
+                allowScrubbing: true,
+                colors: const VideoProgressColors(playedColor: Vc.green),
+              ),
               Center(
                 child: IconButton(
                   iconSize: 56,
@@ -773,7 +933,11 @@ class _VideoPaneState extends State<_VideoPane> {
                       controller.play();
                     }
                   },
-                  icon: Icon(controller.value.isPlaying ? Icons.pause_circle : Icons.play_circle),
+                  icon: Icon(
+                    controller.value.isPlaying
+                        ? Icons.pause_circle
+                        : Icons.play_circle,
+                  ),
                 ),
               ),
             ],
@@ -810,7 +974,11 @@ class _AudioPane extends StatelessWidget {
         children: [
           const Icon(Icons.audiotrack, size: 72, color: Vc.green),
           const SizedBox(height: 16),
-          Text(title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 24),
           Slider(
             value: position.inMilliseconds.clamp(0, total).toDouble(),
@@ -821,8 +989,14 @@ class _AudioPane extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(_fmtDur(position), style: const TextStyle(color: Vc.muted, fontSize: 12)),
-              Text(_fmtDur(duration), style: const TextStyle(color: Vc.muted, fontSize: 12)),
+              Text(
+                _fmtDur(position),
+                style: const TextStyle(color: Vc.muted, fontSize: 12),
+              ),
+              Text(
+                _fmtDur(duration),
+                style: const TextStyle(color: Vc.muted, fontSize: 12),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -851,7 +1025,11 @@ class _ErrorPane extends StatelessWidget {
         children: [
           const Icon(Icons.visibility_off_outlined, color: Vc.muted, size: 40),
           const SizedBox(height: 12),
-          Text(message, textAlign: TextAlign.center, style: const TextStyle(color: Vc.muted)),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Vc.muted),
+          ),
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: onExternal,
@@ -870,7 +1048,9 @@ class _EmptyPane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(child: Text(message, style: const TextStyle(color: Vc.muted)));
+    return Center(
+      child: Text(message, style: const TextStyle(color: Vc.muted)),
+    );
   }
 }
 

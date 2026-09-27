@@ -7,6 +7,8 @@ import '../api/models.dart';
 import '../chat/draft.dart';
 import '../files/kinds.dart';
 import '../theme.dart';
+import '../screens/preview.dart';
+import '../desktop.dart';
 
 class ChatImageBubble extends StatelessWidget {
   const ChatImageBubble({
@@ -33,7 +35,12 @@ class ChatImageBubble extends StatelessWidget {
     final mine = event.isUser;
     Widget image;
     if (path != null && File(path).existsSync()) {
-      image = Image.file(File(path), fit: BoxFit.cover, width: 240, height: 240);
+      image = Image.file(
+        File(path),
+        fit: BoxFit.cover,
+        width: 240,
+        height: 240,
+      );
     } else if (url != null && url.startsWith('http')) {
       image = Image.network(url, fit: BoxFit.cover, width: 240, height: 180);
     } else {
@@ -44,7 +51,10 @@ class ChatImageBubble extends StatelessWidget {
               ? const CircularProgressIndicator(color: Vc.green, strokeWidth: 2)
               : IconButton(
                   onPressed: onRetry,
-                  icon: const Icon(Icons.broken_image_outlined, color: Vc.muted),
+                  icon: const Icon(
+                    Icons.broken_image_outlined,
+                    color: Vc.muted,
+                  ),
                 ),
         ),
       );
@@ -69,11 +79,7 @@ class ChatImageBubble extends StatelessWidget {
           children: [
             GestureDetector(
               onTap: onOpen,
-              child: SizedBox(
-                width: 240,
-                height: 180,
-                child: image,
-              ),
+              child: SizedBox(width: 240, height: 180, child: image),
             ),
             if (event.text.isNotEmpty)
               Padding(
@@ -93,7 +99,7 @@ class ChatImageBubble extends StatelessWidget {
                   TextButton.icon(
                     onPressed: onShare,
                     icon: const Icon(Icons.share_outlined, size: 16),
-                    label: const Text('Share'),
+                    label: Text(isDesktop ? 'Save as…' : 'Share'),
                   ),
                 ],
               ),
@@ -124,8 +130,13 @@ class ChatFileCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mine = event.isUser;
-    final ready = event.localPath != null && File(event.localPath!).existsSync();
-    final kind = detectPreviewKind(name: event.name, mime: event.mime, kind: event.kind);
+    final ready =
+        event.localPath != null && File(event.localPath!).existsSync();
+    final kind = detectPreviewKind(
+      name: event.name,
+      mime: event.mime,
+      kind: event.kind,
+    );
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -155,7 +166,11 @@ class ChatFileCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(event.name ?? 'file', maxLines: 2, overflow: TextOverflow.ellipsis),
+                        Text(
+                          event.name ?? 'file',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         Text(
                           [
                             kindLabel(kind),
@@ -188,25 +203,45 @@ class ChatFileCard extends StatelessWidget {
                       ? const SizedBox(
                           width: 14,
                           height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Vc.green),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Vc.green,
+                          ),
                         )
                       : const Icon(Icons.visibility_outlined, size: 16),
                   label: Text(downloading ? 'Loading' : 'Open'),
                 ),
                 TextButton.icon(
                   onPressed: downloading ? null : onDownload,
-                  icon: Icon(ready ? Icons.download_done : Icons.download, size: 16),
-                  label: Text(ready ? 'Saved' : 'Save'),
+                  icon: Icon(
+                    ready ? Icons.download_done : Icons.download,
+                    size: 16,
+                  ),
+                  label: const Text('Save'),
                 ),
                 TextButton.icon(
                   onPressed: ready ? onShare : null,
                   icon: const Icon(Icons.share_outlined, size: 16),
-                  label: const Text('Share'),
+                  label: Text(isDesktop ? 'Save as…' : 'Share'),
                 ),
                 if (event.url != null && event.url!.startsWith('http'))
                   TextButton.icon(
                     onPressed: () {
-                      launchUrl(Uri.parse(event.url!), mode: LaunchMode.externalApplication);
+                      if (isDesktop) {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => PreviewBrowserScreen(
+                              instanceName: event.name ?? 'File link',
+                              initialUrl: event.url!,
+                            ),
+                          ),
+                        );
+                      } else {
+                        launchUrl(
+                          Uri.parse(event.url!),
+                          mode: LaunchMode.externalApplication,
+                        );
+                      }
                     },
                     icon: const Icon(Icons.link, size: 16),
                     label: const Text('Link'),
@@ -266,9 +301,15 @@ class _ToolFoldState extends State<ToolFold> {
           ),
           title: Text(
             n == 1 ? 'Used 1 tool' : 'Used $n tools',
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Vc.muted),
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: Vc.muted,
+            ),
           ),
-          children: [for (final ev in widget.tools) ToolLine(event: ev, inset: true)],
+          children: [
+            for (final ev in widget.tools) ToolLine(event: ev, inset: true),
+          ],
         ),
       ),
     );
@@ -326,7 +367,11 @@ class ToolLine extends StatelessWidget {
                   if (event.name != null && event.name!.isNotEmpty)
                     Text(
                       event.name!,
-                      style: const TextStyle(fontSize: 10, color: Vc.faint, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Vc.faint,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                 ],
               ),
@@ -375,7 +420,10 @@ class ImageLightbox extends StatelessWidget {
         title: Text(title, style: const TextStyle(fontSize: 14)),
         actions: [
           IconButton(onPressed: onSave, icon: const Icon(Icons.save_alt)),
-          IconButton(onPressed: onShare, icon: const Icon(Icons.share_outlined)),
+          IconButton(
+            onPressed: onShare,
+            icon: const Icon(Icons.share_outlined),
+          ),
         ],
       ),
       body: Center(
@@ -390,7 +438,12 @@ class ImageLightbox extends StatelessWidget {
 }
 
 class DraftTray extends StatelessWidget {
-  const DraftTray({super.key, required this.items, required this.onRemove, this.onOpen});
+  const DraftTray({
+    super.key,
+    required this.items,
+    required this.onRemove,
+    this.onOpen,
+  });
   final List<DraftAttach> items;
   final ValueChanged<DraftAttach> onRemove;
   final ValueChanged<DraftAttach>? onOpen;
@@ -422,31 +475,43 @@ class DraftTray extends StatelessWidget {
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: f.isImage && f.path != null && File(f.path!).existsSync()
+                        child:
+                            f.isImage &&
+                                f.path != null &&
+                                File(f.path!).existsSync()
                             ? Image.file(File(f.path!), fit: BoxFit.cover)
                             : f.isImage
-                                ? Image.memory(f.bytes, fit: BoxFit.cover)
-                                : Padding(
-                                    padding: const EdgeInsets.all(6),
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          kindIcon(detectPreviewKind(name: f.name, mime: f.mime, kind: f.kind)),
-                                          color: Vc.green,
-                                          size: 22,
+                            ? Image.memory(f.bytes, fit: BoxFit.cover)
+                            : Padding(
+                                padding: const EdgeInsets.all(6),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      kindIcon(
+                                        detectPreviewKind(
+                                          name: f.name,
+                                          mime: f.mime,
+                                          kind: f.kind,
                                         ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          f.name,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
-                                          style: const TextStyle(fontSize: 9, color: Vc.muted),
-                                        ),
-                                      ],
+                                      ),
+                                      color: Vc.green,
+                                      size: 22,
                                     ),
-                                  ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      f.name,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        color: Vc.muted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                       ),
                     ),
                   ),
@@ -459,8 +524,15 @@ class DraftTray extends StatelessWidget {
                     child: Container(
                       width: 22,
                       height: 22,
-                      decoration: const BoxDecoration(color: Color(0xFF27272A), shape: BoxShape.circle),
-                      child: const Icon(Icons.close, size: 14, color: Colors.white),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF27272A),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.close,
+                        size: 14,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 ),
@@ -472,4 +544,3 @@ class DraftTray extends StatelessWidget {
     );
   }
 }
-

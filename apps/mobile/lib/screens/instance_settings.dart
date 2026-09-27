@@ -13,6 +13,8 @@ import '../api/providers.dart';
 import '../chat/cli_update.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import '../desktop.dart';
+import '../desktop/shortcuts.dart';
 import '../widgets/side_panel.dart';
 import '../widgets/ui.dart';
 
@@ -30,7 +32,11 @@ const _providers = [
 ];
 
 class InstanceSettingsScreen extends StatefulWidget {
-  const InstanceSettingsScreen({super.key, required this.instanceId, this.instance});
+  const InstanceSettingsScreen({
+    super.key,
+    required this.instanceId,
+    this.instance,
+  });
   final String instanceId;
   final CloudInstance? instance;
 
@@ -75,6 +81,26 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   String apiFormat = 'chat_completions';
   String? runtimeMismatchMessage;
   final history = <ExecResult>[];
+  final _sections = <String, GlobalKey>{
+    'Overview': GlobalKey(),
+    'AI': GlobalKey(),
+    'Channels': GlobalKey(),
+    'Pairing': GlobalKey(),
+    'CLI': GlobalKey(),
+    'Logs': GlobalKey(),
+    'Shell': GlobalKey(),
+  };
+
+  void _jumpSection(String name) {
+    final target = _sections[name]?.currentContext;
+    if (target != null) {
+      Scrollable.ensureVisible(
+        target,
+        duration: const Duration(milliseconds: 180),
+        alignment: .03,
+      );
+    }
+  }
 
   VectraClient get api => context.read<SessionController>().client;
   String get id => widget.instanceId;
@@ -138,7 +164,9 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   Map<String, String> _snapshotCurrent() {
     return {
       'id': _slotId(provider.text, baseUrl.text),
-      'provider': provider.text.trim().isEmpty ? 'custom' : provider.text.trim(),
+      'provider': provider.text.trim().isEmpty
+          ? 'custom'
+          : provider.text.trim(),
       'model': model.text.trim(),
       'baseUrl': (baseUrl.text.trim().isEmpty
           ? stockBaseUrl(provider.text)
@@ -148,7 +176,10 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     };
   }
 
-  List<Map<String, String>> _upsertLocal(List<Map<String, String>> list, Map<String, String> slot) {
+  List<Map<String, String>> _upsertLocal(
+    List<Map<String, String>> list,
+    Map<String, String> slot,
+  ) {
     final id = slot['id'] ?? '';
     final idx = list.indexWhere((s) => s['id'] == id);
     if (idx < 0) return [...list, slot];
@@ -156,7 +187,9 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     final next = {
       ...prev,
       ...slot,
-      'apiKey': (slot['apiKey'] ?? '').isNotEmpty ? slot['apiKey']! : (prev['apiKey'] ?? ''),
+      'apiKey': (slot['apiKey'] ?? '').isNotEmpty
+          ? slot['apiKey']!
+          : (prev['apiKey'] ?? ''),
     };
     return [for (var i = 0; i < list.length; i++) i == idx ? next : list[i]];
   }
@@ -198,7 +231,9 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       provider.text = v;
       apiFormat = defaultApiWireFormat(v);
       if (v.trim().toLowerCase() == 'custom') {
-        final known = providerDefaults.values.any((d) => urlsMatch(baseUrl.text, d.baseUrl));
+        final known = providerDefaults.values.any(
+          (d) => urlsMatch(baseUrl.text, d.baseUrl),
+        );
         if (known) baseUrl.clear();
         modelChoices = const [];
         return;
@@ -214,10 +249,15 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     if (id.isEmpty || id.toLowerCase() == 'custom') return;
     try {
       final live = await api.modelsForProvider(id);
-      if (!mounted || provider.text.trim().toLowerCase() != id.toLowerCase()) return;
+      if (!mounted || provider.text.trim().toLowerCase() != id.toLowerCase()) {
+        return;
+      }
       if (live.isEmpty) return;
       setState(() {
-        modelChoices = mergeCatalogModels([live, modelsForProviderDetailed(id)]);
+        modelChoices = mergeCatalogModels([
+          live,
+          modelsForProviderDetailed(id),
+        ]);
         final ids = modelChoices.map((m) => m.id).toSet();
         if (model.text.trim().isEmpty || !ids.contains(model.text.trim())) {
           final def = lookupProviderDefault(id)?.defaultModel ?? '';
@@ -243,8 +283,13 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       model.text = slot['model'] ?? '';
       baseUrl.text = slot['baseUrl'] ?? '';
       if ((slot['apiKey'] ?? '').isNotEmpty) apiKey.text = slot['apiKey']!;
-      apiFormat = normalizeApiWireFormat(slot['format'], slot['provider'] ?? '');
-      if (baseUrl.text.trim().isEmpty) _applyProviderDefaults(provider.text, fillModel: false);
+      apiFormat = normalizeApiWireFormat(
+        slot['format'],
+        slot['provider'] ?? '',
+      );
+      if (baseUrl.text.trim().isEmpty) {
+        _applyProviderDefaults(provider.text, fillModel: false);
+      }
       _swapModelList(provider.text, resetModel: model.text.trim().isEmpty);
     });
     unawaited(_refreshLiveModels(provider.text));
@@ -252,7 +297,9 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
 
   void _removeSavedProvider(String id) {
     final next = savedProviders.where((s) => s['id'] != id).toList();
-    final fill = _slotId(provider.text, baseUrl.text) == id && next.isNotEmpty ? next.first : null;
+    final fill = _slotId(provider.text, baseUrl.text) == id && next.isNotEmpty
+        ? next.first
+        : null;
     setState(() {
       savedProviders = next;
       if (fill != null) {
@@ -295,10 +342,18 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       final data = jsonDecode(raw);
       if (data is! Map) return;
       if (apiKey.text.trim().isEmpty) apiKey.text = '${data['apiKey'] ?? ''}';
-      if (telegram.text.trim().isEmpty) telegram.text = '${data['telegramBotToken'] ?? ''}';
-      if (discord.text.trim().isEmpty) discord.text = '${data['discordBotToken'] ?? ''}';
-      if (slackBot.text.trim().isEmpty) slackBot.text = '${data['slackBotToken'] ?? ''}';
-      if (slackApp.text.trim().isEmpty) slackApp.text = '${data['slackAppToken'] ?? ''}';
+      if (telegram.text.trim().isEmpty) {
+        telegram.text = '${data['telegramBotToken'] ?? ''}';
+      }
+      if (discord.text.trim().isEmpty) {
+        discord.text = '${data['discordBotToken'] ?? ''}';
+      }
+      if (slackBot.text.trim().isEmpty) {
+        slackBot.text = '${data['slackBotToken'] ?? ''}';
+      }
+      if (slackApp.text.trim().isEmpty) {
+        slackApp.text = '${data['slackAppToken'] ?? ''}';
+      }
     } catch (_) {}
   }
 
@@ -324,7 +379,10 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       model.text = _str(sandbox, stored, 'model');
       baseUrl.text = _str(sandbox, stored, 'baseUrl');
       if (baseUrl.text.trim().isEmpty || model.text.trim().isEmpty) {
-        _applyProviderDefaults(provider.text, fillModel: model.text.trim().isEmpty);
+        _applyProviderDefaults(
+          provider.text,
+          fillModel: model.text.trim().isEmpty,
+        );
       }
       apiKey.text = _str(sandbox, stored, 'apiKey');
       final rawSaved = sandbox['savedProviders'] ?? stored['savedProviders'];
@@ -339,7 +397,10 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
             'baseUrl': '${item['baseUrl'] ?? ''}',
             'apiKey': '${item['apiKey'] ?? ''}',
             'apiKeyHint': '${item['apiKeyHint'] ?? ''}',
-            'format': normalizeApiWireFormat('${item['format'] ?? ''}', '${item['provider'] ?? ''}'),
+            'format': normalizeApiWireFormat(
+              '${item['format'] ?? ''}',
+              '${item['provider'] ?? ''}',
+            ),
           });
         }
       }
@@ -347,7 +408,8 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       discord.text = _str(sandbox, stored, 'discordBotToken');
       slackBot.text = _str(sandbox, stored, 'slackBotToken');
       slackApp.text = _str(sandbox, stored, 'slackAppToken');
-      allowAll = sandbox['allowAllUsers'] == true || stored['allowAllUsers'] == true;
+      allowAll =
+          sandbox['allowAllUsers'] == true || stored['allowAllUsers'] == true;
       apiFormat = normalizeApiWireFormat(
         _str(sandbox, stored, 'format'),
         provider.text,
@@ -364,31 +426,55 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       }
       imageApiKey.text = _str(sandbox, stored, 'imageApiKey');
       final fmt = _str(sandbox, stored, 'imageFormat');
-      imageFormat.text = fmt.isEmpty ? imageProviderFormat(imageProvider.text) : fmt;
+      imageFormat.text = fmt.isEmpty
+          ? imageProviderFormat(imageProvider.text)
+          : fmt;
       imageModelChoices = imageModelsForProvider(imageProvider.text);
       await _fillFromCacheIfMissing();
       await _cacheSecrets();
       _swapModelList(provider.text, resetModel: false);
       unawaited(_refreshLiveModels(provider.text));
-      unawaited(api.pairing(id).then((value) {
-        if (mounted) setState(() => pairing = value);
-      }).catchError((_) {}));
-      unawaited(api.cliVersion(id).then((value) async {
-        if (!mounted) return;
-        setState(() => cli = value);
-        final info = CliVersion.fromJson(value, runtime: inst?.runtime.apiValue);
-        if (info.updateAvailable) {
-          await CliUpdateOffer.notifyOnce(instanceId: id, name: inst?.name ?? 'workspace', info: info);
-        }
-      }).catchError((_) {}));
-      unawaited(api.pollinationsStatus().then((st) {
-        if (mounted) {
-          setState(() {
-            byopReady = st['configured'] == true;
-            byopConnected = st['connected'] == true;
-          });
-        }
-      }).catchError((_) {}));
+      unawaited(
+        api
+            .pairing(id)
+            .then((value) {
+              if (mounted) setState(() => pairing = value);
+            })
+            .catchError((_) {}),
+      );
+      unawaited(
+        api
+            .cliVersion(id)
+            .then((value) async {
+              if (!mounted) return;
+              setState(() => cli = value);
+              final info = CliVersion.fromJson(
+                value,
+                runtime: inst?.runtime.apiValue,
+              );
+              if (info.updateAvailable) {
+                await CliUpdateOffer.notifyOnce(
+                  instanceId: id,
+                  name: inst?.name ?? 'workspace',
+                  info: info,
+                );
+              }
+            })
+            .catchError((_) {}),
+      );
+      unawaited(
+        api
+            .pollinationsStatus()
+            .then((st) {
+              if (mounted) {
+                setState(() {
+                  byopReady = st['configured'] == true;
+                  byopConnected = st['connected'] == true;
+                });
+              }
+            })
+            .catchError((_) {}),
+      );
     } catch (e) {
       msg = e.toString();
       await _fillFromCacheIfMissing();
@@ -421,14 +507,18 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
         'model': model.text.trim(),
         'format': apiFormat,
         'baseUrl': (baseUrl.text.trim().isEmpty)
-                ? stockBaseUrl(provider.text)
-                : baseUrl.text.trim(),
+            ? stockBaseUrl(provider.text)
+            : baseUrl.text.trim(),
         'savedProviders': _upsertLocal(savedProviders, _snapshotCurrent()),
         if (apiKey.text.trim().isNotEmpty) 'apiKey': apiKey.text.trim(),
-        if (telegram.text.trim().isNotEmpty) 'telegramBotToken': telegram.text.trim(),
-        if (discord.text.trim().isNotEmpty) 'discordBotToken': discord.text.trim(),
-        if (slackBot.text.trim().isNotEmpty) 'slackBotToken': slackBot.text.trim(),
-        if (slackApp.text.trim().isNotEmpty) 'slackAppToken': slackApp.text.trim(),
+        if (telegram.text.trim().isNotEmpty)
+          'telegramBotToken': telegram.text.trim(),
+        if (discord.text.trim().isNotEmpty)
+          'discordBotToken': discord.text.trim(),
+        if (slackBot.text.trim().isNotEmpty)
+          'slackBotToken': slackBot.text.trim(),
+        if (slackApp.text.trim().isNotEmpty)
+          'slackAppToken': slackApp.text.trim(),
         'allowAllUsers': allowAll,
         'restart': true,
         if (inst?.runtime == AgentRuntime.supercharge) ...{
@@ -440,7 +530,8 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
           'imageFormat': imageFormat.text.trim().isEmpty
               ? imageProviderFormat(imageProvider.text)
               : imageFormat.text.trim(),
-          if (imageApiKey.text.trim().isNotEmpty) 'imageApiKey': imageApiKey.text.trim(),
+          if (imageApiKey.text.trim().isNotEmpty)
+            'imageApiKey': imageApiKey.text.trim(),
         },
       });
       msg = 'Saved. Daemon restarted.';
@@ -449,21 +540,22 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
   }
 
   Future<void> _wake() => _run('Waking sandbox…', () async {
-        await api.wake(id);
-        msg = 'Wake sent.';
-      });
+    await api.wake(id);
+    msg = 'Wake sent.';
+  });
 
   Future<void> _restart() => _run('Restarting daemon…', () async {
-        await api.restart(id);
-        msg = 'Daemon restarted.';
-      });
+    await api.restart(id);
+    msg = 'Daemon restarted.';
+  });
 
   Future<void> _logs(String source) => _run('Pulling $source logs…', () async {
-        final data = await api.logs(id, source: source);
-        logsSource = source;
-        logs = '${data['text'] ?? ((data['logs'] as List?) ?? const []).join('\n')}';
-        if (logs.trim().isEmpty) logs = '(no log output)';
-      });
+    final data = await api.logs(id, source: source);
+    logsSource = source;
+    logs =
+        '${data['text'] ?? ((data['logs'] as List?) ?? const []).join('\n')}';
+    if (logs.trim().isEmpty) logs = '(no log output)';
+  });
 
   Future<void> _exec() async {
     final command = cmd.text.trim();
@@ -486,7 +578,8 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     });
   }
 
-  Future<void> _updateCli() => _run('Updating CLI (install + restart)…', () async {
+  Future<void> _updateCli() =>
+      _run('Updating CLI (install + restart)…', () async {
         await api.cliUpdate(id);
         cli = await api.cliVersion(id);
         msg = 'CLI update finished.';
@@ -501,8 +594,14 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
           'Creates a new machine from the latest template. Chat, files, API keys, and settings come with you. node_modules is skipped. Preview links change. About 1–3 minutes.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Move')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Move'),
+          ),
         ],
       ),
     );
@@ -522,12 +621,20 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Destroy sandbox?'),
-        content: const Text('This cannot be undone. Chat history on this phone stays, the cloud box is gone.'),
+        content: const Text(
+          'This cannot be undone. Chat history on this phone stays, the cloud box is gone.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Vc.red, foregroundColor: Colors.black),
+            style: FilledButton.styleFrom(
+              backgroundColor: Vc.red,
+              foregroundColor: Colors.black,
+            ),
             child: const Text('Destroy'),
           ),
         ],
@@ -545,10 +652,14 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     String bit(String label, String flag, String hintKey, String value) {
       if (value.trim().isNotEmpty) {
         final v = value.trim();
-        final shown = v.length < 10 ? '••••' : '${v.substring(0, 4)}…${v.substring(v.length - 4)}';
+        final shown = v.length < 10
+            ? '••••'
+            : '${v.substring(0, 4)}…${v.substring(v.length - 4)}';
         return '$label $shown';
       }
-      if (sandbox[flag] == true) return '$label ${_hint(sandbox, hintKey, flag)}';
+      if (sandbox[flag] == true) {
+        return '$label ${_hint(sandbox, hintKey, flag)}';
+      }
       return '$label —';
     }
 
@@ -571,7 +682,8 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     final pending = (root?['pending'] as List?) ?? const [];
     final approved = (root?['approved'] as List?) ?? const [];
     final updateReady = cli?['updateAvailable'] == true;
-    final okMsg = msg != null &&
+    final okMsg =
+        msg != null &&
         (msg!.startsWith('Saved') ||
             msg!.contains('OK') ||
             msg!.contains('finished') ||
@@ -580,10 +692,26 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
             msg!.contains('updated'));
     return AppScaffold(
       currentInstanceId: id,
+      commands: {
+        DesktopCommand.refresh: overlay == null ? _load : null,
+        DesktopCommand.save: overlay == null && !loading ? _save : null,
+      },
       appBar: AppBar(
         title: Text(inst?.name ?? 'Control'),
         actions: [
-          IconButton(onPressed: overlay == null ? _load : null, icon: const Icon(Icons.refresh)),
+          if (isDesktop)
+            Center(
+              child: FilledButton.icon(
+                onPressed: overlay == null && !loading ? _save : null,
+                icon: const Icon(Icons.save_outlined, size: 17),
+                label: const Text('Save configuration'),
+              ),
+            ),
+          IconButton(
+            tooltip: 'Refresh (Ctrl+R)',
+            onPressed: overlay == null ? _load : null,
+            icon: const Icon(Icons.refresh),
+          ),
           IconButton(
             onPressed: () => context.push('/instance/$id/files', extra: inst),
             icon: const Icon(Icons.folder_open),
@@ -595,616 +723,928 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
         ],
       ),
       body: Stack(
-          children: [
-            if (loading)
-              const Center(child: CircularProgressIndicator(color: Vc.green))
-            else
-              ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 36),
-                children: [
-                  if (msg != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(msg!, style: TextStyle(color: okMsg ? Vc.green : Vc.red)),
+        children: [
+          if (loading)
+            const Center(child: CircularProgressIndicator(color: Vc.green))
+          else
+            Column(
+              children: [
+                if (isDesktop)
+                  Container(
+                    decoration: const BoxDecoration(
+                      border: Border(bottom: BorderSide(color: Vc.cardBorder)),
                     ),
-                  VcPanel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            StatusDot(inst?.displayState ?? 'unknown'),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                inst?.name ?? id,
-                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, letterSpacing: -0.3),
-                              ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          for (final section in _sections.keys)
+                            TextButton(
+                              onPressed: loading
+                                  ? null
+                                  : () => _jumpSection(section),
+                              child: Text(section),
                             ),
-                            StateChip(inst?.displayState ?? 'unknown'),
-                            if (inst?.isFree == true) ...[
-                              const SizedBox(width: 6),
-                              const StateChip('free'),
-                            ],
-                            if (inst?.pastDue == true) ...[
-                              const SizedBox(width: 6),
-                              const StateChip('past_due'),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Agent image: ${inst?.runtimeLabel ?? AgentRuntime.xibecode.label}',
-                          style: TextStyle(
-                            color: inst?.runtime == AgentRuntime.supercharge ? Vc.green : Vc.muted,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (runtimeMismatchMessage != null) ...[
-                          const SizedBox(height: 10),
-                          Text(
-                            runtimeMismatchMessage!,
-                            style: const TextStyle(color: Vc.amber, fontSize: 12, height: 1.35),
-                          ),
                         ],
-                        const SizedBox(height: 14),
-                        Row(
-                          children: [
-                            ControlButton(icon: Icons.bolt, label: 'Wake', onTap: _wake, color: Vc.amber),
-                            const SizedBox(width: 8),
-                            ControlButton(icon: Icons.restart_alt, label: 'Restart', onTap: _restart, color: Vc.blue),
-                            const SizedBox(width: 8),
-                            ControlButton(icon: Icons.delete_outline, label: 'Destroy', onTap: _destroy, color: Vc.red),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (updateReady) ...[
-                    const SizedBox(height: 12),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: CliUpdateNote(
-                        info: CliVersion.fromJson(cli, runtime: inst?.runtime.apiValue),
-                        busy: overlay != null,
-                        onUpdate: _updateCli,
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 20),
-                  const SectionTitle(
-                    'AI',
-                    subtitle: 'Pollinations is the default — cheapest huge model list. Connect once and chat.',
                   ),
-                  VcPanel(
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 36),
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF102216),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Vc.green.withValues(alpha: 0.35)),
+                        if (msg != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Text(
+                              msg!,
+                              style: TextStyle(
+                                color: okMsg ? Vc.green : Vc.red,
+                              ),
+                            ),
                           ),
-                          child: const Column(
+                        VcPanel(
+                          key: _sections['Overview'],
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              Row(
+                                children: [
+                                  StatusDot(inst?.displayState ?? 'unknown'),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      inst?.name ?? id,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 18,
+                                        letterSpacing: -0.3,
+                                      ),
+                                    ),
+                                  ),
+                                  StateChip(inst?.displayState ?? 'unknown'),
+                                  if (inst?.isFree == true) ...[
+                                    const SizedBox(width: 6),
+                                    const StateChip('free'),
+                                  ],
+                                  if (inst?.pastDue == true) ...[
+                                    const SizedBox(width: 6),
+                                    const StateChip('past_due'),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 8),
                               Text(
-                                'BEST · CHEAPEST',
+                                'Agent image: ${inst?.runtimeLabel ?? AgentRuntime.xibecode.label}',
                                 style: TextStyle(
-                                  color: Vc.greenSoft,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.2,
+                                  color:
+                                      inst?.runtime == AgentRuntime.supercharge
+                                      ? Vc.green
+                                      : Vc.muted,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              SizedBox(height: 4),
-                              Text(
-                                'Pollinations — GPT / Claude / Gemini / Qwen and more on one cheap Pollen balance. Use this unless you already pay another API.',
-                                style: TextStyle(color: Colors.white, height: 1.4, fontSize: 13),
+                              if (runtimeMismatchMessage != null) ...[
+                                const SizedBox(height: 10),
+                                Text(
+                                  runtimeMismatchMessage!,
+                                  style: const TextStyle(
+                                    color: Vc.amber,
+                                    fontSize: 12,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  ControlButton(
+                                    icon: Icons.bolt,
+                                    label: 'Wake',
+                                    onTap: _wake,
+                                    color: Vc.amber,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ControlButton(
+                                    icon: Icons.restart_alt,
+                                    label: 'Restart',
+                                    onTap: _restart,
+                                    color: Vc.blue,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ControlButton(
+                                    icon: Icons.delete_outline,
+                                    label: 'Destroy',
+                                    onTap: _destroy,
+                                    color: Vc.red,
+                                  ),
+                                ],
                               ),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: provider,
-                          decoration: InputDecoration(
-                            labelText: 'Provider',
-                            suffixIcon: PopupMenuButton<String>(
-                              icon: const Icon(Icons.expand_more, color: Vc.muted),
-                              onSelected: _onProviderPicked,
-                              itemBuilder: (_) => [
-                                for (final p in _providers)
-                                  PopupMenuItem(
-                                    value: p,
-                                    child: Text(p == 'pollinations' ? 'pollinations  ·  recommended' : p),
-                                  ),
-                              ],
+                        if (updateReady) ...[
+                          const SizedBox(height: 12),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: CliUpdateNote(
+                              info: CliVersion.fromJson(
+                                cli,
+                                runtime: inst?.runtime.apiValue,
+                              ),
+                              busy: overlay != null,
+                              onUpdate: _updateCli,
                             ),
                           ),
-                          onChanged: (v) {
-                            if (lookupProviderDefault(v) != null) {
-                              _onProviderPicked(v);
-                            } else {
-                              setState(() {});
-                            }
-                          },
+                        ],
+                        const SizedBox(height: 20),
+                        SectionTitle(
+                          'AI',
+                          key: _sections['AI'],
+                          subtitle:
+                              'Pollinations is the default — cheapest huge model list. Connect once and chat.',
                         ),
-                        const SizedBox(height: 10),
-                        Autocomplete<CatalogModel>(
-                          initialValue: TextEditingValue(text: _modelLabel),
-                          displayStringForOption: (m) => m.name,
-                          optionsBuilder: (text) {
-                            final q = text.text.trim();
-                            final hits = modelChoices.where((m) => m.matches(q)).take(80);
-                            if (q.isNotEmpty && !hits.any((m) => m.id == q)) {
-                              return [...hits, CatalogModel(id: q, name: 'Use “$q”')];
-                            }
-                            return hits;
-                          },
-                          onSelected: (m) => setState(() => model.text = m.id),
-                          fieldViewBuilder: (context, controller, focus, onSubmit) {
-                            CatalogModel? current;
-                            for (final m in modelChoices) {
-                              if (m.id == model.text) {
-                                current = m;
-                                break;
-                              }
-                            }
-                            return TextField(
-                              controller: controller,
-                              focusNode: focus,
-                              decoration: InputDecoration(
-                                labelText: 'Model',
-                                hintText: current?.name ?? 'Search by name or type an id',
-                                helperText: model.text.trim().isEmpty ? null : model.text,
-                                helperMaxLines: 1,
+                        VcPanel(
+                          child: Column(
+                            children: [
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  10,
+                                  12,
+                                  10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF102216),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Vc.green.withValues(alpha: 0.35),
+                                  ),
+                                ),
+                                child: const Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'BEST · CHEAPEST',
+                                      style: TextStyle(
+                                        color: Vc.greenSoft,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.2,
+                                      ),
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Pollinations — GPT / Claude / Gemini / Qwen and more on one cheap Pollen balance. Use this unless you already pay another API.',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        height: 1.4,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              onChanged: (v) {
-                                CatalogModel? hit;
-                                final needle = v.trim().toLowerCase();
-                                for (final m in modelChoices) {
-                                  if (m.name.toLowerCase() == needle || m.id == v.trim()) {
-                                    hit = m;
-                                    break;
-                                  }
-                                }
-                                model.text = hit?.id ?? v.trim();
-                              },
-                              onSubmitted: (_) => onSubmit(),
-                            );
-                          },
-                          optionsViewBuilder: (context, onSelected, options) {
-                            return Align(
-                              alignment: Alignment.topLeft,
-                              child: Material(
-                                color: Vc.card,
-                                elevation: 8,
-                                borderRadius: BorderRadius.circular(12),
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(maxHeight: 280, minWidth: 280),
-                                  child: ListView(
-                                    padding: EdgeInsets.zero,
-                                    shrinkWrap: true,
-                                    children: [
-                                      for (final m in options)
-                                        ListTile(
-                                          dense: true,
-                                          title: Text(m.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                          subtitle: m.name == m.id
-                                              ? null
-                                              : Text(m.id, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 11)),
-                                          onTap: () => onSelected(m),
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: provider,
+                                decoration: InputDecoration(
+                                  labelText: 'Provider',
+                                  suffixIcon: PopupMenuButton<String>(
+                                    icon: const Icon(
+                                      Icons.expand_more,
+                                      color: Vc.muted,
+                                    ),
+                                    onSelected: _onProviderPicked,
+                                    itemBuilder: (_) => [
+                                      for (final p in _providers)
+                                        PopupMenuItem(
+                                          value: p,
+                                          child: Text(
+                                            p == 'pollinations'
+                                                ? 'pollinations  ·  recommended'
+                                                : p,
+                                          ),
                                         ),
                                     ],
                                   ),
                                 ),
+                                onChanged: (v) {
+                                  if (lookupProviderDefault(v) != null) {
+                                    _onProviderPicked(v);
+                                  } else {
+                                    setState(() {});
+                                  }
+                                },
                               ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                        InputDecorator(
-                          decoration: const InputDecoration(
-                            labelText: 'API format',
-                            helperText: '/format in chat also changes this',
-                            helperMaxLines: 1,
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              isExpanded: true,
-                              value: apiFormat,
-                              items: [
-                                for (final entry in apiWireFormats.entries)
-                                  DropdownMenuItem(
-                                    value: entry.key,
-                                    child: Text(entry.value, overflow: TextOverflow.ellipsis),
+                              const SizedBox(height: 10),
+                              Autocomplete<CatalogModel>(
+                                initialValue: TextEditingValue(
+                                  text: _modelLabel,
+                                ),
+                                displayStringForOption: (m) => m.name,
+                                optionsBuilder: (text) {
+                                  final q = text.text.trim();
+                                  final hits = modelChoices
+                                      .where((m) => m.matches(q))
+                                      .take(80);
+                                  if (q.isNotEmpty &&
+                                      !hits.any((m) => m.id == q)) {
+                                    return [
+                                      ...hits,
+                                      CatalogModel(id: q, name: 'Use “$q”'),
+                                    ];
+                                  }
+                                  return hits;
+                                },
+                                onSelected: (m) =>
+                                    setState(() => model.text = m.id),
+                                fieldViewBuilder:
+                                    (context, controller, focus, onSubmit) {
+                                      CatalogModel? current;
+                                      for (final m in modelChoices) {
+                                        if (m.id == model.text) {
+                                          current = m;
+                                          break;
+                                        }
+                                      }
+                                      return TextField(
+                                        controller: controller,
+                                        focusNode: focus,
+                                        decoration: InputDecoration(
+                                          labelText: 'Model',
+                                          hintText:
+                                              current?.name ??
+                                              'Search by name or type an id',
+                                          helperText: model.text.trim().isEmpty
+                                              ? null
+                                              : model.text,
+                                          helperMaxLines: 1,
+                                        ),
+                                        onChanged: (v) {
+                                          CatalogModel? hit;
+                                          final needle = v.trim().toLowerCase();
+                                          for (final m in modelChoices) {
+                                            if (m.name.toLowerCase() ==
+                                                    needle ||
+                                                m.id == v.trim()) {
+                                              hit = m;
+                                              break;
+                                            }
+                                          }
+                                          model.text = hit?.id ?? v.trim();
+                                        },
+                                        onSubmitted: (_) => onSubmit(),
+                                      );
+                                    },
+                                optionsViewBuilder:
+                                    (context, onSelected, options) {
+                                      return Align(
+                                        alignment: Alignment.topLeft,
+                                        child: Material(
+                                          color: Vc.card,
+                                          elevation: 8,
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          child: ConstrainedBox(
+                                            constraints: const BoxConstraints(
+                                              maxHeight: 280,
+                                              minWidth: 280,
+                                            ),
+                                            child: ListView(
+                                              padding: EdgeInsets.zero,
+                                              shrinkWrap: true,
+                                              children: [
+                                                for (final m in options)
+                                                  ListTile(
+                                                    dense: true,
+                                                    title: Text(
+                                                      m.name,
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                    subtitle: m.name == m.id
+                                                        ? null
+                                                        : Text(
+                                                            m.id,
+                                                            maxLines: 1,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                            style:
+                                                                const TextStyle(
+                                                                  color:
+                                                                      Vc.muted,
+                                                                  fontSize: 11,
+                                                                ),
+                                                          ),
+                                                    onTap: () => onSelected(m),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                              ),
+                              const SizedBox(height: 10),
+                              InputDecorator(
+                                decoration: const InputDecoration(
+                                  labelText: 'API format',
+                                  helperText:
+                                      '/format in chat also changes this',
+                                  helperMaxLines: 1,
+                                ),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<String>(
+                                    isExpanded: true,
+                                    value: apiFormat,
+                                    items: [
+                                      for (final entry
+                                          in apiWireFormats.entries)
+                                        DropdownMenuItem(
+                                          value: entry.key,
+                                          child: Text(
+                                            entry.value,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                    ],
+                                    onChanged: (v) {
+                                      if (v == null) return;
+                                      setState(
+                                        () =>
+                                            apiFormat = normalizeApiWireFormat(
+                                              v,
+                                              provider.text,
+                                            ),
+                                      );
+                                    },
                                   ),
-                              ],
-                              onChanged: (v) {
-                                if (v == null) return;
-                                setState(() => apiFormat = normalizeApiWireFormat(v, provider.text));
-                              },
-                            ),
-                          ),
-                        ),
-                        if (_showBaseUrl) ...[
-                          const SizedBox(height: 10),
-                          TextField(
-                            controller: baseUrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Base URL',
-                              hintText: 'https://…/v1',
-                            ),
-                            onChanged: (_) => setState(() {}),
-                          ),
-                        ],
-                        if (provider.text.trim().toLowerCase() == 'pollinations') ...[
-                          const SizedBox(height: 12),
-                          FilledButton.icon(
-                            onPressed: overlay != null ? null : _connectPollinations,
-                            icon: Icon(byopConnected ? Icons.check_circle_outline : Icons.eco_outlined, size: 18),
-                            label: Text(byopConnected ? 'Connected · manage' : 'Connect with Pollinations'),
-                          ),
-                          const SizedBox(height: 6),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              byopConnected
-                                  ? 'This account key applies to every workspace. Disconnect anytime on the Pollinations page.'
-                                  : 'Connect once for every VM. Approve on the site — no key to paste.',
-                              style: const TextStyle(color: Vc.muted, fontSize: 12, height: 1.35),
-                            ),
-                          ),
-                          Theme(
-                            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                            child: ExpansionTile(
-                              tilePadding: EdgeInsets.zero,
-                              childrenPadding: const EdgeInsets.only(bottom: 4),
-                              initiallyExpanded: pastePollinationsKey || apiKey.text.trim().isNotEmpty,
-                              onExpansionChanged: (open) => setState(() => pastePollinationsKey = open),
-                              title: const Text(
-                                'Or paste a secret key',
-                                style: TextStyle(color: Vc.muted, fontSize: 13),
+                                ),
                               ),
-                              children: [
+                              if (_showBaseUrl) ...[
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: baseUrl,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Base URL',
+                                    hintText: 'https://…/v1',
+                                  ),
+                                  onChanged: (_) => setState(() {}),
+                                ),
+                              ],
+                              if (provider.text.trim().toLowerCase() ==
+                                  'pollinations') ...[
+                                const SizedBox(height: 12),
+                                FilledButton.icon(
+                                  onPressed: overlay != null
+                                      ? null
+                                      : _connectPollinations,
+                                  icon: Icon(
+                                    byopConnected
+                                        ? Icons.check_circle_outline
+                                        : Icons.eco_outlined,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    byopConnected
+                                        ? 'Connected · manage'
+                                        : 'Connect with Pollinations',
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    byopConnected
+                                        ? 'This account key applies to every workspace. Disconnect anytime on the Pollinations page.'
+                                        : 'Connect once for every VM. Approve on the site — no key to paste.',
+                                    style: const TextStyle(
+                                      color: Vc.muted,
+                                      fontSize: 12,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ),
+                                Theme(
+                                  data: Theme.of(
+                                    context,
+                                  ).copyWith(dividerColor: Colors.transparent),
+                                  child: ExpansionTile(
+                                    tilePadding: EdgeInsets.zero,
+                                    childrenPadding: const EdgeInsets.only(
+                                      bottom: 4,
+                                    ),
+                                    initiallyExpanded:
+                                        pastePollinationsKey ||
+                                        apiKey.text.trim().isNotEmpty,
+                                    onExpansionChanged: (open) => setState(
+                                      () => pastePollinationsKey = open,
+                                    ),
+                                    title: const Text(
+                                      'Or paste a secret key',
+                                      style: TextStyle(
+                                        color: Vc.muted,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    children: [
+                                      SecretField(
+                                        controller: apiKey,
+                                        label: 'Pollinations secret key',
+                                        hint:
+                                            'sk_… only if you already have one',
+                                        helper:
+                                            'Skip this if you used Connect.',
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ] else ...[
+                                const SizedBox(height: 10),
                                 SecretField(
                                   controller: apiKey,
-                                  label: 'Pollinations secret key',
-                                  hint: 'sk_… only if you already have one',
-                                  helper: 'Skip this if you used Connect.',
+                                  label: 'API key',
+                                  hint: 'sk-… or provider key',
                                 ),
                               ],
-                            ),
-                          ),
-                        ] else ...[
-                          const SizedBox(height: 10),
-                          SecretField(
-                            controller: apiKey,
-                            label: 'API key',
-                            hint: 'sk-… or provider key',
-                          ),
-                        ],
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Saved providers keep their own key (like Hermes). Add another without wiping this one.',
-                            style: const TextStyle(color: Vc.muted, fontSize: 12),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final s in savedProviders)
-                              InputChip(
-                                label: Text(
-                                  [
-                                    s['provider'] ?? s['id'] ?? '',
-                                    if ((s['model'] ?? '').trim().isNotEmpty) s['model']!,
-                                  ].join(' · '),
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  'Saved providers keep their own key (like Hermes). Add another without wiping this one.',
+                                  style: const TextStyle(
+                                    color: Vc.muted,
+                                    fontSize: 12,
+                                  ),
                                 ),
-                                selected: _slotId(provider.text, baseUrl.text) == s['id'],
-                                onPressed: () => _useSavedProvider(s),
-                                onDeleted: () => _removeSavedProvider(s['id'] ?? ''),
                               ),
-                            ActionChip(
-                              avatar: const Icon(Icons.add, size: 16, color: Vc.green),
-                              label: const Text('Add another provider'),
-                              onPressed: _addAnotherProvider,
-                            ),
-                          ],
-                        ),
-                        if (inst?.runtime == AgentRuntime.supercharge) ...[
-                          const SizedBox(height: 16),
-                          const Text(
-                            'Image generation',
-                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Separate from chat. Used by /imagine. Commands: /isetup, /imodels. Any custom model id is allowed.',
-                            style: TextStyle(color: Vc.muted, fontSize: 12, height: 1.35),
-                          ),
-                          const SizedBox(height: 10),
-                          TextField(
-                            controller: imageProvider,
-                            decoration: const InputDecoration(
-                              labelText: 'Image provider',
-                              hintText: 'pollinations, openai, custom…',
-                            ),
-                            onChanged: (v) => setState(() {
-                              imageFormat.text = imageProviderFormat(v);
-                              imageModelChoices = imageModelsForProvider(v);
-                              if (imageModel.text.trim().isEmpty ||
-                                  (imageModelChoices.isNotEmpty &&
-                                      !imageModelChoices.contains(imageModel.text.trim()))) {
-                                imageModel.text = defaultImageModel(v);
-                              }
-                              if (stockBaseUrl(v).isNotEmpty) {
-                                imageBaseUrl.text = stockBaseUrl(v);
-                              }
-                            }),
-                          ),
-                          const SizedBox(height: 10),
-                          TextField(
-                            controller: imageModel,
-                            decoration: InputDecoration(
-                              labelText: 'Image model',
-                              hintText: 'flux or any custom id',
-                              suffixIcon: imageModelChoices.isEmpty
-                                  ? null
-                                  : PopupMenuButton<String>(
-                                      icon: const Icon(Icons.expand_more, color: Vc.muted),
-                                      onSelected: (v) => setState(() => imageModel.text = v),
-                                      itemBuilder: (_) => [
-                                        for (final m in imageModelChoices)
-                                          PopupMenuItem(value: m, child: Text(m)),
-                                      ],
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final s in savedProviders)
+                                    InputChip(
+                                      label: Text(
+                                        [
+                                          s['provider'] ?? s['id'] ?? '',
+                                          if ((s['model'] ?? '')
+                                              .trim()
+                                              .isNotEmpty)
+                                            s['model']!,
+                                        ].join(' · '),
+                                      ),
+                                      selected:
+                                          _slotId(
+                                            provider.text,
+                                            baseUrl.text,
+                                          ) ==
+                                          s['id'],
+                                      onPressed: () => _useSavedProvider(s),
+                                      onDeleted: () =>
+                                          _removeSavedProvider(s['id'] ?? ''),
                                     ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          TextField(
-                            controller: imageFormat,
-                            decoration: const InputDecoration(
-                              labelText: 'Image format',
-                              hintText: 'openai_images | pollinations | custom',
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          SecretField(
-                            controller: imageApiKey,
-                            label: 'Image API key (optional)',
-                            hint: 'empty = reuse chat key / none',
-                          ),
-                          if (providerNeedsBaseUrl(imageProvider.text, imageBaseUrl.text)) ...[
-                            const SizedBox(height: 10),
-                            TextField(
-                              controller: imageBaseUrl,
-                              decoration: const InputDecoration(
-                                labelText: 'Image base URL',
-                                hintText: 'https://…/v1',
+                                  ActionChip(
+                                    avatar: const Icon(
+                                      Icons.add,
+                                      size: 16,
+                                      color: Vc.green,
+                                    ),
+                                    label: const Text('Add another provider'),
+                                    onPressed: _addAnotherProvider,
+                                  ),
+                                ],
                               ),
-                            ),
-                          ],
-                        ],
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Allow all users (skip pairing)'),
-                          value: allowAll,
-                          activeThumbColor: Vc.green,
-                          onChanged: (v) => setState(() => allowAll = v),
-                        ),
-                        const SizedBox(height: 4),
-                        FilledButton(
-                          onPressed: overlay == null ? _save : null,
-                          child: const SizedBox(
-                            width: double.infinity,
-                            child: Text('Save & restart daemon', textAlign: TextAlign.center),
+                              if (inst?.runtime ==
+                                  AgentRuntime.supercharge) ...[
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'Image generation',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Separate from chat. Used by /imagine. Commands: /isetup, /imodels. Any custom model id is allowed.',
+                                  style: TextStyle(
+                                    color: Vc.muted,
+                                    fontSize: 12,
+                                    height: 1.35,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: imageProvider,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Image provider',
+                                    hintText: 'pollinations, openai, custom…',
+                                  ),
+                                  onChanged: (v) => setState(() {
+                                    imageFormat.text = imageProviderFormat(v);
+                                    imageModelChoices = imageModelsForProvider(
+                                      v,
+                                    );
+                                    if (imageModel.text.trim().isEmpty ||
+                                        (imageModelChoices.isNotEmpty &&
+                                            !imageModelChoices.contains(
+                                              imageModel.text.trim(),
+                                            ))) {
+                                      imageModel.text = defaultImageModel(v);
+                                    }
+                                    if (stockBaseUrl(v).isNotEmpty) {
+                                      imageBaseUrl.text = stockBaseUrl(v);
+                                    }
+                                  }),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: imageModel,
+                                  decoration: InputDecoration(
+                                    labelText: 'Image model',
+                                    hintText: 'flux or any custom id',
+                                    suffixIcon: imageModelChoices.isEmpty
+                                        ? null
+                                        : PopupMenuButton<String>(
+                                            icon: const Icon(
+                                              Icons.expand_more,
+                                              color: Vc.muted,
+                                            ),
+                                            onSelected: (v) => setState(
+                                              () => imageModel.text = v,
+                                            ),
+                                            itemBuilder: (_) => [
+                                              for (final m in imageModelChoices)
+                                                PopupMenuItem(
+                                                  value: m,
+                                                  child: Text(m),
+                                                ),
+                                            ],
+                                          ),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: imageFormat,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Image format',
+                                    hintText:
+                                        'openai_images | pollinations | custom',
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                SecretField(
+                                  controller: imageApiKey,
+                                  label: 'Image API key (optional)',
+                                  hint: 'empty = reuse chat key / none',
+                                ),
+                                if (providerNeedsBaseUrl(
+                                  imageProvider.text,
+                                  imageBaseUrl.text,
+                                )) ...[
+                                  const SizedBox(height: 10),
+                                  TextField(
+                                    controller: imageBaseUrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Image base URL',
+                                      hintText: 'https://…/v1',
+                                    ),
+                                  ),
+                                ],
+                              ],
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text(
+                                  'Allow all users (skip pairing)',
+                                ),
+                                value: allowAll,
+                                activeThumbColor: Vc.green,
+                                onChanged: (v) => setState(() => allowAll = v),
+                              ),
+                              const SizedBox(height: 4),
+                              FilledButton(
+                                onPressed: overlay == null ? _save : null,
+                                child: const SizedBox(
+                                  width: double.infinity,
+                                  child: Text(
+                                    'Save & restart daemon',
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const SectionTitle(
-                    'Chat channels',
-                    subtitle: 'Optional Telegram / Discord / Slack bots. The phone app does not need these.',
-                  ),
-                  VcPanel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _secretStatus(),
-                        const SizedBox(height: 12),
-                        SecretField(controller: telegram, label: 'Telegram bot token', hint: '123456:ABC…'),
-                        const SizedBox(height: 10),
-                        SecretField(controller: discord, label: 'Discord bot token'),
-                        const SizedBox(height: 10),
-                        SecretField(controller: slackBot, label: 'Slack bot token', hint: 'xoxb-…'),
-                        const SizedBox(height: 10),
-                        SecretField(controller: slackApp, label: 'Slack app token', hint: 'xapp-…'),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const SectionTitle('Pairing'),
-                  VcPanel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (pending.isEmpty)
-                          const Text('No pending codes.', style: TextStyle(color: Vc.muted))
-                        else
-                          for (final p in pending)
-                            ListTile(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              title: Text('${(p as Map)['code'] ?? ''}'),
-                              subtitle: Text('${p['platform'] ?? ''} · ${p['userId'] ?? ''}'),
-                            ),
-                        if (approved.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          const Text('Approved', style: TextStyle(color: Vc.muted, fontSize: 12)),
-                          for (final p in approved)
-                            ListTile(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              title: Text('${(p as Map)['platform'] ?? ''} · ${p['userId'] ?? ''}'),
-                            ),
-                        ],
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(controller: pairCode, decoration: const InputDecoration(labelText: 'Approve code')),
-                            ),
-                            const SizedBox(width: 8),
-                            FilledButton(onPressed: overlay == null ? _pair : null, child: const Text('Approve')),
-                          ],
+                        const SizedBox(height: 20),
+                        SectionTitle(
+                          'Chat channels', key: _sections['Channels'],
+                          subtitle:
+                              'Optional Telegram / Discord / Slack bots. The phone app does not need these.',
                         ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const SectionTitle('CLI'),
-                  VcPanel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          cli == null
-                              ? 'Version unknown'
-                              : 'Sandbox ${cli!['current'] ?? '?'} · latest ${cli!['latest'] ?? '?'}${cli!['updateAvailable'] == true ? ' · update available' : ''}',
-                          style: const TextStyle(color: Vc.muted),
+                        VcPanel(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _secretStatus(),
+                              const SizedBox(height: 12),
+                              SecretField(
+                                controller: telegram,
+                                label: 'Telegram bot token',
+                                hint: '123456:ABC…',
+                              ),
+                              const SizedBox(height: 10),
+                              SecretField(
+                                controller: discord,
+                                label: 'Discord bot token',
+                              ),
+                              const SizedBox(height: 10),
+                              SecretField(
+                                controller: slackBot,
+                                label: 'Slack bot token',
+                                hint: 'xoxb-…',
+                              ),
+                              const SizedBox(height: 10),
+                              SecretField(
+                                controller: slackApp,
+                                label: 'Slack app token',
+                                hint: 'xapp-…',
+                              ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 20),
+                        SectionTitle('Pairing', key: _sections['Pairing']),
+                        VcPanel(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (pending.isEmpty)
+                                const Text(
+                                  'No pending codes.',
+                                  style: TextStyle(color: Vc.muted),
+                                )
+                              else
+                                for (final p in pending)
+                                  ListTile(
+                                    dense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text('${(p as Map)['code'] ?? ''}'),
+                                    subtitle: Text(
+                                      '${p['platform'] ?? ''} · ${p['userId'] ?? ''}',
+                                    ),
+                                  ),
+                              if (approved.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'Approved',
+                                  style: TextStyle(
+                                    color: Vc.muted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                for (final p in approved)
+                                  ListTile(
+                                    dense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(
+                                      '${(p as Map)['platform'] ?? ''} · ${p['userId'] ?? ''}',
+                                    ),
+                                  ),
+                              ],
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: pairCode,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Approve code',
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  FilledButton(
+                                    onPressed: overlay == null ? _pair : null,
+                                    child: const Text('Approve'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        SectionTitle('CLI', key: _sections['CLI']),
+                        VcPanel(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                cli == null
+                                    ? 'Version unknown'
+                                    : 'Sandbox ${cli!['current'] ?? '?'} · latest ${cli!['latest'] ?? '?'}${cli!['updateAvailable'] == true ? ' · update available' : ''}',
+                                style: const TextStyle(color: Vc.muted),
+                              ),
+                              const SizedBox(height: 10),
+                              OutlinedButton(
+                                onPressed: overlay == null ? _updateCli : null,
+                                child: const SizedBox(
+                                  width: double.infinity,
+                                  child: Text(
+                                    'Update CLI & restart',
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              OutlinedButton(
+                                onPressed: overlay == null
+                                    ? _recreateSandbox
+                                    : null,
+                                child: const SizedBox(
+                                  width: double.infinity,
+                                  child: Text(
+                                    'Move to new sandbox',
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ),
+                              const Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: Text(
+                                  'Use this after a template update. Keeps chat, files, and API keys. Skips node_modules.',
+                                  style: TextStyle(
+                                    color: Vc.muted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        SectionTitle('Logs', key: _sections['Logs']),
+                        VcPanel(
+                          child: Column(
+                            children: [
+                              Wrap(
+                                spacing: 8,
+                                children: [
+                                  for (final s in [
+                                    'all',
+                                    'daemon',
+                                    'agent',
+                                    'system',
+                                  ])
+                                    ChoiceChip(
+                                      label: Text(s),
+                                      selected: logsSource == s,
+                                      onSelected: (_) => _logs(s),
+                                    ),
+                                ],
+                              ),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton.icon(
+                                  onPressed: logs.isEmpty
+                                      ? null
+                                      : () {
+                                          Clipboard.setData(
+                                            ClipboardData(text: logs),
+                                          );
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text('Logs copied'),
+                                            ),
+                                          );
+                                        },
+                                  icon: const Icon(Icons.copy, size: 16),
+                                  label: const Text('Copy'),
+                                ),
+                              ),
+                              Container(
+                                width: double.infinity,
+                                constraints: const BoxConstraints(
+                                  minHeight: 120,
+                                  maxHeight: 240,
+                                ),
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF09090B),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Vc.cardBorder),
+                                ),
+                                child: SingleChildScrollView(
+                                  child: Text(
+                                    logs.isEmpty
+                                        ? 'Tap a source to pull logs.'
+                                        : logs,
+                                    style: const TextStyle(
+                                      fontFamily: 'monospace',
+                                      fontSize: 11,
+                                      color: Vc.muted,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        SectionTitle('Shell', key: _sections['Shell']),
+                        VcPanel(
+                          child: Column(
+                            children: [
+                              TextField(
+                                controller: cwd,
+                                decoration: const InputDecoration(
+                                  labelText: 'cwd',
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: cmd,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Command',
+                                      ),
+                                      onSubmitted: (_) => _exec(),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  FilledButton(
+                                    onPressed: overlay == null ? _exec : null,
+                                    child: const Text('Run'),
+                                  ),
+                                ],
+                              ),
+                              for (final lastExec in history.take(4)) ...[
+                                const SizedBox(height: 8),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    '${lastExec.command ?? 'cmd'} · exit ${lastExec.exitCode ?? '?'}',
+                                    style: TextStyle(
+                                      color: lastExec.ok ? Vc.green : Vc.red,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                                if (lastExec.stdout.isNotEmpty)
+                                  Text(
+                                    lastExec.stdout,
+                                    style: const TextStyle(
+                                      fontFamily: 'monospace',
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                if (lastExec.stderr.isNotEmpty)
+                                  Text(
+                                    lastExec.stderr,
+                                    style: const TextStyle(
+                                      fontFamily: 'monospace',
+                                      fontSize: 11,
+                                      color: Vc.red,
+                                    ),
+                                  ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
                         OutlinedButton(
-                          onPressed: overlay == null ? _updateCli : null,
-                          child: const SizedBox(
-                            width: double.infinity,
-                            child: Text('Update CLI & restart', textAlign: TextAlign.center),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        OutlinedButton(
-                          onPressed: overlay == null ? _recreateSandbox : null,
-                          child: const SizedBox(
-                            width: double.infinity,
-                            child: Text('Move to new sandbox', textAlign: TextAlign.center),
-                          ),
-                        ),
-                        const Padding(
-                          padding: EdgeInsets.only(top: 8),
-                          child: Text(
-                            'Use this after a template update. Keeps chat, files, and API keys. Skips node_modules.',
-                            style: TextStyle(color: Vc.muted, fontSize: 12),
-                          ),
+                          onPressed: () => context.push('/billing', extra: id),
+                          child: const Text('Billing / renew'),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  const SectionTitle('Logs'),
-                  VcPanel(
-                    child: Column(
-                      children: [
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            for (final s in ['all', 'daemon', 'agent', 'system'])
-                              ChoiceChip(
-                                label: Text(s),
-                                selected: logsSource == s,
-                                onSelected: (_) => _logs(s),
-                              ),
-                          ],
-                        ),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton.icon(
-                            onPressed: logs.isEmpty
-                                ? null
-                                : () {
-                                    Clipboard.setData(ClipboardData(text: logs));
-                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logs copied')));
-                                  },
-                            icon: const Icon(Icons.copy, size: 16),
-                            label: const Text('Copy'),
-                          ),
-                        ),
-                        Container(
-                          width: double.infinity,
-                          constraints: const BoxConstraints(minHeight: 120, maxHeight: 240),
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF09090B),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Vc.cardBorder),
-                          ),
-                          child: SingleChildScrollView(
-                            child: Text(
-                              logs.isEmpty ? 'Tap a source to pull logs.' : logs,
-                              style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Vc.muted),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const SectionTitle('Shell'),
-                  VcPanel(
-                    child: Column(
-                      children: [
-                        TextField(controller: cwd, decoration: const InputDecoration(labelText: 'cwd')),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: cmd,
-                                decoration: const InputDecoration(labelText: 'Command'),
-                                onSubmitted: (_) => _exec(),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            FilledButton(onPressed: overlay == null ? _exec : null, child: const Text('Run')),
-                          ],
-                        ),
-                        for (final lastExec in history.take(4)) ...[
-                          const SizedBox(height: 8),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              '${lastExec.command ?? 'cmd'} · exit ${lastExec.exitCode ?? '?'}',
-                              style: TextStyle(color: lastExec.ok ? Vc.green : Vc.red, fontSize: 12),
-                            ),
-                          ),
-                          if (lastExec.stdout.isNotEmpty)
-                            Text(lastExec.stdout, style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
-                          if (lastExec.stderr.isNotEmpty)
-                            Text(lastExec.stderr, style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Vc.red)),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  OutlinedButton(
-                    onPressed: () => context.push('/billing', extra: id),
-                    child: const Text('Billing / renew'),
-                  ),
-                ],
-              ),
-            if (overlay != null) BusyOverlay(message: overlay!, detail: 'Please wait — sandbox ops can take a minute'),
-          ],
-        ),
+                ),
+              ],
+            ),
+          if (overlay != null)
+            BusyOverlay(
+              message: overlay!,
+              detail: 'Please wait — sandbox ops can take a minute',
+            ),
+        ],
+      ),
     );
   }
 }

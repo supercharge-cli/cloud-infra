@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { proxyInbox, requireChatInstance } from '@/lib/app-chat';
+import { prepareBotRequest } from '@/lib/bot-routing';
 
 export const maxDuration = 120;
 
@@ -16,6 +17,7 @@ export async function POST(req: Request, ctx: Ctx) {
   let payload: {
     text?: string;
     chatId?: string;
+    botId?: string;
     files?: Array<{ name: string; contentBase64: string; mime?: string }>;
   } = {};
 
@@ -28,6 +30,7 @@ export async function POST(req: Request, ctx: Ctx) {
         if (typeof value === 'string') {
           if (key === 'text' || key === 'caption') payload.text = value;
           if (key === 'chatId') payload.chatId = value;
+          if (key === 'botId') payload.botId = value;
           continue;
         }
         const blob = value as File;
@@ -53,6 +56,8 @@ export async function POST(req: Request, ctx: Ctx) {
   }
 
   try {
+    const rejected = await prepareBotRequest(gate.inst, payload.botId, payload.chatId, { sync: true, allowLegacyChatId: true });
+    if (rejected) return rejected;
     const res = await proxyInbox(gate.inst, '/v1/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
