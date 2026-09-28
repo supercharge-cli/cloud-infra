@@ -4,9 +4,10 @@ import { getPlan, hasInstanceAccess } from "@/lib/billing";
 import { wakeSession } from "@/lib/gateway-client";
 import { ensureInbox } from "@/lib/app-chat";
 import { getInstance, updateInstance } from "@/lib/store";
+import { applySystemUpdate, getSystemVersionInfo } from "@/lib/system-update";
 import { syncTelegramWakeWebhook } from "@/lib/telegram-webhook";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -40,7 +41,31 @@ export async function POST(_req: Request, ctx: Ctx) {
       runtime: inst.runtime || "xibecode",
       restartDaemon: inst.runtime !== "supercharge",
     });
-    if (result.ok && inst.runtime === "supercharge") await ensureInbox(inst);
+    if (result.ok && inst.runtime === "supercharge") {
+      const system = await getSystemVersionInfo(inst.sessionId, inst.sandboxId).catch(
+        () => null,
+      );
+      if (system?.updateAvailable && system.latest) {
+        const applied = await applySystemUpdate(
+          inst.sessionId,
+          inst.sandboxId,
+          system.latest,
+        ).catch((error: Error) => ({
+          ok: false,
+          from: system.current,
+          to: null as string | null,
+          notes: system.notes,
+          logs: [error.message],
+        }));
+        logs.push(
+          applied.ok
+            ? `system update ${applied.from || "none"} -> ${applied.to}`
+            : "system update failed; stamp left unchanged",
+        );
+        logs.push(...applied.logs.slice(0, 20));
+      }
+      await ensureInbox(inst);
+    }
     const logs = [...(result.logs || [])];
     const fullyUp = result.ok && result.daemonOk !== false;
 

@@ -1475,8 +1475,8 @@ export function Dashboard({ email }: { email: string }) {
                     <p className="mt-1 text-emerald-100/90">
                       {systemUpdate.latest}
                       {systemUpdate.current ? ` (this sandbox has ${systemUpdate.current})` : " (this sandbox has no system stamp yet)"}
-                      . Stops the wake server, file server, and browser, replaces those files, then starts them again.
-                      Your workspace stays on this sandbox.
+                      . The next wake installs it on this sandbox. You can also apply it now.
+                      Your workspace stays.
                     </p>
                     {systemUpdate.notes.length > 0 && (
                       <ul className="mt-2 list-disc pl-5 text-emerald-100/80">
