@@ -41,6 +41,7 @@ export async function POST(_req: Request, ctx: Ctx) {
       runtime: inst.runtime || "xibecode",
       restartDaemon: inst.runtime !== "supercharge",
     });
+    const logs = [...(result.logs || [])];
     if (result.ok && inst.runtime === "supercharge") {
       const system = await getSystemVersionInfo(inst.sessionId, inst.sandboxId).catch(
         () => null,
@@ -66,7 +67,6 @@ export async function POST(_req: Request, ctx: Ctx) {
       }
       await ensureInbox(inst);
     }
-    const logs = [...(result.logs || [])];
     const fullyUp = result.ok && result.daemonOk !== false;
 
     // Sandbox webhook mode: keep Telegram on sandbox public URL (E2B auto-resume).
