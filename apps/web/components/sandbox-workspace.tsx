@@ -136,7 +136,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
   }, [disabled, instanceId]);
 
   useEffect(() => {
-    if (tab !== 'browser' || disabled) return;
+    if (tab !== 'browser' || disabled || runtime === 'supercharge') return;
     const controller = new AbortController();
     setBrowserStatus('connecting');
     setMessage('');
@@ -183,7 +183,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
       }
     })();
     return () => controller.abort();
-  }, [disabled, instanceId, tab]);
+  }, [disabled, instanceId, tab, runtime]);
 
   const parentPath = useMemo(() => {
     if (directory === '/home/user/workspace') return directory;

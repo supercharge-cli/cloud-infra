@@ -584,6 +584,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _syncBrowserStream() {
+    if (_isSupercharge && _sandboxId != null && (isDesktop || _computerOpen || _browserViewerOpen)) {
+      _browserSub?.cancel();
+      _browserSub = null;
+      _browserListening = false;
+      _liveTick?.cancel();
+      _liveTick = null;
+      return;
+    }
     final want =
         !disposed &&
         !backgrounded &&
