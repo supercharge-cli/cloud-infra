@@ -4,6 +4,18 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+Uri? normalizedBrowserWebSocket(String value) {
+  final authority = RegExp(r'^[A-Za-z]+://([^/?#]*)').firstMatch(value)?.group(1) ?? '';
+  if (RegExp(r':0+$').hasMatch(authority)) return null;
+  final uri = Uri.tryParse(value);
+  if (uri == null || !{'ws', 'wss'}.contains(uri.scheme) || !uri.hasAuthority ||
+      uri.host.isEmpty || uri.userInfo.isNotEmpty || uri.hasFragment ||
+      (uri.hasPort && (uri.port < 1 || uri.port > 65535))) {
+    return null;
+  }
+  return uri.hasPort ? uri : uri.replace(port: uri.scheme == 'wss' ? 443 : 80);
+}
+
 /// A capability-addressed, loopback-only noVNC page and WebSocket bridge.
 ///
 /// The connection callback means at least one proxy socket is active; it does
@@ -422,15 +434,8 @@ class _ViewerConnection {
       _check();
       final target = await _wait(viewer._requestVncUrl);
       _check();
-      final remote = Uri.tryParse(target);
-      if (remote == null ||
-          (remote.scheme != 'ws' && remote.scheme != 'wss') ||
-          !remote.hasAuthority ||
-          remote.host.isEmpty ||
-          remote.userInfo.isNotEmpty ||
-          remote.hasFragment ||
-          remote.port < 1 ||
-          remote.port > 65535) {
+      final remote = normalizedBrowserWebSocket(target);
+      if (remote == null) {
         throw const _ViewerFailure(502, 'Invalid browser connection address.');
       }
       _remote = remote;

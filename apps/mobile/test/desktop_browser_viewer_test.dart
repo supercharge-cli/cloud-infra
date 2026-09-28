@@ -89,6 +89,16 @@ Future<WebSocket> _connectViewer(
 }
 
 void main() {
+  test('normalizes implicit WebSocket ports before the HTTP handshake', () {
+    final secure = normalizedBrowserWebSocket('wss://sandbox.example/vnc?ticket=fixture')!;
+    expect(secure.port, 443);
+    expect(secure.hasPort, isTrue);
+    expect(normalizedBrowserWebSocket('ws://sandbox.example/vnc')!.port, 80);
+    expect(normalizedBrowserWebSocket('wss://sandbox.example:8443/vnc')!.port, 8443);
+    expect(normalizedBrowserWebSocket('wss://sandbox.example:0/vnc'), isNull);
+    expect(normalizedBrowserWebSocket('wss://user:password@sandbox.example/vnc'), isNull);
+  });
+
   test(
     'serves capability-scoped viewer, module, and state without CORS',
     () async {
