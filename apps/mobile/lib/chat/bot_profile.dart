@@ -15,7 +15,10 @@ class BotProfile {
   final String defaultFolder;
   final int revision;
   bool get isMain => id == 'main';
-  bool get isImage => icon.startsWith('data:image/');
+  bool get isImage => icon.startsWith('data:image/') || icon.startsWith('avatar:');
+  bool get isRemoteAvatar => icon.startsWith('avatar:');
+  String? get avatarVersion => RegExp(r'^avatar:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$')
+      .firstMatch(icon)?.group(1);
 
   factory BotProfile.fromJson(Map<String, dynamic> raw) => BotProfile(
     id: '${raw['id'] ?? ''}',

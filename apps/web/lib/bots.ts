@@ -166,7 +166,24 @@ export async function updateBot(
   if (patch.archived !== undefined && typeof patch.archived !== 'boolean') throw new BotInputError('Invalid archive state');
   const changes: Partial<Bot> = { updatedAt: new Date().toISOString() };
   if (patch.name !== undefined) changes.name = botName(patch.name);
-  if (patch.icon !== undefined) changes.icon = botIcon(patch.icon);
+  if (patch.icon !== undefined) {
+    if (typeof patch.icon === 'string' && patch.icon.startsWith('avatar:')) {
+      if (!/^avatar:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(patch.icon)) {
+        throw new BotInputError('Invalid picture reference');
+      }
+      if (patch.icon !== current.icon) {
+        const db = await getDb();
+        const exists = await db.collection('bot_avatars').findOne({
+          instanceId: instance.id, userId: instance.userId, botId: id,
+          version: patch.icon.slice('avatar:'.length),
+        });
+        if (!exists) throw new BotInputError('Picture was not uploaded for this bot');
+      }
+      changes.icon = patch.icon;
+    } else {
+      changes.icon = botIcon(patch.icon);
+    }
+  }
   if (patch.instructions !== undefined) changes.instructions = botInstructions(patch.instructions);
   if (patch.defaultFolder !== undefined) {
     changes.defaultFolder = id === MAIN_BOT && patch.defaultFolder === WORKSPACE

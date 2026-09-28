@@ -338,6 +338,39 @@ class VectraClient {
     timeout: _slow,
   );
 
+  Future<Map<String, dynamic>> uploadBotAvatar(
+    String id,
+    String botId,
+    Uint8List bytes,
+    String mime,
+  ) async {
+    final res = await http.put(
+      _u('/api/instances/$id/bots/${Uri.encodeComponent(botId)}/avatar'),
+      headers: {..._headers, 'content-type': mime},
+      body: bytes,
+    ).timeout(_slow);
+    if (res.statusCode >= 400) {
+      var details = <String, dynamic>{};
+      try {
+        final parsed = jsonDecode(res.body);
+        if (parsed is Map<String, dynamic>) details = parsed;
+      } catch (_) {}
+      throw ApiException(res.statusCode, _friendlyError(res.statusCode, details, res.reasonPhrase));
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Uint8List> botAvatar(String id, String botId, String version) async {
+    final res = await http.get(
+      _u('/api/instances/$id/bots/${Uri.encodeComponent(botId)}/avatar', {'v': version}),
+      headers: _headers,
+    ).timeout(_fast);
+    if (res.statusCode >= 400) {
+      throw ApiException(res.statusCode, 'Could not load bot picture');
+    }
+    return res.bodyBytes;
+  }
+
   Future<Map<String, dynamic>> listConversations(String id, {String? botId}) =>
       _json(
         'GET',

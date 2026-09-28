@@ -292,6 +292,7 @@ export async function deleteUserById(userId: string): Promise<boolean> {
     await Promise.all([
       db.collection('bots').deleteMany({ userId }),
       db.collection('bot_jobs').deleteMany({ userId }),
+      db.collection('bot_avatars').deleteMany({ userId }),
     ]);
   }
   return r.deletedCount > 0;
@@ -336,6 +337,7 @@ export async function hardDeleteInstance(id: string): Promise<boolean> {
     await Promise.all([
       db.collection('bots').deleteMany({ instanceId: id }),
       db.collection('bot_jobs').deleteMany({ instanceId: id }),
+      db.collection('bot_avatars').deleteMany({ instanceId: id }),
     ]);
   }
   return r.deletedCount > 0;
@@ -363,6 +365,7 @@ export async function reassignInstance(
   await Promise.all([
     db.collection('bots').updateMany({ instanceId }, { $set: { userId: newUserId } }),
     db.collection('bot_jobs').updateMany({ instanceId }, { $set: { userId: newUserId } }),
+    db.collection('bot_avatars').updateMany({ instanceId }, { $set: { userId: newUserId } }),
   ]);
   return clean as Instance;
 }
@@ -636,6 +639,7 @@ export async function deleteInstance(
     await Promise.all([
       db.collection('bots').deleteMany({ instanceId: id }),
       db.collection('bot_jobs').deleteMany({ instanceId: id }),
+      db.collection('bot_avatars').deleteMany({ instanceId: id }),
     ]);
   }
   return r.deletedCount > 0;

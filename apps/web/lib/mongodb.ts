@@ -92,6 +92,7 @@ async function ensureIndexes(database: Db): Promise<void> {
   await database.collection('bots').createIndex({ instanceId: 1, createKey: 1 }, {
     unique: true, partialFilterExpression: { createKey: { $type: 'string' } },
   });
+  await database.collection('bot_avatars').createIndex({ instanceId: 1, botId: 1, version: 1 }, { unique: true });
   await database.collection('bot_jobs').createIndex({ instanceId: 1, id: 1 }, { unique: true });
   await database.collection('bot_jobs').createIndex({ instanceId: 1, requestId: 1 }, {
     unique: true, partialFilterExpression: { requestId: { $type: 'string' } },

@@ -642,7 +642,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     );
     if (ok != true) return;
     await _run('Destroying instance…', () async {
-      await api.destroy(id);
+      await context.read<SessionController>().workspaces.destroy(id);
       if (mounted) context.go('/');
     });
   }

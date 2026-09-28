@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -21,6 +20,7 @@ import '../desktop/chat_workspace.dart';
 import '../api/models.dart';
 import '../chat/chat_store.dart';
 import '../chat/bot_profile.dart';
+import '../chat/bot_avatar.dart';
 import '../chat/cli_update.dart';
 import '../chat/commands.dart';
 import '../chat/draft.dart';
@@ -49,6 +49,32 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
+class _ChatSwitchOrigin {
+  const _ChatSwitchOrigin({
+    required this.sessionId,
+    required this.bot,
+    required this.events,
+    required this.answered,
+    required this.cursor,
+    required this.draft,
+    required this.attachments,
+    required this.startedAt,
+    required this.sending,
+    required this.queued,
+  });
+
+  final String? sessionId;
+  final BotProfile? bot;
+  final List<AppChatEvent> events;
+  final Set<String> answered;
+  final String? cursor;
+  final String draft;
+  final List<DraftAttach> attachments;
+  final DateTime? startedAt;
+  final bool sending;
+  final bool queued;
+}
+
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _input = TextEditingController();
   final _inputFocus = FocusNode();
@@ -66,9 +92,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final botRunning = <String>{};
   final botQueued = <String>{};
   final botUnread = <String>{};
+  final _botByChat = <String, String>{};
   Timer? _botsRefresh;
+  final _lastBotPreview = <String, String>{};
+  final _lastBotActivity = <String, int>{};
   bool _chatQueued = false;
+  bool _contactThreadLoading = false;
+  bool _phoneContactsOpen = false;
+  int _switchGeneration = 0;
+  String? _openingBotId;
   bool _switchingBot = false;
+  _ChatSwitchOrigin? _switchOrigin;
   final _botDrafts = <String, (String, List<DraftAttach>)>{};
   final _seenBotMessages = <String, String>{};
   final _latestBotMessages = <String, String>{};
@@ -76,6 +110,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   EventStreamCancellation? _eventCancellation;
   int _eventGeneration = 0;
   bool _statusPolling = false;
+  bool _botStatusPolling = false;
+  int _botStatusGeneration = 0;
+  int _catalogueGeneration = 0;
   final backgroundTasks = <String, Map<String, dynamic>>{};
   StreamSubscription<ComputerFrame>? _browserSub;
   List<BotCommand> commands = defaultBotCommandsFor(AgentRuntime.supercharge);
@@ -124,6 +161,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _botsEnabled && store.activeSessionId != null ? _selectedBotId : null;
   String? get _chatScope => _botsEnabled ? store.activeSessionId : null;
   String get _selectedBotName => selectedBot?.name ?? 'Main';
+  String _botPreview(BotProfile bot) => _lastBotPreview[bot.id] ??
+      store.conversations.where((item) => item.botId == bot.id).firstOrNull?.title ??
+      (bot.isMain ? 'Your main assistant' : 'Start a conversation');
+  bool _botActive(BotProfile bot) => botRunning.any((chatId) =>
+      _botByChat[chatId] == bot.id || store.conversations.any((item) =>
+          item.sessionId == chatId && item.botId == bot.id));
+  bool _botWaiting(BotProfile bot) => botQueued.any((chatId) =>
+      _botByChat[chatId] == bot.id || store.conversations.any((item) =>
+          item.sessionId == chatId && item.botId == bot.id));
+  int _botUnread(BotProfile bot) => botUnread.where((chatId) =>
+      _botByChat[chatId] == bot.id || store.conversations.any((item) =>
+          item.sessionId == chatId && item.botId == bot.id)).length;
 
   Duration get elapsed => turnStartedAt == null
       ? Duration.zero
@@ -131,6 +180,43 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   int get progressPct =>
       TaskNotifications.softPercent(tools: toolCount, elapsed: elapsed);
+
+  _ChatSwitchOrigin _captureSwitchOrigin() => _ChatSwitchOrigin(
+    sessionId: store.activeSessionId,
+    bot: selectedBot,
+    events: List<AppChatEvent>.of(events),
+    answered: Set<String>.of(answered),
+    cursor: lastServerId,
+    draft: _input.text,
+    attachments: List<DraftAttach>.of(pending),
+    startedAt: turnStartedAt,
+    sending: sending,
+    queued: _chatQueued,
+  );
+
+  void _restoreSwitchOrigin(_ChatSwitchOrigin origin) {
+    selectedBot = origin.bot;
+    events
+      ..clear()
+      ..addAll(origin.events);
+    answered
+      ..clear()
+      ..addAll(origin.answered);
+    lastServerId = origin.cursor;
+    turnStartedAt = origin.startedAt;
+    sending = origin.sending;
+    _chatQueued = origin.queued;
+    _input.text = origin.draft;
+    pending
+      ..clear()
+      ..addAll(origin.attachments);
+    computer.clear();
+    computer.replay(events);
+    _switchingBot = false;
+    _contactThreadLoading = false;
+    _openingBotId = null;
+    _switchOrigin = null;
+  }
 
   @override
   void initState() {
@@ -152,6 +238,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       backgrounded = false;
       unawaited(TaskNotifications.leaveBackground());
       unawaited(_catchUp());
+      if (_isSupercharge) unawaited(_refreshBots());
+      unawaited(context.read<SessionController>().workspaces.refresh(force: false));
       return;
     }
     if (state == AppLifecycleState.paused ||
@@ -252,6 +340,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     if (_isSupercharge) await _refreshBots();
     if (_botsEnabled) {
+      unawaited(_pollBotStatus());
       await _refreshConversations();
       var chat = store.conversations
           .where(
@@ -291,6 +380,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       unawaited(_hydrateFromRemote());
       _listen();
     }
+    if (!mounted || _switchingBot) return;
     api
         .commands(id)
         .then((c) {
@@ -310,7 +400,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     unawaited(_refreshConversations());
     if (_botsEnabled) {
       _botsRefresh?.cancel();
-      _botsRefresh = Timer.periodic(const Duration(seconds: 15), (_) {
+      _botsRefresh = Timer.periodic(const Duration(seconds: 6), (_) {
+        if (backgrounded || disposed || inst?.isPaused == true) return;
         unawaited(_refreshBots());
         unawaited(_pollBotStatus());
       });
@@ -320,6 +411,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _refreshBots() async {
     if (!_isSupercharge || disposed) return;
+    final generation = ++_catalogueGeneration;
     try {
       final raw = await api.listBots(id);
       final list = (raw['bots'] as List?) ?? const [];
@@ -328,7 +420,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           .map((item) => BotProfile.fromJson(Map<String, dynamic>.from(item)))
           .where((bot) => bot.id.isNotEmpty)
           .toList();
-      if (!mounted) return;
+      if (!mounted || generation != _catalogueGeneration) return;
       setState(() {
         bots
           ..clear()
@@ -346,19 +438,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             remote.where((bot) => bot.isMain).firstOrNull;
       });
     } on ApiException catch (failure) {
-      if (failure.status != 404 && mounted) {
+      if (failure.status != 404 && mounted && bots.isEmpty &&
+          generation == _catalogueGeneration) {
         setState(() => error = failure.message);
       }
     } catch (failure) {
-      if (mounted) setState(() => error = failure.toString());
+      if (mounted && bots.isEmpty && generation == _catalogueGeneration) {
+        setState(() => error = failure.toString());
+      }
     }
   }
 
   Future<void> _pollBotStatus() async {
-    if (!_botsEnabled || disposed || backgrounded || _switchingBot) return;
+    if (!_botsEnabled || disposed || backgrounded || _botStatusPolling) return;
+    _botStatusPolling = true;
+    final generation = ++_botStatusGeneration;
     try {
       final raw = await api.chatStatus(id);
-      if (!mounted) return;
+      if (!mounted || disposed || backgrounded || generation != _botStatusGeneration) return;
       final active = ((raw['activeBotChats'] as List?) ?? const [])
           .map((item) => '$item')
           .toSet();
@@ -375,20 +472,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         for (final item
             in ((raw['conversations'] as List?) ?? const []).whereType<Map>()) {
           final chat = '${item['sessionId'] ?? ''}';
+          final owner = '${item['botId'] ?? ''}';
+          if (chat.isNotEmpty && owner.isNotEmpty) _botByChat[chat] = owner;
+          final preview = '${item['lastMessage'] ?? ''}'.trim();
+          final existing = _lastBotActivity[owner] ?? 0;
+          final updated = (item['updatedAt'] as num?)?.toInt() ?? 0;
+          if (owner.isNotEmpty && preview.isNotEmpty && updated >= existing) {
+            _lastBotActivity[owner] = updated;
+            _lastBotPreview[owner] = preview;
+          }
           final last = '${item['lastMessageId'] ?? ''}';
-          if (last.isNotEmpty) {
+          if (chat.isNotEmpty && last.isNotEmpty) {
             _latestBotMessages[chat] = last;
-            if (chat == store.activeSessionId) {
+            if (chat == store.activeSessionId && !_switchingBot) {
               _seenBotMessages[chat] = last;
               botUnread.remove(chat);
+            } else if (_seenBotMessages[chat] == null) {
+              _seenBotMessages[chat] = last;
             } else if (_seenBotMessages[chat] != last) {
               botUnread.add(chat);
             }
           }
         }
       });
-      unawaited(_refreshConversations());
-    } catch (_) {}
+      if (!_switchingBot) unawaited(_refreshConversations());
+    } on Object {
+      return;
+    } finally {
+      _botStatusPolling = false;
+    }
   }
 
   void _listen() {
@@ -753,6 +865,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         events[live] = ev;
         if (ev.text.isNotEmpty) {
           lastAssistantText = ev.text;
+          if (_botsEnabled) _lastBotPreview[_selectedBotId] = ev.text.trim();
           final show = parseComputerShow(ev.text);
           if (show != null) computer.tab = show;
         }
@@ -832,6 +945,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     }
     events.add(ev);
+    if (_botsEnabled && ev.text.trim().isNotEmpty && (ev.type == 'text' || ev.type == 'user')) {
+      _lastBotPreview[_selectedBotId] = ev.text.trim();
+    }
     if (ev.type == 'file' && ev.fileId != null && ev.localPath == null) {
       unawaited(
         _ensureLocalFile(ev, auto: ev.isImage).then((_) {
@@ -958,6 +1074,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         added = true;
       }
       if (added && mounted) {
+        final recent = events.where((event) => event.text.trim().isNotEmpty &&
+            (event.type == 'text' || event.type == 'user')).lastOrNull;
+        if (recent != null && _botsEnabled) _lastBotPreview[_selectedBotId] = recent.text.trim();
         setState(() {});
         _persist();
       }
@@ -1021,51 +1140,87 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshConversations() async {
+    if (_switchingBot) return;
     try {
       final botId = _botsEnabled ? _selectedBotId : null;
+      final selected = store.activeSessionId;
+      final generation = _switchGeneration;
       final raw = await api.listConversations(id, botId: botId);
+      if (!mounted || _switchingBot || generation != _switchGeneration ||
+          selected != store.activeSessionId || (_botsEnabled && botId != _selectedBotId)) {
+        return;
+      }
       final active = raw['active'] as String?;
       final list = (raw['conversations'] as List?) ?? const [];
       final remote = list
           .whereType<Map>()
           .map((e) => ConversationMeta.fromJson(Map<String, dynamic>.from(e)))
           .toList();
+      if (!mounted || _switchingBot || generation != _switchGeneration ||
+          selected != store.activeSessionId || (_botsEnabled && botId != _selectedBotId)) {
+        return;
+      }
       await store.mergeRemote(
         remote,
         active: active,
         selectActive: !_botsEnabled,
       );
-      if (mounted) setState(() {});
+      if (mounted && !_switchingBot && generation == _switchGeneration) {
+        setState(() {});
+      }
     } catch (_) {}
   }
 
-  Future<void> _openConversation(ConversationMeta item) async {
-    if (_switchingBot || (working && !_botsEnabled)) return;
-    final oldBot = selectedBot;
-    setState(() => _switchingBot = true);
-    final oldChat = store.activeSessionId;
+  Future<void> _openConversation(ConversationMeta item, {
+    int? switchGeneration,
+  }) async {
+    if (switchGeneration == null && _switchingBot) return;
+    if (working && !_botsEnabled) return;
+    final expectedSwitch = switchGeneration ?? ++_switchGeneration;
+    final origin = _switchOrigin ?? _captureSwitchOrigin();
+    _switchOrigin = origin;
+    setState(() {
+      _switchingBot = true;
+      _contactThreadLoading = true;
+      _openingBotId = item.botId;
+      selectedBot = bots.where((bot) => bot.id == item.botId).firstOrNull ?? selectedBot;
+      events.clear();
+      answered.clear();
+      lastServerId = null;
+      sending = false;
+      showKickoff = false;
+      turnStartedAt = null;
+      _chatQueued = botQueued.contains(item.sessionId);
+      _input.clear();
+      pending.clear();
+      computer.clear();
+    });
+    final oldChat = origin.sessionId;
     _eventCancellation?.cancel();
     await _sub?.cancel();
     final generation = ++_eventGeneration;
     _tick?.cancel();
+    if (!mounted || expectedSwitch != _switchGeneration) return;
     try {
-      await store.save(
-        events: events,
-        answered: answered,
-        lastServerId: lastServerId,
-        sessionId: oldChat,
-      );
       if (oldChat != null) {
-        _botDrafts[oldChat] = (_input.text, List.of(pending));
+        await store.save(
+          events: origin.events,
+          answered: origin.answered,
+          lastServerId: origin.cursor,
+          sessionId: oldChat,
+        );
+      }
+      if (oldChat != null) {
+        _botDrafts[oldChat] = (origin.draft, origin.attachments);
       }
       if (!_botsEnabled) await api.switchConversation(id, item.sessionId);
       final snap = await store.load(
         sessionId: item.sessionId,
         fallbackToLegacy: !_botsEnabled,
       );
-      if (!mounted || generation != _eventGeneration) return;
+      if (!mounted || generation != _eventGeneration || expectedSwitch != _switchGeneration) return;
       await store.selectConversation(item.sessionId);
-      if (!mounted || generation != _eventGeneration) return;
+      if (!mounted || generation != _eventGeneration || expectedSwitch != _switchGeneration) return;
       setState(() {
         selectedBot =
             bots.where((bot) => bot.id == item.botId).firstOrNull ??
@@ -1084,7 +1239,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _seenBotMessages[item.sessionId] = last;
         }
         _chatQueued = botQueued.contains(item.sessionId);
-        turnStartedAt = null;
+        turnStartedAt = botRunning.contains(item.sessionId) ? DateTime.now() : null;
         sending = false;
         showKickoff = false;
         lastAssistantText = null;
@@ -1097,20 +1252,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         computer.clear();
         computer.replay(events);
         _switchingBot = false;
+        _contactThreadLoading = false;
+        _openingBotId = null;
+        _switchOrigin = null;
       });
       _listen();
       await _hydrateFromRemote();
       await _pollTurnStatus();
     } catch (failure) {
-      if (!mounted) return;
+      if (!mounted || expectedSwitch != _switchGeneration) return;
       setState(() {
+        _restoreSwitchOrigin(origin);
         error = failure.toString();
-        selectedBot = oldBot;
-        _switchingBot = false;
       });
       _listen();
     } finally {
-      if (mounted && _switchingBot) setState(() => _switchingBot = false);
+      if (mounted && expectedSwitch == _switchGeneration && _switchingBot) {
+        setState(() {
+          _switchingBot = false;
+          _contactThreadLoading = false;
+          _openingBotId = null;
+          _switchOrigin = null;
+        });
+      }
     }
   }
 
@@ -1119,6 +1283,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final folder = TextEditingController(text: bot?.defaultFolder ?? '');
     final instructions = TextEditingController(text: bot?.instructions ?? '');
     var icon = bot?.icon ?? '🤖';
+    Uint8List? avatarBytes;
+    String? avatarMime;
     final createKey =
         'app-${DateTime.now().microsecondsSinceEpoch}-${math.Random.secure().nextInt(1 << 32)}';
     var busy = false;
@@ -1157,10 +1323,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     if (folder.text.trim().isNotEmpty)
                       'defaultFolder': folder.text.trim(),
                   };
+                  String targetId;
                   if (bot == null) {
-                    await api.createBot(id, input);
+                    final created = await api.createBot(id, input);
+                    targetId = '${(created['bot'] as Map?)?['id'] ?? ''}';
                   } else {
                     await api.updateBot(id, bot.id, input);
+                    targetId = bot.id;
+                  }
+                  if (avatarBytes != null && targetId.isEmpty) {
+                    throw StateError('The new bot was created but no ID was returned for its picture');
+                  }
+                  if (avatarBytes case final bytes? when targetId.isNotEmpty) {
+                    await api.uploadBotAvatar(id, targetId, bytes, avatarMime!);
                   }
                 }
                 if (sheet.mounted) Navigator.pop(sheet);
@@ -1209,17 +1384,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             children: [
                               for (final preset in icons)
                                 ChoiceChip(
-                                  label: Text(preset),
+                                  label: Icon(botPresetIcon(preset), size: 20),
                                   selected: icon == preset,
-                                  onSelected: (_) =>
-                                      redraw(() => icon = preset),
+                                  onSelected: (_) => redraw(() {
+                                    icon = preset;
+                                    avatarBytes = null;
+                                    avatarMime = null;
+                                  }),
                                 ),
                             ],
                           ),
                           TextButton.icon(
                             icon: const Icon(Icons.image_outlined),
                             label: const Text(
-                              'Choose icon image (up to 32 KB)',
+                              'Choose profile picture (up to 1 MiB)',
                             ),
                             onPressed: () async {
                               final picked = await FilePicker.pickFiles();
@@ -1235,31 +1413,44 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 'webp' => 'webp',
                                 _ => '',
                               };
-                              final bytes = await file.readAsBytes();
-                              if (mime.isEmpty ||
-                                  bytes.isEmpty ||
-                                  bytes.length > 32 * 1024) {
+                              final length = await file.length();
+                              if (mime.isEmpty || length == 0 || length > 1024 * 1024) {
                                 if (sheet.mounted) {
                                   ScaffoldMessenger.of(sheet).showSnackBar(
                                     const SnackBar(
                                       content: Text(
-                                        'Choose a PNG, JPEG, or WebP image under 32 KB.',
+                                        'Choose a PNG, JPEG, or WebP image up to 1 MiB.',
                                       ),
                                     ),
                                   );
                                 }
                                 return;
                               }
-                              if (sheet.mounted) {
-                                redraw(
-                                  () => icon =
-                                      'data:image/$mime;base64,${base64Encode(bytes)}',
-                                );
-                              }
+                              final bytes = await file.readAsBytes();
+                              if (bytes.isEmpty || bytes.length > 1024 * 1024) return;
+                              if (!sheet.mounted) return;
+                              redraw(() {
+                                avatarBytes = bytes;
+                                avatarMime = 'image/$mime';
+                                if (bot == null) icon = '🤖';
+                              });
                             },
                           ),
-                          if (icon.startsWith('data:image/'))
-                            const Text('Custom image selected'),
+                          if (avatarBytes != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Row(
+                                children: [
+                                  ClipOval(
+                                    child: Image.memory(avatarBytes!, width: 42, height: 42,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined)),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  const Text('Picture selected · saved after bot details'),
+                                ],
+                              ),
+                            ),
                           TextField(
                             controller: folder,
                             decoration: InputDecoration(
@@ -1331,45 +1522,155 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _selectBot(BotProfile bot) async {
-    if (_switchingBot ||
-        selectedBot?.id == bot.id &&
-            store.conversations.any(
-              (item) =>
-                  item.sessionId == store.activeSessionId &&
-                  item.botId == bot.id,
-            )) {
-      return;
+    if (selectedBot?.id == bot.id && !_switchingBot) return;
+    final selection = ++_switchGeneration;
+    final origin = _switchOrigin ?? _captureSwitchOrigin();
+    _switchOrigin = origin;
+    if (!_switchingBot) {
+      _eventCancellation?.cancel();
+      unawaited(_sub?.cancel());
+      ++_eventGeneration;
     }
+    setState(() {
+      _switchingBot = true;
+      _contactThreadLoading = true;
+      _openingBotId = bot.id;
+      selectedBot = bot;
+      _phoneContactsOpen = false;
+      error = null;
+    });
     try {
       final data = await api.listConversations(id, botId: bot.id);
+      if (!mounted || selection != _switchGeneration) return;
       var remote = ((data['conversations'] as List?) ?? const [])
           .whereType<Map>()
-          .map(
-            (item) =>
-                ConversationMeta.fromJson(Map<String, dynamic>.from(item)),
-          )
+          .map((item) => ConversationMeta.fromJson(Map<String, dynamic>.from(item)))
           .toList();
+      var active = data['active'] as String?;
       if (remote.isEmpty) {
         final created = await api.startNewConversation(id, botId: bot.id);
+        if (!mounted || selection != _switchGeneration) return;
+        active = created['active'] as String?;
         remote = ((created['conversations'] as List?) ?? const [])
             .whereType<Map>()
-            .map(
-              (item) =>
-                  ConversationMeta.fromJson(Map<String, dynamic>.from(item)),
-            )
+            .map((item) => ConversationMeta.fromJson(Map<String, dynamic>.from(item)))
             .toList();
       }
-      await store.mergeRemote(remote, selectActive: false);
-      if (!mounted) return;
-      final selected = remote.where((item) => item.botId == bot.id).firstOrNull;
+      if (!mounted || selection != _switchGeneration) return;
+      final selected = remote.where((item) => item.botId == bot.id && item.sessionId == active).firstOrNull ??
+          remote.where((item) => item.botId == bot.id).firstOrNull;
       if (selected == null) {
         throw StateError('No conversation returned for ${bot.name}');
       }
-      await _openConversation(selected);
+      await _openConversation(selected, switchGeneration: selection);
+      if (mounted && selection == _switchGeneration && !_switchingBot &&
+          selectedBot?.id == bot.id) {
+        await store.mergeRemote(remote, selectActive: false);
+      }
     } catch (failure) {
-      if (mounted) setState(() => error = failure.toString());
+      if (!mounted || selection != _switchGeneration) return;
+      setState(() {
+        _restoreSwitchOrigin(origin);
+        error = failure.toString();
+      });
+      _listen();
     }
   }
+
+  void _showSandboxPicker() {
+    final catalog = context.read<SessionController>().workspaces;
+    unawaited(catalog.refresh(force: false));
+    showAdaptivePanel<void>(
+      context: context,
+      builder: (sheet) => SafeArea(
+        child: SizedBox(
+          height: (MediaQuery.sizeOf(sheet).height * 0.6).clamp(240.0, 560.0),
+          child: Column(children: [
+            const ListTile(title: Text('Switch sandbox'),
+                subtitle: Text('Chats and agents stay with their workspace')),
+            Expanded(child: ListenableBuilder(
+              listenable: catalog,
+              builder: (context, _) => ListView(children: [
+                for (final workspace in catalog.items)
+                  ListTile(
+                    selected: workspace.id == id,
+                    leading: const Icon(Icons.cloud_outlined),
+                    title: Text(workspace.name),
+                    subtitle: Text(workspace.runtimeLabel),
+                    trailing: workspace.id == id ? const Icon(Icons.check, color: Vc.green) : null,
+                    onTap: () {
+                      Navigator.pop(sheet);
+                      if (workspace.id != id && mounted) {
+                        context.go('/chat/${workspace.id}', extra: workspace);
+                      }
+                    },
+                  ),
+              ]),
+            )),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _agentRow(BotProfile bot, {bool compact = false}) {
+    final active = _botActive(bot);
+    final queued = _botWaiting(bot);
+    final unread = _botUnread(bot);
+    return ListTile(
+      key: ValueKey('agent-${bot.id}'),
+      selected: bot.id == _selectedBotId,
+      selectedTileColor: Vc.green.withValues(alpha: 0.09),
+      contentPadding: EdgeInsets.symmetric(horizontal: compact ? 12 : 18, vertical: 4),
+      leading: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          BotAvatar(bot: bot, instanceId: id, client: api, radius: compact ? 20 : 23),
+          if (active)
+            const Positioned(right: -2, bottom: -2,
+              child: StatusDot('running', size: 12),
+            ),
+        ],
+      ),
+      title: Text(bot.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: active
+          ? const TypingDots(label: 'Working')
+          : Text(queued ? 'Queued · waiting for a turn' : _botPreview(bot),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: queued ? Vc.amber : Vc.muted, fontSize: 12)),
+      trailing: unread > 0
+          ? CircleAvatar(radius: 11, backgroundColor: Vc.green,
+              child: Text('$unread', style: const TextStyle(color: Colors.black,
+                  fontWeight: FontWeight.w800, fontSize: 11)))
+          : compact ? null : IconButton(
+              tooltip: 'Edit ${bot.name}',
+              onPressed: () => unawaited(_editBot(bot)),
+              icon: const Icon(Icons.more_horiz, size: 20)),
+      onTap: () => unawaited(_selectBot(bot)),
+    );
+  }
+
+  Widget _agentContacts({bool compact = false}) => Material(
+    color: Vc.surface,
+    child: Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 8, 6),
+          child: Row(children: [
+            const Expanded(child: Text('Chats', style: TextStyle(fontSize: 19,
+                fontWeight: FontWeight.w700))),
+            IconButton(tooltip: 'New bot', icon: const Icon(Icons.person_add_alt_1_outlined),
+                onPressed: () => unawaited(_editBot())),
+          ]),
+        ),
+        Expanded(child: ListView.builder(
+          itemCount: bots.length,
+          itemBuilder: (_, index) => _agentRow(bots[index], compact: compact),
+        )),
+      ],
+    ),
+  );
 
   void _showBots() {
     unawaited(_refreshBots());
@@ -1377,86 +1678,53 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       context: context,
       builder: (sheet) => SafeArea(
         child: SizedBox(
-          height: (MediaQuery.sizeOf(sheet).height * 0.68).clamp(250.0, 600.0),
+          height: (MediaQuery.sizeOf(sheet).height * 0.72).clamp(290.0, 650.0),
           child: Column(
             children: [
               ListTile(
-                title: const Text('Bots'),
-                subtitle: const Text(
-                  'One sandbox · separate chats and default folders',
-                ),
+                title: const Text('Chats'),
+                subtitle: const Text('Your agents in this sandbox'),
                 trailing: IconButton(
                   tooltip: 'New bot',
                   onPressed: () {
                     Navigator.pop(sheet);
                     unawaited(_editBot());
                   },
-                  icon: const Icon(Icons.add),
+                  icon: const Icon(Icons.person_add_alt_1_outlined),
                 ),
               ),
-              Expanded(
-                child: ListView(
-                  children: [
-                    for (final bot in bots)
-                      ListTile(
-                        selected: bot.id == _selectedBotId,
-                        leading: CircleAvatar(
-                          child: bot.isImage
-                              ? ClipOval(
-                                  child: Image.memory(
-                                    base64Decode(bot.icon.split(',').last),
-                                    width: 36,
-                                    height: 36,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, _, _) =>
-                                        const Icon(Icons.smart_toy_outlined),
-                                  ),
-                                )
-                              : Text(bot.icon),
-                        ),
-                        title: Text(bot.name),
-                        subtitle: Text(
-                          bot.defaultFolder,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (store.conversations.any(
-                              (item) =>
-                                  item.botId == bot.id &&
-                                  botRunning.contains(item.sessionId),
-                            ))
-                              const Icon(Icons.bolt, size: 16, color: Vc.green),
-                            if (store.conversations.any(
-                              (item) =>
-                                  item.botId == bot.id &&
-                                  botUnread.contains(item.sessionId),
-                            ))
-                              const Icon(
-                                Icons.circle,
-                                size: 10,
-                                color: Vc.amber,
-                              ),
-                            IconButton(
-                              tooltip: 'Edit ${bot.name}',
-                              onPressed: () {
-                                Navigator.pop(sheet);
-                                unawaited(_editBot(bot));
-                              },
-                              icon: const Icon(Icons.tune, size: 18),
-                            ),
-                          ],
-                        ),
-                        onTap: () {
+              Expanded(child: ListView(
+                children: [for (final bot in bots)
+                  ListTile(
+                    key: ValueKey('agent-${bot.id}'),
+                    selected: bot.id == _selectedBotId,
+                    leading: BotAvatar(bot: bot, instanceId: id, client: api),
+                    title: Text(bot.name),
+                    subtitle: _botActive(bot)
+                        ? const TypingDots(label: 'Working')
+                        : Text(_botWaiting(bot) ? 'Queued · waiting for a turn' : _botPreview(bot),
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (_botUnread(bot) > 0)
+                        CircleAvatar(radius: 10, backgroundColor: Vc.green,
+                            child: Text('${_botUnread(bot)}', style: const TextStyle(
+                                fontSize: 10, color: Colors.black))),
+                      IconButton(
+                        tooltip: 'Edit ${bot.name}',
+                        onPressed: () {
                           Navigator.pop(sheet);
-                          unawaited(_selectBot(bot));
+                          unawaited(_editBot(bot));
                         },
+                        icon: const Icon(Icons.more_horiz),
                       ),
-                  ],
-                ),
-              ),
+                    ]),
+                    onTap: () {
+                      Navigator.pop(sheet);
+                      unawaited(_selectBot(bot));
+                    },
+                  ),
+                ],
+              )),
             ],
           ),
         ),
@@ -3186,8 +3454,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 onUpdate: () => unawaited(_runCliUpdate()),
                 onDismiss: () => unawaited(_dismissCliUpdate()),
               ),
-            if (reconnecting) const ReconnectBar(),
-            if (_chatQueued)
+            if (reconnecting && !_contactThreadLoading) const ReconnectBar(),
+            if (_chatQueued && !_contactThreadLoading)
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                 child: Text(
@@ -3195,7 +3463,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   style: TextStyle(color: Vc.amber, fontSize: 12),
                 ),
               ),
-            if (backgroundTasks.isNotEmpty)
+            if (backgroundTasks.isNotEmpty && !_contactThreadLoading)
               BackgroundTasksBar(tasks: backgroundTasks.values.toList()),
             if (error != null)
               ErrorBanner(
@@ -3204,7 +3472,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 onDismiss: () => setState(() => error = null),
               ),
             Expanded(
-              child: paymentBlocked
+              child: _contactThreadLoading
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.chat_bubble_outline, size: 28, color: Vc.muted),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Opening ${bots.where((bot) => bot.id == _openingBotId).firstOrNull?.name ?? 'chat'}…',
+                            style: const TextStyle(color: Vc.muted),
+                          ),
+                        ],
+                      ),
+                    )
+                  : paymentBlocked
                   ? EmptyState(
                       icon: Icons.lock_outline,
                       title: 'Subscription needed',
@@ -3263,13 +3545,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       },
                     ),
             ),
-            if (pending.isNotEmpty)
+            if (pending.isNotEmpty && !_contactThreadLoading)
               DraftTray(
                 items: pending,
                 onRemove: (f) => setState(() => pending.remove(f)),
                 onOpen: _openDraft,
               ),
-            if (palette) _commandOverlay(),
+            if (palette && !_contactThreadLoading) _commandOverlay(),
             if (paymentBlocked)
               SafeArea(
                 child: Padding(
@@ -3283,7 +3565,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 ),
               )
-            else
+            else if (!_contactThreadLoading)
               SafeArea(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3302,7 +3584,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if ((working || showKickoff) &&
+                          if (!_contactThreadLoading && (working || showKickoff) &&
                               !events.any(
                                 (e) =>
                                     e.type == 'progress' &&
@@ -3399,7 +3681,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                         ? 'Send (Enter)'
                                         : 'Send',
                                     onPressed:
-                                        sending ||
+                                        _switchingBot ||
+                                            sending ||
                                             (_botsEnabled &&
                                                 (working || _chatQueued)) ||
                                             (_input.text.trim().isEmpty &&
@@ -3508,36 +3791,40 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         DesktopCommand.search: _showFind,
       },
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _botsEnabled ? '$instanceName · $_selectedBotName' : instanceName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.3,
-              ),
-            ),
-            if (_headerClock != null)
-              Text(
-                _headerClock!,
-                style: TextStyle(
-                  color: working ? Vc.greenSoft : Vc.muted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
+        title: Row(children: [
+          if (_botsEnabled && !_phoneContactsOpen && selectedBot != null) ...[
+            BotAvatar(bot: selectedBot!, instanceId: id, client: api, radius: 18),
+            const SizedBox(width: 10),
           ],
-        ),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_phoneContactsOpen ? 'Chats' : _botsEnabled ? _selectedBotName : instanceName,
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+              Text(_botsEnabled ? instanceName : (_headerClock ?? 'Chat'),
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Vc.muted, fontSize: 11)),
+            ],
+          )),
+        ]),
         actions: [
+          ListenableBuilder(
+            listenable: context.read<SessionController>().workspaces,
+            builder: (context, _) => context.read<SessionController>().workspaces.items.length > 1
+                ? TextButton.icon(
+                    onPressed: _showSandboxPicker,
+                    icon: const Icon(Icons.swap_horiz_rounded, size: 17),
+                    label: const Text('Sandbox'),
+                  )
+                : const SizedBox.shrink(),
+          ),
           if (_botsEnabled)
             IconButton(
               tooltip: 'Bots',
-              onPressed: _showBots,
-              icon: const Icon(Icons.smart_toy_outlined),
+              onPressed: isDesktop ? _showBots : () => setState(() =>
+                  _phoneContactsOpen = !_phoneContactsOpen),
+              icon: Icon(_phoneContactsOpen ? Icons.chat_bubble_outline : Icons.people_outline),
             ),
           if (isDesktop) ...[
             IconButton(
@@ -3596,15 +3883,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ],
       ),
       body: isDesktop
-          ? DesktopChatWorkspace(
-              chat: transcript,
-              computer: computer,
-              showComputer: _desktopComputer,
-              onCloseComputer: _openComputer,
-              onRunCommand: _runComputerCommand,
-              onManualControl: _isSupercharge ? _openBrowserHandoff : null,
+          ? Row(
+              children: [
+                if (_botsEnabled && MediaQuery.sizeOf(context).width >= 1050) ...[
+                  SizedBox(width: 248, child: _agentContacts(compact: true)),
+                  const VerticalDivider(width: 1),
+                ],
+                Expanded(
+                  child: DesktopChatWorkspace(
+                    chat: transcript,
+                    computer: computer,
+                    showComputer: _desktopComputer,
+                    onCloseComputer: _openComputer,
+                    onRunCommand: _runComputerCommand,
+                    onManualControl: _isSupercharge ? _openBrowserHandoff : null,
+                  ),
+                ),
+              ],
             )
-          : transcript,
+          : _botsEnabled && _phoneContactsOpen ? _agentContacts() : transcript,
     );
     if (isDesktop) return body;
     return WithForegroundTask(child: body);

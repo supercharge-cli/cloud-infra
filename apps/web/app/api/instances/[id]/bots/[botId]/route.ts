@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { BotInputError, exposedBot, getBot, updateBot, type BotInput } from '@/lib/bots';
 import { botsEnabled, syncBots } from '@/lib/bot-service';
+import { avatarVersion, pruneBotAvatars } from '@/lib/bot-avatars';
 import { requireChatInstance } from '@/lib/app-chat';
 
 type Ctx = { params: Promise<{ id: string; botId: string }> };
@@ -21,9 +22,15 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (!botsEnabled(gate.inst)) return NextResponse.json({ error: 'Supercharge E2B only' }, { status: 404 });
   try {
     const patch = await req.json() as Partial<BotInput> & { archived?: boolean };
+    const previous = await getBot(gate.inst, botId);
+    if (!previous) return NextResponse.json({ error: 'Bot not found' }, { status: 404 });
     const bot = await updateBot(gate.inst, botId, patch);
     if (!bot) return NextResponse.json({ error: 'Bot not found' }, { status: 404 });
     await syncBots(gate.inst);
+    if (patch.icon !== undefined && patch.icon !== previous.icon &&
+        avatarVersion(previous.icon) && !avatarVersion(bot.icon)) {
+      await pruneBotAvatars(gate.inst, botId, '').catch(() => undefined);
+    }
     return NextResponse.json({ bot: exposedBot(bot) });
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, {

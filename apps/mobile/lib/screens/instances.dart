@@ -10,6 +10,7 @@ import '../desktop/shortcuts.dart';
 import '../api/models.dart';
 import '../chat/cli_update.dart';
 import '../state/session.dart';
+import '../state/workspaces.dart';
 import '../theme.dart';
 import '../widgets/side_panel.dart';
 import '../widgets/ui.dart';
@@ -21,18 +22,35 @@ class InstancesScreen extends StatefulWidget {
 }
 
 class _InstancesScreenState extends State<InstancesScreen> {
-  List<CloudInstance> items = [];
-  FreeQuota quota = FreeQuota();
-  PlanInfo? plan;
-  bool loading = true;
-  String? error;
+  WorkspaceCatalog? _catalog;
+  WorkspaceCatalog get catalog => _catalog ?? context.read<SessionController>().workspaces;
+  List<CloudInstance> get items => catalog.items;
+  FreeQuota get quota => catalog.quota;
+  PlanInfo? get plan => catalog.plan;
+  bool get loading => catalog.loading;
+  String? get error => catalog.error;
   String? overlay;
   final cliById = <String, CliVersion>{};
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = context.read<SessionController>().workspaces;
+    if (_catalog == next) return;
+    _catalog?.removeListener(_catalogChanged);
+    _catalog = next;
+    next.addListener(_catalogChanged);
+  }
+
+  void _catalogChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
+    _catalog?.removeListener(_catalogChanged);
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -43,24 +61,14 @@ class _InstancesScreenState extends State<InstancesScreen> {
   @override
   void initState() {
     super.initState();
-    _reload();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_reload());
+    });
   }
 
   Future<void> _reload() async {
-    setState(() {
-      loading = items.isEmpty;
-      error = null;
-    });
-    try {
-      final data = await api.dashboard();
-      items = data.instances;
-      quota = data.quota;
-      plan = data.plan;
-    } catch (e) {
-      error = e.toString();
-    }
-    if (mounted) setState(() => loading = false);
-    unawaited(_checkCliUpdates());
+    await catalog.refresh();
+    if (mounted && catalog.error == null) unawaited(_checkCliUpdates());
   }
 
   Future<void> _checkCliUpdates() async {
@@ -112,7 +120,8 @@ class _InstancesScreenState extends State<InstancesScreen> {
     setState(() => overlay = 'Provisioning sandbox…');
     try {
       final created = await api.createInstance(name, runtime: runtime);
-      await _reload();
+      catalog.upsert(created);
+      unawaited(_reload());
       if (!mounted) return;
       context.push('/chat/${created.id}', extra: created);
     } on ApiException catch (e) {

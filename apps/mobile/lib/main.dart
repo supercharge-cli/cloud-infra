@@ -62,17 +62,25 @@ class VectraApp extends StatefulWidget {
   State<VectraApp> createState() => _VectraAppState();
 }
 
-class _VectraAppState extends State<VectraApp> {
+class _VectraAppState extends State<VectraApp> with WidgetsBindingObserver {
   late final SessionController session;
   late final GoRouter router;
   late final AppLinks _appLinks;
   StreamSubscription<Uri>? _linkSub;
+  Timer? _workspaceRefresh;
+  bool _foreground = true;
   Uri? _pendingLink;
 
   @override
   void initState() {
     super.initState();
     session = SessionController(apiBase: apiBase);
+    WidgetsBinding.instance.addObserver(this);
+    _workspaceRefresh = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_foreground && session.user != null) {
+        unawaited(session.workspaces.refresh(force: false));
+      }
+    });
     router = GoRouter(
       initialLocation: '/',
       overridePlatformDefaultLocation: true,
@@ -201,7 +209,17 @@ class _VectraAppState extends State<VectraApp> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (_foreground && session.user != null) {
+      unawaited(session.workspaces.refresh());
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _workspaceRefresh?.cancel();
     _linkSub?.cancel();
     session.removeListener(_flushPendingLink);
     session.dispose();

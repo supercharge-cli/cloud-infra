@@ -1,14 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../api/client.dart';
 import '../api/models.dart';
+import '../chat/bot_avatar.dart';
+import 'workspaces.dart';
 
 class SessionController extends ChangeNotifier {
-  SessionController({required this.apiBase});
+  SessionController({required this.apiBase}) {
+    workspaces = WorkspaceCatalog(() => client);
+  }
 
   final String apiBase;
   final _store = const FlutterSecureStorage();
+  late final WorkspaceCatalog workspaces;
 
   VectraClient client = VectraClient(baseUrl: '');
   AuthUser? user;
@@ -27,10 +34,13 @@ class SessionController extends ChangeNotifier {
         await _store.delete(key: 'token');
         client.token = null;
         user = null;
+        workspaces.reset();
+        BotAvatar.clearCache();
       }
     }
     ready = true;
     notifyListeners();
+    if (user != null) unawaited(workspaces.refresh());
   }
 
   void setError(String? value) {
@@ -42,6 +52,8 @@ class SessionController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
+      workspaces.reset();
+      BotAvatar.clearCache();
       client = VectraClient(baseUrl: apiBase);
       final result = register
           ? await client.register(email, password)
@@ -53,10 +65,12 @@ class SessionController extends ChangeNotifier {
       user = result.user;
       await _store.write(key: 'token', value: result.token);
       await _store.delete(key: 'apiBase');
+      unawaited(workspaces.refresh());
     } catch (e) {
       error = e.toString();
     }
     notifyListeners();
+    if (user != null) unawaited(workspaces.refresh());
   }
 
   /// Paseo-style: phone talks to a Supercharge daemon (host + password).
@@ -69,6 +83,8 @@ class SessionController extends ChangeNotifier {
       if (!base.startsWith('http://') && !base.startsWith('https://')) {
         base = 'http://$base';
       }
+      workspaces.reset();
+      BotAvatar.clearCache();
       client = VectraClient(baseUrl: base);
       final result = await client.login('server@supercharge', password);
       if (result.token.isEmpty) {
@@ -78,14 +94,23 @@ class SessionController extends ChangeNotifier {
       user = result.user;
       await _store.write(key: 'token', value: result.token);
       await _store.write(key: 'apiBase', value: base);
+      unawaited(workspaces.refresh());
     } catch (e) {
       error = e.toString();
     }
     notifyListeners();
   }
 
+  @override
+  void dispose() {
+    workspaces.dispose();
+    super.dispose();
+  }
+
   Future<void> signOut() async {
     user = null;
+    workspaces.reset();
+    BotAvatar.clearCache();
     client.token = null;
     await _store.delete(key: 'token');
     await _store.delete(key: 'apiBase');

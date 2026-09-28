@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -11,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../api/models.dart';
 import '../main.dart';
 import '../state/session.dart';
+import '../state/workspaces.dart';
 import '../theme.dart';
 import 'ui.dart';
 
@@ -142,29 +145,39 @@ class VectraSidePanel extends StatefulWidget {
 }
 
 class _VectraSidePanelState extends State<VectraSidePanel> {
-  List<CloudInstance> items = [];
-  bool loading = true;
+  WorkspaceCatalog? _catalog;
+  List<CloudInstance> get items => _catalog?.items ?? const [];
+  bool get loading => _catalog?.loading ?? false;
 
   @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final data = await context.read<SessionController>().client.dashboard();
-      if (!mounted) return;
-      setState(() {
-        items = data.instances;
-        loading = false;
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = context.read<SessionController>().workspaces;
+    if (_catalog == next) return;
+    _catalog?.removeListener(_catalogChanged);
+    _catalog = next;
+    next.addListener(_catalogChanged);
+    if (!next.initialized && !next.loading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _catalog == next && !next.initialized && !next.loading) {
+          unawaited(next.refresh());
+        }
       });
-    } catch (_) {
-      if (mounted) setState(() => loading = false);
     }
   }
 
+  void _catalogChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _catalog?.removeListener(_catalogChanged);
+    super.dispose();
+  }
+
   void _go(String path, {Object? extra}) {
+    unawaited(_catalog?.refresh(force: false));
     final router = GoRouter.of(context);
     final loc = GoRouterState.of(context).uri.path;
     if (!widget.embedded) Navigator.of(context).pop();
@@ -444,8 +457,7 @@ class _VectraSidePanelState extends State<VectraSidePanel> {
                     onPressed: loading
                         ? null
                         : () {
-                            setState(() => loading = true);
-                            _load();
+                            unawaited(_catalog?.refresh());
                           },
                     icon: const Icon(Icons.refresh, size: 16),
                   ),

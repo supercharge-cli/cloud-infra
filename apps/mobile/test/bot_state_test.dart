@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:vectra_cloud/api/models.dart';
 import 'package:vectra_cloud/chat/chat_store.dart';
+import 'package:vectra_cloud/chat/bot_profile.dart';
 
 class _Paths extends PathProviderPlatform {
   _Paths(this.root);
@@ -37,6 +38,17 @@ void main() {
 
   test('legacy conversations belong to Main', () {
     expect(ConversationMeta.fromJson({'sessionId': 'old'}).botId, 'main');
+  });
+
+  test('profile picture reference cannot become an arbitrary avatar URL', () {
+    BotProfile profile(String icon) => BotProfile.fromJson({
+      'id': 'a', 'name': 'A', 'icon': icon, 'instructions': '',
+      'defaultFolder': '/home/user/workspace/bots/a', 'revision': 1,
+    });
+    expect(profile('avatar:12345678-1234-4123-8123-123456789abc').avatarVersion,
+        '12345678-1234-4123-8123-123456789abc');
+    expect(profile('avatar:../../instance').avatarVersion, isNull);
+    expect(profile('🤖').isImage, false);
   });
 
   test(
