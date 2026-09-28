@@ -64,7 +64,7 @@ void main() {
       await DesktopNative.inlineDispose(DesktopNative.previewSurface);
       await DesktopNative.inlineLoad(
         DesktopNative.viewerSurface,
-        'http://127.0.0.1:12345/capability/',
+        'http://127.0.0.1:12345/capability/#path=vnc&view_only=1&autoconnect=1',
       );
       expect(calls.map((call) => call.method), [
         'inlineLoad',
@@ -76,7 +76,7 @@ void main() {
       ]);
       expect(calls.last.arguments, {
         'id': 'ai-viewer',
-        'url': 'http://127.0.0.1:12345/capability/',
+        'url': 'http://127.0.0.1:12345/capability/#path=vnc&view_only=1&autoconnect=1',
       });
       expect(calls[1].arguments, {
         'id': 'preview',

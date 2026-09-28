@@ -73,7 +73,9 @@ const gchar* string_field(FlValue* args, const char* name) {
 bool allowed_url(const gchar* url, bool viewer) {
   if (!url) return false;
   g_autoptr(GUri) uri = g_uri_parse(url, G_URI_FLAGS_NONE, nullptr);
-  if (!uri || !g_uri_get_host(uri) || g_uri_get_userinfo(uri) || g_uri_get_fragment(uri)) return false;
+  if (!uri || !g_uri_get_host(uri) || g_uri_get_userinfo(uri)) return false;
+  const gchar* fragment = g_uri_get_fragment(uri);
+  if (fragment && std::strlen(fragment) > 4096) return false;
   const gchar* scheme = g_uri_get_scheme(uri);
   if (!scheme || (g_strcmp0(scheme, "http") != 0 && g_strcmp0(scheme, "https") != 0)) return false;
   if (!viewer) return true;
