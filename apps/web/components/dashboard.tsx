@@ -160,6 +160,13 @@ export function Dashboard({ email }: { email: string }) {
   } | null>(null);
   /** Dismissed latest version per instance (session memory). */
   const [cliDismissed, setCliDismissed] = useState<Record<string, string>>({});
+  const [systemUpdate, setSystemUpdate] = useState<{
+    current: string | null;
+    latest: string | null;
+    notes: string[];
+    updateAvailable: boolean;
+  } | null>(null);
+  const [systemDismissed, setSystemDismissed] = useState<Record<string, string>>({});
 
   // form fields
   const [provider, setProvider] = useState("pollinations");
@@ -504,6 +511,21 @@ export function Dashboard({ email }: { email: string }) {
           ),
         )
         .catch(() => setCliUpdate(null));
+      void fetch(`/api/instances/${id}/system-version`)
+        .then(async (res) => (res.ok ? await res.json() : null))
+        .then((value) =>
+          setSystemUpdate(
+            value
+              ? {
+                  current: value.current || null,
+                  latest: value.latest || null,
+                  notes: Array.isArray(value.notes) ? value.notes : [],
+                  updateAvailable: Boolean(value.updateAvailable),
+                }
+              : null,
+          ),
+        )
+        .catch(() => setSystemUpdate(null));
     } finally {
       setBusy(false);
     }
@@ -587,6 +609,41 @@ export function Dashboard({ email }: { email: string }) {
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Move to new sandbox failed");
       }
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applySystemUpdateClick() {
+    if (!selected || !systemUpdate?.latest) return;
+    setBusy(true);
+    setLogs("");
+    try {
+      const res = await fetch(`/api/instances/${selected}/system-update`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: systemUpdate.latest }),
+      });
+      const data = await res.json();
+      const notes = Array.isArray(data.notes) ? data.notes.join("\n") : "";
+      setLogs(
+        [
+          data.ok
+            ? `System update OK · ${data.from || "none"} → ${data.to || systemUpdate.latest}`
+            : data.error || "System update failed. Version stamp was left unchanged.",
+          notes,
+          ...(data.logs || []),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+      if (!res.ok || !data.ok) throw new Error(data.error || "System update failed");
+      setSystemUpdate((prev) =>
+        prev ? { ...prev, current: data.to || prev.latest, updateAvailable: false, notes: data.notes || prev.notes } : prev,
+      );
       await refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -1400,6 +1457,54 @@ export function Dashboard({ email }: { email: string }) {
                       disabled={busy}
                       onClick={dismissCliUpdate}
                       className="rounded-lg border border-sky-800/60 px-3 py-1.5 text-xs text-sky-100 hover:bg-sky-950/50 disabled:opacity-50"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          {systemUpdate?.updateAvailable &&
+            systemUpdate.latest &&
+            selectedInst.runtime === "supercharge" &&
+            systemDismissed[selectedInst.id] !== systemUpdate.latest && (
+              <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-50">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <strong className="text-white">Sandbox system update available</strong>
+                    <p className="mt-1 text-emerald-100/90">
+                      {systemUpdate.latest}
+                      {systemUpdate.current ? ` (this sandbox has ${systemUpdate.current})` : " (this sandbox has no system stamp yet)"}
+                      . Stops the wake server, file server, and browser, replaces those files, then starts them again.
+                      Your workspace stays on this sandbox.
+                    </p>
+                    {systemUpdate.notes.length > 0 && (
+                      <ul className="mt-2 list-disc pl-5 text-emerald-100/80">
+                        {systemUpdate.notes.map((note) => (
+                          <li key={note}>{note}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void applySystemUpdateClick()}
+                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                    >
+                      Update this sandbox
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        setSystemDismissed((current) => ({
+                          ...current,
+                          [selectedInst.id]: systemUpdate.latest!,
+                        }))
+                      }
+                      className="rounded-lg border border-emerald-800/60 px-3 py-1.5 text-xs text-emerald-100 hover:bg-emerald-950/50 disabled:opacity-50"
                     >
                       Dismiss
                     </button>
