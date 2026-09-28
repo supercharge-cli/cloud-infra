@@ -73,7 +73,7 @@ class _DesktopShellState extends State<DesktopShell> {
                   children: [
                     if (showSidebar) ...[
                       SizedBox(
-                        width: 232,
+                        width: 292,
                         child: VectraSidePanel(
                           key: const ValueKey('desktop-sidebar'),
                           currentInstanceId: instanceId,

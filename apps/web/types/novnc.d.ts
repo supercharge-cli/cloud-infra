@@ -3,6 +3,8 @@ declare module "@novnc/novnc" {
     constructor(target: HTMLElement, url: string, options?: Record<string, unknown>);
     scaleViewport: boolean;
     resizeSession: boolean;
+    viewOnly: boolean;
+    focusOnClick: boolean;
     addEventListener(type: string, listener: () => void): void;
     disconnect(): void;
   }

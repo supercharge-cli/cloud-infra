@@ -17,6 +17,7 @@ class DesktopChatWorkspace extends StatefulWidget {
     required this.onCloseComputer,
     required this.onRunCommand,
     required this.onManualControl,
+    this.browser,
   });
 
   final Widget chat;
@@ -25,6 +26,7 @@ class DesktopChatWorkspace extends StatefulWidget {
   final VoidCallback onCloseComputer;
   final Future<void> Function(String) onRunCommand;
   final Future<void> Function()? onManualControl;
+  final Widget? browser;
 
   @override
   State<DesktopChatWorkspace> createState() => _DesktopChatWorkspaceState();
@@ -164,7 +166,8 @@ class _DesktopChatWorkspaceState extends State<DesktopChatWorkspace> {
             const Divider(height: 1),
             Expanded(
               child: state.isBrowser
-                  ? ComputerBrowserView(state: state, compact: false)
+                  ? widget.browser ??
+                        ComputerBrowserView(state: state, compact: false)
                   : ComputerTerminalView(state: state, compact: false),
             ),
             const Divider(height: 1),
@@ -198,7 +201,7 @@ class _DesktopChatWorkspaceState extends State<DesktopChatWorkspace> {
                   ],
                 ),
               )
-            else
+            else if (widget.browser == null)
               Padding(
                 padding: const EdgeInsets.all(10),
                 child: Row(

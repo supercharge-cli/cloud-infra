@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Monitor,
   Check,
@@ -77,6 +77,25 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
   const [browserKey, setBrowserKey] = useState('Enter');
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [handoffWsUrl, setHandoffWsUrl] = useState('');
+  const [handoffExpires, setHandoffExpires] = useState(0);
+  const [viewerRevision, setViewerRevision] = useState(0);
+  const ownedHandoff = useRef(false);
+
+  useEffect(() => {
+    if (runtime !== 'supercharge' || disabled || tab !== 'browser') return;
+    let disposed = false;
+    void fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/vnc-ticket`, { method: 'POST' })
+      .then(async (response) => { const data = await response.json(); if (!response.ok || !data.wsUrl) throw new Error(data.error || 'Desktop ticket unavailable'); return data; })
+      .then((data) => { if (!disposed) setHandoffWsUrl(String(data.wsUrl)); })
+      .catch((error) => { if (!disposed) setMessage((error as Error).message); });
+    return () => { disposed = true; };
+  }, [runtime, disabled, instanceId, tab, viewerRevision]);
+
+  useEffect(() => () => {
+    if (ownedHandoff.current) void fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop' }), keepalive: true,
+    });
+  }, [instanceId]);
 
   const loadDirectory = useCallback(async (path: string) => {
     setLoadingFiles(true);
@@ -258,6 +277,9 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
 
   const handleHandoffDisconnected = useCallback(() => {
     setHandoffWsUrl('');
+    setHandoffExpires(0);
+    if (!ownedHandoff.current) { setViewerRevision((value) => value + 1); return; }
+    ownedHandoff.current = false;
     void fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -275,18 +297,33 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
     setHandoffBusy(true);
     setMessage('');
     try {
+      if (action === 'start') {
+        const statusResponse = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/chat/status`);
+        const status = await statusResponse.json();
+        if (!statusResponse.ok || typeof status.turn?.busy !== 'boolean') throw new Error('Cannot verify agent state. Reconnect before taking over.');
+        if (status.turn.busy || status.activeBotChats?.length || status.queuedBotChats?.length || status.backgroundTasks?.length) {
+          throw new Error('An agent is working or queued. Open its chat and stop that task before taking over.');
+        }
+      } else { setHandoffExpires(0); setHandoffWsUrl(''); }
       const handoff = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action, minutes: 10 }),
       });
       const data = await handoff.json().catch(() => ({}));
-      if (!handoff.ok) throw new Error(data.error || 'Browser handoff request failed');
+      if (!handoff.ok || data.ok !== true) throw new Error(data.error || 'Browser handoff request failed');
       if (action === 'stop') {
+        ownedHandoff.current = false;
+        setHandoffExpires(0);
+        setViewerRevision((value) => value + 1);
         setHandoffWsUrl('');
         setMessage('Browser control returned to Supercharge.');
         return;
       }
+      ownedHandoff.current = true;
+      const expiry = Number(data.expiresAt);
+      if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('Control lease is unavailable. Return control and retry.');
+      setHandoffExpires(expiry);
       const ticket = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/vnc-ticket`, {
         method: 'POST',
       });
@@ -354,14 +391,14 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 bg-amber-500/5 p-3 text-xs">
               <p className="text-amber-200/80">You are watching the AI&apos;s live E2B browser below. Open manual control only for login, MFA, OAuth, CAPTCHA, or another step that requires your input.</p>
               <div className="flex gap-2">
-                <button type="button" disabled={disabled || handoffBusy || Boolean(handoffWsUrl)} onClick={() => void setBrowserHandoff('start')} className="rounded border border-amber-400/50 px-3 py-1.5 text-amber-100 hover:bg-amber-400/10 disabled:opacity-50">Manual control</button>
-                <button type="button" disabled={disabled || handoffBusy || !handoffWsUrl} onClick={() => void setBrowserHandoff('stop')} className="rounded border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Return to AI</button>
+                <button type="button" disabled={disabled || handoffBusy || handoffExpires > Date.now()} onClick={() => void setBrowserHandoff('start')} className="rounded border border-amber-400/50 px-3 py-1.5 text-amber-100 hover:bg-amber-400/10 disabled:opacity-50">Take over</button>
+                <button type="button" disabled={disabled || handoffBusy || !ownedHandoff.current} onClick={() => void setBrowserHandoff('stop')} className="rounded border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Return to AI</button>
               </div>
             </div>
           ) : null}
           {handoffWsUrl ? (
             <div className="min-h-[520px] bg-zinc-950">
-              <BrowserHandoffView wsUrl={handoffWsUrl} onDisconnected={handleHandoffDisconnected} />
+              <BrowserHandoffView wsUrl={handoffWsUrl} viewOnly={handoffExpires <= Date.now()} expiresAt={handoffExpires} onDisconnected={handleHandoffDisconnected} />
             </div>
           ) : (
           <>

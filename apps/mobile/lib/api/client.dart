@@ -322,6 +322,14 @@ class VectraClient {
   Future<Map<String, dynamic>> listBots(String id) =>
       _json('GET', '/api/instances/$id/bots', timeout: _fast);
 
+  Future<Map<String, dynamic>> groupChat(String id) =>
+      _json('GET', '/api/instances/$id/group', timeout: _fast);
+
+  Future<Map<String, dynamic>> sendGroupMessage(
+    String id, String text, String requestId, List<String> mentions,
+  ) => _json('POST', '/api/instances/$id/group',
+      body: {'text': text, 'requestId': requestId, 'mentions': mentions}, timeout: _slow);
+
   Future<Map<String, dynamic>> createBot(
     String id,
     Map<String, dynamic> input,

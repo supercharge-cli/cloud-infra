@@ -2,16 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 class Vc {
-  static const bg = Color(0xFF07080A);
-  static const surface = Color(0xFF101114);
-  static const card = Color(0xFF14161A);
-  static const elevated = Color(0xFF1A1D23);
-  static const cardBorder = Color(0xFF2A2E36);
-  static const muted = Color(0xFFA1A1AA);
-  static const faint = Color(0xFF71717A);
-  static const green = Color(0xFF22C55E);
-  static const greenSoft = Color(0xFF4ADE80);
-  static const greenDim = Color(0xFF14532D);
+  static const bg = Color(0xFF0B141A);
+  static const surface = Color(0xFF111B21);
+  static const card = Color(0xFF1C2A32);
+  static const elevated = Color(0xFF202F38);
+  static const cardBorder = Color(0xFF314149);
+  static const muted = Color(0xFFAFBEC7);
+  static const faint = Color(0xFF93A6B2);
+  static const green = Color(0xFF35C5A3);
+  static const greenSoft = Color(0xFF6EE5C4);
+  static const greenDim = Color(0xFF164D40);
+  static const sentBubble = Color(0xFF145249);
   static const amber = Color(0xFFFBBF24);
   static const red = Color(0xFFF87171);
   static const blue = Color(0xFF60A5FA);
@@ -74,6 +75,7 @@ class Vc {
         scrolledUnderElevation: 0,
         centerTitle: false,
         titleTextStyle: TextStyle(
+          fontFamily: desktop ? 'Adwaita Sans' : 'Roboto',
           color: Colors.white,
           fontSize: 18,
           fontWeight: FontWeight.w700,
@@ -106,7 +108,7 @@ class Vc {
       chipTheme: ChipThemeData(
         backgroundColor: elevated,
         selectedColor: green.withValues(alpha: 0.18),
-        labelStyle: const TextStyle(color: Colors.white, fontSize: 12),
+        labelStyle: TextStyle(fontFamily: desktop ? 'Adwaita Sans' : 'Roboto', color: Colors.white, fontSize: 12),
         side: const BorderSide(color: cardBorder),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
       ),

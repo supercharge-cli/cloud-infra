@@ -7,6 +7,7 @@ String browserViewerDocument({
   bool controlling = false,
   int? expiresAt,
   int generation = 0,
+  bool compact = false,
 }) {
   const exportMarker = 'export{ne as default};';
   if (!desktop &&
@@ -49,9 +50,9 @@ button{padding:9px 14px;cursor:pointer}button:disabled{opacity:.5;cursor:default
 #screen{flex:1;min-height:0;overflow:hidden;position:relative;background:#0b0b0d}
 [hidden]{display:none!important}
 </style></head><body>
-<header id="toolbar" ${desktop ? '' : 'hidden'}>
+<header id="toolbar" ${desktop && !compact ? '' : 'hidden'}>
 <div class="row"><span class="title">AI browser</span><span id="mode">View only</span>
-<button id="retry">Reconnect</button><button id="take" disabled>Take control</button>
+<button id="retry">Reconnect</button><button id="take" disabled>Take over</button>
 <button id="done" hidden>Done &amp; continue</button></div>
 <p id="hint">This is the browser the AI is using, not your project preview. Watching does not interrupt the AI.</p>
 <textarea id="notes" hidden maxlength="4000" rows="2" aria-label="What did you change?" placeholder="Optional: tell the AI what you changed. Do not include passwords or other secrets."></textarea>
@@ -60,8 +61,13 @@ button{padding:9px 14px;cursor:pointer}button:disabled{opacity:.5;cursor:default
 <div id="error" role="alert" hidden></div><div id="screen"></div>
 <script type="module">
 ${desktop ? 'import RFB from "./rfb.mjs";' : moduleScript}
-const RFB=${desktop ? 'RFB' : 'window.SuperchargeNoVNC.RFB'};
+${desktop ? '' : 'const RFB=window.SuperchargeNoVNC.RFB;'}
 const initial=$initial;
+const settings=new URLSearchParams(location.hash.slice(1));
+let requestedViewOnly=settings.has('view_only')?settings.get('view_only')!=='0':initial.phase!=='controlling';
+const reconnectEnabled=settings.get('reconnect')!=='0';
+const reconnectDelay=Math.min(10000,Math.max(1000,Number(settings.get('reconnect_delay'))||2000));
+let reconnectTimer=null;
 const screen=document.getElementById('screen');
 const status=document.getElementById('status');
 const error=document.getElementById('error');
@@ -81,7 +87,7 @@ function notify(kind,extra={}){
 function message(text){status.textContent=text;}
 function showError(text){error.hidden=!text;error.textContent=text||'';}
 function mayControl(){
-  return !ended&&state.phase==='controlling'&&Number(state.expiresAt)>Date.now()
+  return !requestedViewOnly&&!ended&&state.phase==='controlling'&&Number(state.expiresAt)>Date.now()
     &&(!initial.desktop||Date.now()-lastStateAt<2500);
 }
 function applyMode(){
@@ -100,6 +106,7 @@ function applyMode(){
     :'This is the browser the AI is using, not your project preview. Watching does not interrupt the AI.';
 }
 function disconnect(){
+  clearTimeout(reconnectTimer);reconnectTimer=null;
   connected=false;
   const previous=rfb;rfb=null;
   if(previous){previous.viewOnly=true;previous.focusOnClick=false;previous.disconnect();}
@@ -128,6 +135,9 @@ function connect(url,generation){
       const text=event.detail.clean?'Browser view disconnected. Reconnect to watch again.'
         :safeReason||'Could not connect to the AI browser. Reconnect for a fresh ticket. The sandbox and gateway must support browser VNC.';
       message(text);notify('disconnected',{message:text});
+      if(initial.desktop&&reconnectEnabled&&!ended&&!state.busy){
+        clearTimeout(reconnectTimer);reconnectTimer=setTimeout(()=>action('reconnect'),reconnectDelay);
+      }
     });
     client.addEventListener('credentialsrequired',()=>{
       const text='The browser requested unsupported VNC credentials. Check the sandbox browser configuration.';
@@ -152,6 +162,9 @@ window.SuperchargeBrowser={suspend(){
 }};
 function update(next){
   state=next;lastStateAt=Date.now();
+  requestedViewOnly=next.phase!=='controlling';
+  settings.set('view_only',requestedViewOnly?'1':'0');
+  history.replaceState(null,'',location.pathname+location.search+'#'+settings.toString());
   const generation=Number(next.generation);
   if(currentGeneration!==generation&&rfb)disconnect();
   if(next.busy){disconnect();message(next.phase==='takingControl'?'Stopping the AI before enabling control…':'Returning control to the AI…');}

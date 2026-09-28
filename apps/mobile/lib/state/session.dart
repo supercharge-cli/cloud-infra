@@ -7,15 +7,18 @@ import '../api/client.dart';
 import '../api/models.dart';
 import '../chat/bot_avatar.dart';
 import 'workspaces.dart';
+import 'agents.dart';
 
 class SessionController extends ChangeNotifier {
   SessionController({required this.apiBase}) {
     workspaces = WorkspaceCatalog(() => client);
+    agents = AgentDirectory(() => client);
   }
 
   final String apiBase;
   final _store = const FlutterSecureStorage();
   late final WorkspaceCatalog workspaces;
+  late final AgentDirectory agents;
 
   VectraClient client = VectraClient(baseUrl: '');
   AuthUser? user;
@@ -24,7 +27,11 @@ class SessionController extends ChangeNotifier {
 
   Future<void> load() async {
     final savedBase = await _store.read(key: 'apiBase');
-    client = VectraClient(baseUrl: (savedBase != null && savedBase.isNotEmpty) ? savedBase : apiBase);
+    client = VectraClient(
+      baseUrl: (savedBase != null && savedBase.isNotEmpty)
+          ? savedBase
+          : apiBase,
+    );
     final token = await _store.read(key: 'token');
     if (token != null && token.isNotEmpty) {
       client.token = token;
@@ -35,6 +42,7 @@ class SessionController extends ChangeNotifier {
         client.token = null;
         user = null;
         workspaces.reset();
+        agents.reset();
         BotAvatar.clearCache();
       }
     }
@@ -48,11 +56,16 @@ class SessionController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> signIn(String email, String password, {bool register = false}) async {
+  Future<void> signIn(
+    String email,
+    String password, {
+    bool register = false,
+  }) async {
     error = null;
     notifyListeners();
     try {
       workspaces.reset();
+      agents.reset();
       BotAvatar.clearCache();
       client = VectraClient(baseUrl: apiBase);
       final result = register
@@ -84,6 +97,7 @@ class SessionController extends ChangeNotifier {
         base = 'http://$base';
       }
       workspaces.reset();
+      agents.reset();
       BotAvatar.clearCache();
       client = VectraClient(baseUrl: base);
       final result = await client.login('server@supercharge', password);
@@ -104,12 +118,14 @@ class SessionController extends ChangeNotifier {
   @override
   void dispose() {
     workspaces.dispose();
+    agents.dispose();
     super.dispose();
   }
 
   Future<void> signOut() async {
     user = null;
     workspaces.reset();
+    agents.reset();
     BotAvatar.clearCache();
     client.token = null;
     await _store.delete(key: 'token');

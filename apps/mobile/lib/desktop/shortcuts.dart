@@ -67,7 +67,7 @@ class CommandBinding {
 const desktopBindings = [
   CommandBinding(
     DesktopCommand.workspaces,
-    'Workspaces',
+    'Chats',
     LogicalKeyboardKey.digit1,
   ),
   CommandBinding(

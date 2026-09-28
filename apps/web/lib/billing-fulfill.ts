@@ -5,6 +5,7 @@
 import { addBillingPeriod, getPlan, type Plan } from "./billing";
 import { bootstrapAppInbox, createGatewaySession } from "./gateway-client";
 import { getDb } from "./mongodb";
+import { withWorkspaceCreation, WorkspaceLimitError } from './workspace-limit';
 import {
   createInstanceRecord,
   findPendingOrderByRazorpayId,
@@ -150,7 +151,9 @@ export async function fulfillPaidOrder(input: {
     };
   }
 
-  // new_instance
+  // New instance creation shares the same account lock as the free endpoint.
+  try {
+  return await withWorkspaceCreation(order.userId, async (): Promise<FulfillResult> => {
   const session = await createGatewaySession({
     strategy: "sandbox_full",
     runtime: order.runtime || "xibecode",
@@ -197,6 +200,12 @@ export async function fulfillPaidOrder(input: {
     paidUntil,
     plan: getPlan(),
   };
+  });
+  } catch (error) {
+    if (error instanceof WorkspaceLimitError) return { ok: false, status: 409,
+      error: `${error.message} Your payment is recorded; contact support for this order rather than paying again.` };
+    throw error;
+  }
 }
 
 /** Atomically mark order paid if still `created`. */

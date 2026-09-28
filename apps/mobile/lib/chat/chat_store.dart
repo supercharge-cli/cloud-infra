@@ -15,6 +15,7 @@ class ConversationMeta {
     this.status = 'active',
     this.parentSessionId,
     this.botId = 'main',
+    this.source = 'direct',
   });
 
   final String sessionId;
@@ -24,6 +25,7 @@ class ConversationMeta {
   String status;
   String? parentSessionId;
   String botId;
+  String source;
 
   factory ConversationMeta.fromJson(Map<String, dynamic> j) => ConversationMeta(
     sessionId: '${j['sessionId'] ?? ''}',
@@ -33,6 +35,7 @@ class ConversationMeta {
     status: '${j['status'] ?? 'active'}',
     parentSessionId: j['parentSessionId'] as String?,
     botId: '${j['botId'] ?? 'main'}',
+    source: '${j['source'] ?? 'direct'}',
   );
 
   Map<String, dynamic> toJson() => {
@@ -42,6 +45,7 @@ class ConversationMeta {
     'updatedAt': updatedAt,
     'status': status,
     'botId': botId,
+    'source': source,
     if (parentSessionId != null) 'parentSessionId': parentSessionId,
   };
 }

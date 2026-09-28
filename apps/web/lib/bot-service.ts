@@ -3,6 +3,7 @@ import { getBot, listBots, exposedBot, type Bot } from './bots';
 import { ensureBotCapability, getInstanceById, type Instance } from './store';
 import { hasInstanceAccess } from './billing';
 import { proxyInbox } from './app-chat';
+import { NextResponse } from 'next/server';
 
 export function botsEnabled(instance: Instance): boolean {
   return instance.runtime === 'supercharge' && instance.status !== 'destroyed';
@@ -31,6 +32,34 @@ export async function syncBots(instance: Instance): Promise<void> {
 export async function validBot(instance: Instance, id: string): Promise<Bot | null> {
   if (!botsEnabled(instance)) return null;
   return getBot(instance, id);
+}
+
+export type AgentCaller = { instance: Instance; botId: string; sessionId: string };
+
+export async function requireAgentCaller(req: Request, body: Record<string, unknown>): Promise<AgentCaller | NextResponse> {
+  const instanceId = typeof body.instanceId === 'string' ? body.instanceId : '';
+  const botId = typeof body.senderBotId === 'string' ? body.senderBotId : '';
+  const sessionId = typeof body.senderSessionId === 'string' ? body.senderSessionId : '';
+  const credential = req.headers.get('x-vectra-bot-capability') || '';
+  if (!instanceId || !botId || !sessionId || credential.length < 32 || credential.length > 128) {
+    return NextResponse.json({ error: 'Agent conversation identity required; update the sandbox runtime' }, { status: 401 });
+  }
+  const instance = await getInstanceById(instanceId);
+  if (!instance || !botsEnabled(instance) || !hasInstanceAccess(instance) || !await getBot(instance, botId)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  try {
+    const response = await proxyInbox(instance, '/v1/app/bots/authenticate', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ botId, sessionId, credential }),
+    });
+    if (!response.ok || (await response.json()).ok !== true) {
+      return NextResponse.json({ error: 'Agent conversation could not be verified' }, { status: 401 });
+    }
+    return { instance, botId, sessionId };
+  } catch {
+    return NextResponse.json({ error: 'Agent identity service unavailable' }, { status: 503 });
+  }
 }
 
 export async function authenticateBotCapability(instanceId: string, secret: string): Promise<Instance | null> {

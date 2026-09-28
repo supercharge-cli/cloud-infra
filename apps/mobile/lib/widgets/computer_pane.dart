@@ -70,6 +70,7 @@ class ComputerPage extends StatefulWidget {
     required this.onSelectTab,
     this.onRunCommand,
     this.onManualBrowserControl,
+    this.browser,
   });
 
   final ComputerState state;
@@ -78,6 +79,7 @@ class ComputerPage extends StatefulWidget {
   final ValueChanged<String> onSelectTab;
   final Future<void> Function(String command)? onRunCommand;
   final Future<void> Function()? onManualBrowserControl;
+  final Widget? browser;
 
   @override
   State<ComputerPage> createState() => _ComputerPageState();
@@ -244,7 +246,7 @@ class _ComputerPageState extends State<ComputerPage> {
                               ),
                               Expanded(
                                 child: state.isBrowser
-                                    ? ComputerBrowserView(
+                                    ? widget.browser ?? ComputerBrowserView(
                                         state: state,
                                         compact: false,
                                       )
@@ -293,7 +295,7 @@ class _ComputerPageState extends State<ComputerPage> {
                         ],
                       ),
                     )
-                  else if (state.isBrowser)
+                  else if (state.isBrowser && widget.browser == null)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                       child: Row(

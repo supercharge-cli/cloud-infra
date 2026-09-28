@@ -99,6 +99,10 @@ class _InstancesScreenState extends State<InstancesScreen> {
   }
 
   Future<void> _create() async {
+    if (items.isNotEmpty) {
+      context.go('/chat/${items.first.id}?group=1', extra: items.first);
+      return;
+    }
     final request = await showDialog<CreateInstanceRequest>(
       context: context,
       builder: (ctx) =>
@@ -163,7 +167,7 @@ class _InstancesScreenState extends State<InstancesScreen> {
     return AppScaffold(
       isRoot: true,
       commands: {
-        DesktopCommand.newWorkspace: overlay == null ? _create : null,
+        DesktopCommand.newWorkspace: overlay == null && items.isEmpty ? _create : null,
         DesktopCommand.refresh: overlay == null ? _reload : null,
         DesktopCommand.search: _searchFocus.requestFocus,
       },
@@ -176,7 +180,7 @@ class _InstancesScreenState extends State<InstancesScreen> {
                   icon: const Icon(Icons.refresh, size: 20),
                 ),
                 const SizedBox(width: 8),
-                Center(
+                if (items.isEmpty) Center(
                   child: FilledButton.icon(
                     onPressed: overlay == null ? _create : null,
                     icon: const Icon(Icons.add, size: 17),
@@ -208,7 +212,7 @@ class _InstancesScreenState extends State<InstancesScreen> {
           ],
         ),
       ),
-      floatingActionButton: isDesktop
+      floatingActionButton: isDesktop || items.isNotEmpty
           ? null
           : FloatingActionButton.extended(
               onPressed: overlay == null ? _create : null,
@@ -298,10 +302,10 @@ class _InstancesScreenState extends State<InstancesScreen> {
                   )
                 else if (items.isEmpty)
                   const EmptyState(
-                    icon: Icons.cloud_outlined,
-                    title: 'No instances yet',
+                    icon: Icons.forum_outlined,
+                    title: 'One workspace. Your whole team.',
                     detail:
-                        'Create a free sandbox, then open Chat. Wake, billing, and AI config live in Control.',
+                        'Create your workspace once. Main and your specialist agents share it, with a group chat and separate direct messages.',
                   )
                 else if (isDesktop)
                   _desktopList()
@@ -755,7 +759,7 @@ class _CreateInstanceDialog extends StatefulWidget {
 
 class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
   final _name = TextEditingController(text: 'workspace');
-  AgentRuntime _runtime = AgentRuntime.xibecode;
+  AgentRuntime _runtime = AgentRuntime.supercharge;
 
   @override
   void dispose() {
@@ -775,7 +779,7 @@ class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('New instance'),
+      title: const Text('Create your workspace'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -820,7 +824,7 @@ class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
           Text(
             widget.canCreateFree
                 ? 'Free slot available.'
-                : 'Free quota used. Extra instances are paid.',
+                : 'Hosting requires an active plan. You can have one workspace with many agents.',
             style: const TextStyle(color: Vc.muted, fontSize: 12),
           ),
         ],
@@ -836,11 +840,6 @@ class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
             child: const Text('Pay & create'),
           )
         else ...[
-          if (!isDesktop)
-            OutlinedButton(
-              onPressed: () => _submit(paid: true),
-              child: const Text('Pay extra'),
-            ),
           FilledButton(
             onPressed: () => _submit(paid: false),
             child: const Text('Create free'),

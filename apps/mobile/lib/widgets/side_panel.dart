@@ -11,6 +11,8 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api/models.dart';
+import '../chat/bot_avatar.dart';
+import '../state/agents.dart';
 import '../main.dart';
 import '../state/session.dart';
 import '../state/workspaces.dart';
@@ -146,13 +148,23 @@ class VectraSidePanel extends StatefulWidget {
 
 class _VectraSidePanelState extends State<VectraSidePanel> {
   WorkspaceCatalog? _catalog;
+  AgentDirectory? _agents;
+  final _search = TextEditingController();
+  String? _requestedAgentInstance;
   List<CloudInstance> get items => _catalog?.items ?? const [];
   bool get loading => _catalog?.loading ?? false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final next = context.read<SessionController>().workspaces;
+    final session = context.read<SessionController>();
+    final nextAgents = session.agents;
+    if (_agents != nextAgents) {
+      _agents?.removeListener(_catalogChanged);
+      _agents = nextAgents;
+      nextAgents.addListener(_catalogChanged);
+    }
+    final next = session.workspaces;
     if (_catalog == next) return;
     _catalog?.removeListener(_catalogChanged);
     _catalog = next;
@@ -173,16 +185,18 @@ class _VectraSidePanelState extends State<VectraSidePanel> {
   @override
   void dispose() {
     _catalog?.removeListener(_catalogChanged);
+    _agents?.removeListener(_catalogChanged);
+    _search.dispose();
     super.dispose();
   }
 
   void _go(String path, {Object? extra}) {
     unawaited(_catalog?.refresh(force: false));
     final router = GoRouter.of(context);
-    final loc = GoRouterState.of(context).uri.path;
+    final loc = GoRouterState.of(context).uri.toString();
     if (!widget.embedded) Navigator.of(context).pop();
     if (loc == path) return;
-    if (widget.embedded) {
+    if (widget.embedded || path.startsWith('/chat/')) {
       router.go(path, extra: extra);
       return;
     }
@@ -222,6 +236,18 @@ class _VectraSidePanelState extends State<VectraSidePanel> {
     final session = context.watch<SessionController>();
     final email = session.user?.email ?? '';
     final initial = email.isNotEmpty ? email[0].toUpperCase() : '?';
+    final workspace = items.where((item) => item.id == widget.currentInstanceId).firstOrNull ??
+        items.where((item) => item.runtime == AgentRuntime.supercharge).firstOrNull;
+    if (workspace?.runtime == AgentRuntime.supercharge) {
+      if (_requestedAgentInstance != workspace!.id) {
+        _requestedAgentInstance = workspace.id;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_agents?.refresh(workspace.id));
+        });
+      }
+      final panel = _agentPanel(email, workspace);
+      return widget.embedded ? panel : Drawer(backgroundColor: Vc.surface, width: 320, child: panel);
+    }
     if (widget.embedded) return _desktopPanel(email);
     return Drawer(
       backgroundColor: Vc.surface,
@@ -302,7 +328,7 @@ class _VectraSidePanelState extends State<VectraSidePanel> {
             ),
             _item(
               icon: Icons.grid_view_rounded,
-              label: 'Workspaces',
+              label: 'Chats',
               selected: GoRouterState.of(context).uri.path == '/',
               onTap: () => _go('/'),
             ),
@@ -402,6 +428,66 @@ class _VectraSidePanelState extends State<VectraSidePanel> {
         ),
       ),
     );
+  }
+
+  Widget _agentPanel(String email, CloudInstance workspace) {
+    final uri = GoRouterState.of(context).uri;
+    final selected = uri.queryParameters['bot'];
+    final group = uri.path == '/' || (uri.path.startsWith('/chat/') && selected == null);
+    final bots = _agents?.bots(workspace.id) ?? const [];
+    final client = context.read<SessionController>().client;
+    return Material(color: Vc.surface, child: SafeArea(child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(padding: const EdgeInsets.fromLTRB(18, 20, 8, 14), child: Row(children: [
+          const Expanded(child: Text('Chats', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w700))),
+          IconButton(tooltip: 'Refresh agents', onPressed: () => _agents?.refresh(workspace.id, force: true), icon: const Icon(Icons.refresh, size: 19)),
+        ])),
+        Padding(padding: const EdgeInsets.fromLTRB(14, 0, 14, 12), child: TextField(controller: _search,
+          onChanged: (_) => setState(() {}), decoration: const InputDecoration(hintText: 'Search agents',
+            prefixIcon: Icon(Icons.search, size: 18), isDense: true))),
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 14), child: Row(children: [
+          StatusDot(workspace.displayState, size: 7), const SizedBox(width: 7),
+          Expanded(child: Text(workspace.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Vc.muted, fontSize: 12))),
+          if (items.length > 1) IconButton(tooltip: 'Existing workspaces', onPressed: () => _go('/workspaces'), icon: const Icon(Icons.swap_horiz, size: 17)),
+        ])),
+        const SizedBox(height: 12),
+        ListTile(key: const ValueKey('sidebar-group'), selected: group, selectedTileColor: Vc.green.withValues(alpha: .10),
+          leading: const CircleAvatar(backgroundColor: Vc.greenDim, radius: 21, child: Icon(Icons.forum_outlined, color: Vc.greenSoft, size: 21)),
+          title: const Text('Agent group', style: TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text('${bots.length} agents · @ to mention', style: const TextStyle(fontSize: 12, color: Vc.muted)),
+          onTap: () => _go('/chat/${workspace.id}?group=1', extra: workspace)),
+        const Padding(padding: EdgeInsets.fromLTRB(18, 18, 18, 7), child: Text('Direct messages',
+          style: TextStyle(color: Vc.muted, fontWeight: FontWeight.w600, fontSize: 12))),
+        Expanded(child: ListView(children: [
+          for (final bot in bots.where((bot) => bot.name.toLowerCase().contains(_search.text.toLowerCase())))
+            ListTile(key: ValueKey('agent-${bot.id}'), selected: !group && selected == bot.id,
+              selectedTileColor: Vc.green.withValues(alpha: .10),
+              leading: BotAvatar(bot: bot, instanceId: workspace.id, client: client, radius: 21),
+              title: Text(bot.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: _agents?.activity(workspace.id, bot.id)?['state'] == 'working'
+                  ? const TypingDots(label: 'Working')
+                  : Text(_agents?.activity(workspace.id, bot.id)?['state'] == 'queued' ? 'Queued' : _agents?.preview(workspace.id, bot.id) ?? (bot.isMain ? 'Your main assistant' : 'Direct message'),
+                    maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 12)),
+              trailing: _agents?.activity(workspace.id, bot.id) == null ? null : IconButton(
+                tooltip: 'View ${bot.name} activity', icon: const Icon(Icons.open_in_new, size: 16, color: Vc.greenSoft),
+                onPressed: () {
+                  final thread = _agents?.activity(workspace.id, bot.id)?['sessionId'];
+                  _go('/chat/${workspace.id}?bot=${Uri.encodeQueryComponent(bot.id)}${thread == null ? '' : '&thread=${Uri.encodeQueryComponent('$thread')}'}', extra: workspace);
+                }),
+              onTap: () => _go('/chat/${workspace.id}?bot=${Uri.encodeQueryComponent(bot.id)}', extra: workspace)),
+        ])),
+        const Divider(height: 1),
+        _item(icon: Icons.tune, label: 'Workspace settings', selected: uri.path == '/instance/${workspace.id}', onTap: () => _go('/instance/${workspace.id}', extra: workspace)),
+        _item(icon: Icons.folder_open_outlined, label: 'Files', onTap: () => _go('/instance/${workspace.id}/files', extra: workspace)),
+        _item(icon: Icons.person_outline, label: 'Account', selected: uri.path == '/account', onTap: () => _go('/account')),
+        Padding(padding: const EdgeInsets.fromLTRB(18, 6, 6, 10), child: Row(children: [
+          Expanded(child: Text(email, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 11))),
+          IconButton(tooltip: 'Sign out', onPressed: _signOut, icon: const Icon(Icons.logout, size: 17, color: Vc.muted)),
+        ])),
+      ],
+    )));
   }
 
   Widget _desktopPanel(String email) {

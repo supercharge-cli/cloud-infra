@@ -9,6 +9,7 @@ import '../api/client.dart';
 import '../chat/browser_handoff.dart';
 import '../chat/browser_viewer_document.dart';
 import '../chat/desktop_browser_viewer.dart';
+import '../chat/novnc_url.dart';
 import '../desktop.dart';
 import '../desktop/native.dart';
 import '../desktop/inline_browser.dart';
@@ -19,11 +20,17 @@ class BrowserHandoffScreen extends StatefulWidget {
     required this.api,
     required this.instanceId,
     required this.onContinue,
+    this.embedded = false,
+    this.botId,
+    this.chatId,
   });
 
   final VectraClient api;
   final String instanceId;
   final Future<void> Function(String prompt) onContinue;
+  final bool embedded;
+  final String? botId;
+  final String? chatId;
 
   @override
   State<BrowserHandoffScreen> createState() => _BrowserHandoffScreenState();
@@ -56,6 +63,8 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
       instanceId: widget.instanceId,
       suspendViewer: _suspendViewer,
       continueChat: widget.onContinue,
+      botId: widget.botId,
+      chatId: widget.chatId,
     )..addListener(_controlChanged);
     if (!isDesktop) {
       _web = WebViewController()
@@ -90,7 +99,7 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
       _module = module;
       if (isDesktop) {
         final viewer = await DesktopBrowserViewer.start(
-          html: browserViewerDocument(desktop: true),
+          html: browserViewerDocument(desktop: true, compact: widget.embedded),
           viewerModule: module,
           requestVncUrl: () => widget.api.openAiBrowserVnc(widget.instanceId),
           readState: _viewerState,
@@ -353,31 +362,35 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
     final busy = _control.busy || _closing;
     final error = _control.error ?? _viewerError;
     return PopScope(
-      canPop: _allowPop,
+      canPop: widget.embedded || _allowPop,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) unawaited(_requestClose());
+        if (!didPop && !widget.embedded) unawaited(_requestClose());
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF0B0B0D),
-        appBar: AppBar(
-          title: Text(
-            _manual ? 'AI browser · your control' : 'AI browser · view only',
-          ),
-          backgroundColor: const Color(0xFF141518),
-          foregroundColor: Colors.white,
-          leading: IconButton(
-            tooltip: 'Close browser viewer',
-            onPressed: busy ? null : _requestClose,
-            icon: const Icon(Icons.close),
-          ),
-          actions: [
-            IconButton(
-              tooltip: 'Reconnect browser viewer',
-              onPressed: busy || !_ready ? null : _reconnect,
-              icon: const Icon(Icons.refresh),
-            ),
-          ],
-        ),
+        appBar: widget.embedded
+            ? null
+            : AppBar(
+                title: Text(
+                  _manual
+                      ? 'AI browser · your control'
+                      : 'AI browser · view only',
+                ),
+                backgroundColor: const Color(0xFF141518),
+                foregroundColor: Colors.white,
+                leading: IconButton(
+                  tooltip: 'Close browser viewer',
+                  onPressed: busy ? null : _requestClose,
+                  icon: const Icon(Icons.close),
+                ),
+                actions: [
+                  IconButton(
+                    tooltip: 'Reconnect browser viewer',
+                    onPressed: busy || !_ready ? null : _reconnect,
+                    icon: const Icon(Icons.refresh),
+                  ),
+                ],
+              ),
         body: SafeArea(
           child: Column(
             children: [
@@ -397,7 +410,11 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
                           : InlineBrowserView(
                               key: _viewerKey,
                               surface: DesktopNative.viewerSurface,
-                              url: _desktop!.url.toString(),
+                              url: embeddedNoVncUrl(
+                                _desktop!.url,
+                                websocketUrl: 'vnc',
+                                controlling: _manual,
+                              ).toString(),
                             )
                     : Stack(
                         children: [
@@ -442,6 +459,25 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
                       ),
                     ],
                     const SizedBox(height: 12),
+                    if (widget.embedded)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _manual ? 'You have control' : 'View only',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Reconnect desktop',
+                            onPressed: busy || !_ready ? null : _reconnect,
+                            icon: const Icon(Icons.refresh, size: 18),
+                          ),
+                        ],
+                      ),
                     FilledButton.icon(
                       onPressed: busy || (!_control.hasControl && !_connected)
                           ? null
@@ -466,7 +502,7 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
                                   ? 'Done & continue'
                                   : 'Return control'
                             : _connected
-                            ? 'Take control'
+                            ? 'Take over'
                             : 'Reconnect browser first',
                       ),
                     ),

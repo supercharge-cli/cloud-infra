@@ -28,7 +28,9 @@ void main() {
       final html = browserViewerDocument(desktop: true);
 
       expect(html, contains('import RFB from "./rfb.mjs";'));
-      expect(html, contains('Take control'));
+      expect(html, contains('Take over'));
+      expect(html, isNot(contains('const RFB=RFB;')));
+      expect(html, contains("settings.set('view_only',requestedViewOnly?'1':'0')"));
       expect(html, contains('Done &amp; continue'));
       expect(
         html,

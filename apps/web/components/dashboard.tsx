@@ -24,6 +24,7 @@ import {
 } from "@/lib/api-format";
 import type { Instance } from "@/lib/store";
 import { SandboxWorkspace } from "@/components/sandbox-workspace";
+import { AgentChats } from '@/components/agent-chats';
 
 type AgentRuntime = "xibecode" | "supercharge";
 
@@ -141,7 +142,8 @@ export function Dashboard({ email }: { email: string }) {
   const [creating, setCreating] = useState(false);
   const [creatingFree, setCreatingFree] = useState(false);
   const [name, setName] = useState("workspace");
-  const [runtime, setRuntime] = useState<AgentRuntime>("xibecode");
+  const [runtime, setRuntime] = useState<AgentRuntime>("supercharge");
+  const [chatMode, setChatMode] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [pairing, setPairing] = useState<PairingView | null>(null);
@@ -1103,12 +1105,17 @@ export function Dashboard({ email }: { email: string }) {
   ];
 
   const selectedInst = instances.find((i) => i.id === selected);
+  const chatInstance = selectedInst?.runtime === 'supercharge' ? selectedInst : instances.find((instance) => instance.runtime === 'supercharge');
+  if (!loading && chatMode && chatInstance) {
+    return <AgentChats key={chatInstance.id} workspace={chatInstance} onSettings={() => { setChatMode(false); void loadDetail(chatInstance.id); }} />;
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white">Dashboard</h1>
+          <h1 className="text-3xl font-bold text-white">Workspace settings</h1>
+          {chatInstance && <button type="button" className="mt-3 text-sm text-emerald-300 hover:underline" onClick={() => setChatMode(true)}>Back to agent chats</button>}
           <p className="mt-1 text-sm text-zinc-400">
             Signed in as <span className="text-zinc-200">{email}</span> · plan{" "}
             <span className="text-orange-400">{BRAND.plan.label}</span>
@@ -1132,7 +1139,7 @@ export function Dashboard({ email }: { email: string }) {
         </div>
       ) : null}
 
-      <div className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
+      {!loading && instances.length === 0 && <div className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-white">Create sandbox</h2>
           <div className="flex items-center gap-2">
@@ -1239,7 +1246,7 @@ export function Dashboard({ email }: { email: string }) {
             <>
               Every account includes{" "}
               <strong className="text-zinc-400">{freeQuota.limit} free</strong>{" "}
-              instance (no expiry). Extra sandboxes via Razorpay · India{" "}
+              workspace (no expiry). Add agents inside your workspace. Hosting via Razorpay · India{" "}
               <strong className="text-zinc-400">₹{plan.priceInr || "—"}</strong>{" "}
               · International{" "}
               <strong className="text-zinc-400">${plan.priceUsd || "—"}</strong>{" "}
@@ -1255,7 +1262,7 @@ export function Dashboard({ email }: { email: string }) {
             </>
           )}
         </p>
-      </div>
+      </div>}
 
       <p className="mb-3 text-xs text-zinc-500">
         Your sandboxes stay listed when{" "}

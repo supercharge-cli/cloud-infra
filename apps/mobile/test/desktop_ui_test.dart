@@ -157,6 +157,14 @@ class _BotClient extends _Client {
   @override
   Future<Map<String, dynamic>> listBots(String id) async => {'bots': savedBots};
   @override
+  Future<Map<String, dynamic>> groupChat(String id) async => {
+    'messages': [
+      {'id': 'group-question', 'text': '@Research check the sources for this plan.', 'createdAt': 1, 'senderBotId': null},
+      {'id': 'group-main', 'text': 'Research is checking the sources. I will combine the findings with the implementation plan.', 'createdAt': 2, 'senderBotId': 'main', 'sessionId': 'group-main'},
+    ],
+    'activity': [{'botId': 'research', 'sessionId': 'group-research', 'state': 'working'}],
+  };
+  @override
   Future<Map<String, dynamic>> listConversations(
     String id, {
     String? botId,
@@ -366,7 +374,8 @@ Future<void> _app(
           GoRoute(path: '/', builder: (_, _) => const InstancesScreen()),
           GoRoute(
             path: '/chat/design',
-            builder: (_, _) => const ChatScreen(instanceId: 'design'),
+            builder: (_, state) => ChatScreen(instanceId: 'design', initialBotId: state.uri.queryParameters['bot'],
+              initialSessionId: state.uri.queryParameters['thread'], showGroup: state.uri.queryParameters['group'] == '1'),
           ),
           GoRoute(
             path: '/instance/design',
@@ -441,6 +450,8 @@ void main() {
       'Adwaita Sans':
           '/usr/share/fonts/adwaita-sans-fonts/AdwaitaSans-Regular.ttf',
       'Roboto': '/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf',
+      'Roboto Medium': '/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf',
+      'Roboto Light': '/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf',
       'Ahem': '/usr/share/fonts/adwaita-sans-fonts/AdwaitaSans-Regular.ttf',
       'monospace': '/usr/share/fonts/google-noto-vf/NotoSansMono[wght].ttf',
       'MaterialIcons':
@@ -477,12 +488,13 @@ void main() {
     expect(tester.takeException(), isNull);
     await _capture(tester, 'workspaces-desktop');
     await _shortcut(tester, LogicalKeyboardKey.keyF);
-    final search = tester.widget<TextField>(find.byType(TextField).first);
+    final searchFinder = find.widgetWithText(TextField, 'Find a workspace…');
+    final search = tester.widget<TextField>(searchFinder);
     expect(search.focusNode!.hasFocus, isTrue);
-    await tester.enterText(find.byType(TextField).first, 'API service');
+    await tester.enterText(searchFinder, 'API service');
     await tester.pumpAndSettle();
-    expect(find.text('API service'), findsNWidgets(3));
-    expect(find.text('Documentation'), findsOneWidget);
+    expect(find.text('API service'), findsNWidgets(2));
+    expect(find.text('Documentation'), findsNothing);
     final before = client.refreshes;
     await _shortcut(tester, LogicalKeyboardKey.keyR);
     expect(client.refreshes, greaterThan(before));
@@ -494,10 +506,49 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
     await _shortcut(tester, LogicalKeyboardKey.keyN, shift: true);
-    expect(find.text('New instance'), findsOneWidget);
+    expect(find.text('Create your workspace'), findsNothing);
+    expect(find.byType(AlertDialog), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('group chat opens on desktop and agents remain in the menu', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    PathProviderPlatform.instance = _Paths();
+    await _size(tester, const Size(1440, 900));
+    await _app(tester, _BotClient(), path: '/chat/design?group=1');
+    for (var i = 0; i < 8; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 60)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.byKey(const ValueKey('sidebar-group')), findsOneWidget);
+    expect(find.byKey(const ValueKey('group-composer')), findsOneWidget);
+    expect(find.text('Research · working'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await _capture(tester, 'group-desktop');
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('phone home shows contacts and opens the shared group', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    PathProviderPlatform.instance = _Paths();
+    await _size(tester, const Size(390, 844));
+    await _app(tester, _BotClient(), path: '/chat/design?group=1');
+    for (var i = 0; i < 8; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 60)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.byKey(const ValueKey('group-contact')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('group-contact')));
+    for (var i = 0; i < 6; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.byKey(const ValueKey('group-composer')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await _capture(tester, 'group-phone');
     debugDefaultTargetPlatformOverride = null;
   });
 
@@ -1087,7 +1138,7 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     await _app(tester, _Client());
     expect(find.byType(MenuBar), findsNothing);
-    expect(find.byType(FloatingActionButton), findsOneWidget);
+    expect(find.byType(FloatingActionButton), findsNothing);
     expect(tester.takeException(), isNull);
     await _capture(tester, 'workspaces-mobile');
     await tester.pumpWidget(const SizedBox());

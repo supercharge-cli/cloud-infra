@@ -14,6 +14,7 @@ import 'desktop/shell.dart';
 import 'screens/account.dart';
 import 'screens/billing.dart';
 import 'screens/chat.dart';
+import 'screens/chat_home.dart';
 import 'screens/instance_settings.dart';
 import 'screens/workspace.dart';
 import 'screens/instances.dart';
@@ -117,12 +118,21 @@ class _VectraAppState extends State<VectraApp> with WidgetsBindingObserver {
           builder: (context, state, child) =>
               isDesktop ? DesktopShell(child: child) : child,
           routes: [
-            GoRoute(path: '/', builder: (c, st) => const InstancesScreen()),
+            GoRoute(path: '/', builder: (c, st) => const ChatHomeScreen()),
+            GoRoute(
+              path: '/workspaces',
+              builder: (c, st) => const InstancesScreen(),
+            ),
             GoRoute(
               path: '/chat/:id',
               builder: (c, st) => ChatScreen(
                 key: ValueKey('chat-${st.pathParameters['id']}'),
                 instanceId: st.pathParameters['id']!,
+                initialBotId: st.uri.queryParameters['bot'],
+                initialSessionId: st.uri.queryParameters['thread'],
+                showGroup:
+                    st.uri.queryParameters['group'] == '1' ||
+                    st.uri.queryParameters['bot'] == null,
                 instance: st.extra is CloudInstance
                     ? st.extra as CloudInstance
                     : null,

@@ -8,7 +8,8 @@ export type BotJob = {
   id: string;
   instanceId: string;
   userId: string;
-  senderBotId: 'main';
+  senderBotId: string;
+  senderSessionId?: string;
   recipientBotId: string;
   sessionId: string;
   prompt: string;
@@ -29,9 +30,13 @@ export async function botJob(instance: Instance, jobId: string): Promise<BotJob 
 
 export async function createBotJob(
   instance: Instance, botId: string, prompt: unknown, requestId: unknown,
+  sender: { botId: string; sessionId: string },
 ): Promise<{ bot: Bot; job: BotJob }> {
   const bot = await getBot(instance, botId);
-  if (!bot || bot.id === 'main') throw new BotJobInputError('Target bot not found');
+  if (!bot || bot.id === sender.botId) throw new BotJobInputError('Choose a different available agent');
+  if (!await getBot(instance, sender.botId) || !/^[A-Za-z0-9_-]{1,128}$/.test(sender.sessionId)) {
+    throw new BotJobInputError('Invalid originating agent conversation');
+  }
   if (typeof prompt !== 'string' || !prompt.trim() || Buffer.byteLength(prompt, 'utf8') > 12_000) {
     throw new BotJobInputError('Prompt must be 1–12,000 characters');
   }
@@ -42,7 +47,7 @@ export async function createBotJob(
   const collection = db.collection<BotJob>('bot_jobs');
   const existing = await collection.findOne({ instanceId: instance.id, requestId });
   if (existing) {
-    if (existing.recipientBotId !== botId || existing.prompt !== prompt.trim()) {
+    if (existing.recipientBotId !== botId || existing.prompt !== prompt.trim() || existing.senderBotId !== sender.botId || existing.senderSessionId !== sender.sessionId) {
       throw new BotJobInputError('Request ID has already been used');
     }
     return { bot, job: existing };
@@ -50,7 +55,7 @@ export async function createBotJob(
   const id = nanoid(18);
   const now = new Date().toISOString();
   const job: BotJob = {
-    id, instanceId: instance.id, userId: instance.userId, senderBotId: 'main',
+    id, instanceId: instance.id, userId: instance.userId, senderBotId: sender.botId, senderSessionId: sender.sessionId,
     recipientBotId: botId, sessionId: `bot-${botId}`, prompt: prompt.trim(), requestId,
     status: 'queued', createdAt: now, updatedAt: now,
   };
@@ -58,7 +63,7 @@ export async function createBotJob(
   catch (error) {
     if ((error as { code?: number }).code === 11000) {
       const prior = await collection.findOne({ instanceId: instance.id, requestId });
-      if (prior && prior.recipientBotId === botId && prior.prompt === prompt.trim()) return { bot, job: prior };
+      if (prior && prior.recipientBotId === botId && prior.prompt === prompt.trim() && prior.senderBotId === sender.botId && prior.senderSessionId === sender.sessionId) return { bot, job: prior };
     }
     throw error;
   }
@@ -70,7 +75,8 @@ export async function deliverBotJob(instance: Instance, job: BotJob): Promise<vo
   const res = await proxyInbox(instance, '/v1/app/bot-jobs', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ jobId: job.id, botId: job.recipientBotId,
-      chatId: job.sessionId, text: `[Task from Main · ${job.id}]\n${job.prompt}` }),
+      chatId: job.sessionId, text: `[Task from ${job.senderBotId} · ${job.id}]\n${job.prompt}`,
+      senderBotId: job.senderBotId, senderSessionId: job.senderSessionId }),
   });
   if (!res.ok) {
     const reason = await res.text().catch(() => '');

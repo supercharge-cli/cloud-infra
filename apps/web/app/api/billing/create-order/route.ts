@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireWorkspaceSlot, WorkspaceLimitError } from '@/lib/workspace-limit';
 import { nanoid } from "nanoid";
 import { getSessionUser } from "@/lib/auth";
 import { getPlan, normalizeCurrency, priceForCurrency } from "@/lib/billing";
@@ -20,6 +21,7 @@ export async function POST(req: Request) {
       runtime?: AgentRuntime;
     };
     const purpose = body.purpose === "renew" ? "renew" : "new_instance";
+    if (purpose === 'new_instance') await requireWorkspaceSlot(user.id);
     const currency = normalizeCurrency(body.currency);
     const price = priceForCurrency(currency);
     const plan = getPlan();
@@ -110,6 +112,7 @@ export async function POST(req: Request) {
       },
     });
   } catch (e) {
+    if (e instanceof WorkspaceLimitError) return NextResponse.json({ error: e.message, code: 'WORKSPACE_LIMIT' }, { status: 409 });
     console.error("[billing/create-order]", e);
     return NextResponse.json(
       { error: (e as Error).message || "Failed to create order" },

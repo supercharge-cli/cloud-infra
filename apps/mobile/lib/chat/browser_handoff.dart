@@ -20,11 +20,15 @@ class BrowserHandoffController extends ChangeNotifier {
     required String instanceId,
     required Future<void> Function() suspendViewer,
     required Future<void> Function(String prompt) continueChat,
+    String? botId,
+    String? chatId,
     Duration pollInterval = const Duration(milliseconds: 250),
     Duration pollTimeout = const Duration(seconds: 12),
     DateTime Function()? now,
   }) : _api = api,
        _instanceId = instanceId,
+       _botId = botId,
+       _chatId = chatId,
        _suspendViewer = suspendViewer,
        _continueChat = continueChat,
        _pollInterval = pollInterval,
@@ -41,6 +45,8 @@ class BrowserHandoffController extends ChangeNotifier {
 
   final VectraClient _api;
   final String _instanceId;
+  final String? _botId;
+  final String? _chatId;
   final Future<void> Function() _suspendViewer;
   final Future<void> Function(String prompt) _continueChat;
   final Duration _pollInterval;
@@ -135,7 +141,7 @@ class BrowserHandoffController extends ChangeNotifier {
       _wasBusy = await _readBusy(timeout: _pollTimeout);
       if (_closeRequested) return;
       // Always drain matching foreground work, even if the status looked idle.
-      await _api.stopChat(_instanceId);
+      await _api.stopChat(_instanceId, botId: _botId, chatId: _chatId);
       foregroundStopped = true;
       if (_closeRequested) return;
       await _waitUntilIdle();
@@ -172,7 +178,17 @@ class BrowserHandoffController extends ChangeNotifier {
   }
 
   Future<bool> _readBusy({required Duration timeout}) async {
-    final status = await _api.chatStatus(_instanceId).timeout(timeout);
+    final status = await _api
+        .chatStatus(_instanceId, sessionId: _chatId)
+        .timeout(timeout);
+    final active = status['activeBotChats'];
+    final queued = status['queuedBotChats'];
+    if (active is List && active.any((id) => id != _chatId) ||
+        queued is List && queued.any((id) => id != _chatId)) {
+      throw StateError(
+        'Another agent is working or queued. Open its chat to stop that task before taking over; other agents are not stopped automatically.',
+      );
+    }
     final turn = status['turn'];
     if (turn is! Map || turn['busy'] is! bool) {
       throw StateError(

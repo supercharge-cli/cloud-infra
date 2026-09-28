@@ -267,6 +267,18 @@ void main() {
     expect(controller.error, contains('Background tasks'));
   });
 
+  test('another bot working prevents takeover without stopping it', () async {
+    controller.dispose();
+    controller = BrowserHandoffController(api: api, instanceId: 'instance-1', botId: 'research', chatId: 'chat-research',
+      suspendViewer: () async => api.calls.add('suspend'), continueChat: (_) async {});
+    api.statuses.add({..._status(false), 'activeBotChats': ['chat-main'], 'queuedBotChats': []});
+    await controller.takeControl();
+    expect(api.calls, isNot(contains('stop')));
+    expect(api.calls, isNot(contains('start')));
+    expect(controller.hasControl, isFalse);
+    expect(controller.error, contains('Another agent'));
+  });
+
   test('chat status error fails closed', () async {
     api.statusFailure = ApiException(503, 'Status unavailable');
     await controller.takeControl();

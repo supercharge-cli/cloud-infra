@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withWorkspaceCreation, WorkspaceLimitError } from '@/lib/workspace-limit';
 import { getSessionUser } from "@/lib/auth";
 import {
   billingStatusForInstance,
@@ -83,9 +84,8 @@ export async function GET() {
 
   const freeLimit = freeInstanceLimit();
   const freeUsed = await countFreeInstancesForUser(user.id);
-  const freeAvailable = Math.max(0, freeLimit - freeUsed);
-
   const rows = await listInstances(user.id);
+  const freeAvailable = rows.length > 0 ? 0 : Math.max(0, freeLimit - freeUsed);
   console.info("[timing] instances", {
     userId: user.id,
     mongoMs: Math.round(performance.now() - started),
@@ -117,6 +117,8 @@ export async function GET() {
   const plan = getPlan();
   return NextResponse.json({
     instances,
+    workspaceLimit: 1,
+    canCreateWorkspace: rows.length === 0,
     freeQuota: {
       limit: freeLimit,
       used: freeUsed,
@@ -145,7 +147,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Login required" }, { status: 401 });
   }
 
-  const freeLimit = freeInstanceLimit();
+  const owned = await listInstances(user.id);
+  if (owned.length > 0) {
+    return NextResponse.json({ error: 'Your workspace already exists. Add agents inside it instead.', code: 'WORKSPACE_LIMIT', instanceId: owned[0].id }, { status: 409 });
+  }
+  const freeLimit = Math.min(1, freeInstanceLimit());
   const freeUsed = await countFreeInstancesForUser(user.id);
   if (freeLimit <= 0 || freeUsed >= freeLimit) {
     const plan = getPlan();
@@ -178,6 +184,7 @@ export async function POST(req: Request) {
   }
 
   try {
+    return await withWorkspaceCreation(user.id, async () => {
     const session = await createGatewaySession({
       strategy: "sandbox_full",
       runtime,
@@ -242,7 +249,9 @@ export async function POST(req: Request) {
       },
       { status: 201 },
     );
+    });
   } catch (e) {
+    if (e instanceof WorkspaceLimitError) return NextResponse.json({ error: e.message, code: 'WORKSPACE_LIMIT' }, { status: 409 });
     console.error("[instances/POST free]", e);
     return NextResponse.json(
       { error: (e as Error).message || "Failed to create free instance" },
