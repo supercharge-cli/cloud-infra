@@ -12,7 +12,7 @@ function playwrightVncUrl(sandboxId: string, ticket: string): string {
   const domain = (
     process.env.XIBECODE_E2B_PREVIEW_DOMAIN ||
     process.env.E2B_DOMAIN ||
-    "e2b.dev"
+    "e2b.app"
   )
     .trim()
     .replace(/^\.+/, "");
@@ -32,6 +32,19 @@ export async function POST(_req: Request, ctx: Ctx) {
     );
   }
   const sandboxId = gate.inst.sandboxId || "";
+  if (sandboxId) {
+    try {
+      const upstream = await proxyInbox(gate.inst, '/v1/computer/vnc-ticket');
+      const data = await upstream.json() as { ticket?: string };
+      if (upstream.ok && data.ticket) {
+        return NextResponse.json({ ticket: data.ticket, expiresInSeconds: 300,
+          wsUrl: playwrightVncUrl(sandboxId, data.ticket), source: 'daemon' },
+          { headers: { 'cache-control': 'no-store' } });
+      }
+    } catch {
+      // An older sandbox can still use the gateway relay below.
+    }
+  }
   try {
     await ensureGatewaySession(
       gate.inst.sessionId,
