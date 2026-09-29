@@ -218,7 +218,7 @@ class _DesktopChatWorkspaceState extends State<DesktopChatWorkspace> {
                       OutlinedButton.icon(
                         onPressed: widget.onManualControl,
                         icon: const Icon(Icons.ads_click, size: 16),
-                        label: const Text('Take control'),
+                        label: const Text('Take over'),
                       ),
                   ],
                 ),

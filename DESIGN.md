@@ -19,7 +19,9 @@ System sans typography carries the interface; Linux uses Adwaita Sans with nativ
 
 Selected contact identity changes immediately. The prior transcript is hidden while the destination loads. Working animation represents real activity only and respects reduced motion. Queued is a separate static state. Group work chips open the exact agent thread. Agent name/avatar links open a DM; they do not trigger another model turn.
 
-Group send uses a stable request ID for retries. Direct-message and group drafts stay separate. Images remain authenticated and versioned. The noVNC viewer starts read-only and input is enabled only after an explicit, verified takeover.
+Group send uses a stable request ID for retries. Direct-message and group drafts stay separate. Images remain authenticated and versioned.
+
+Normal browser viewing uses the passive JPEG/SSE stream. Take over stops that stream and opens noVNC across the full app window only after verified control acquisition. The controlled desktop has one 46 px bottom bar: status, keyboard toggle, reconnect, and Return control. No duplicated header, explanatory panels, or inline notes form competes with the desktop. Return control pauses input and opens an optional notes dialog; Keep control reconnects, while Return & continue releases the connection before resuming the originating conversation. A small keyboard button opens the phone keyboard on touch devices or a compact on-screen keyboard on desktop.
 
 ## Evidence scope
 

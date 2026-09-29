@@ -13,6 +13,7 @@ import '../chat/novnc_url.dart';
 import '../desktop.dart';
 import '../desktop/native.dart';
 import '../desktop/inline_browser.dart';
+import '../theme.dart';
 
 class BrowserHandoffScreen extends StatefulWidget {
   const BrowserHandoffScreen({
@@ -20,7 +21,6 @@ class BrowserHandoffScreen extends StatefulWidget {
     required this.api,
     required this.instanceId,
     required this.onContinue,
-    this.embedded = false,
     this.botId,
     this.chatId,
   });
@@ -28,7 +28,6 @@ class BrowserHandoffScreen extends StatefulWidget {
   final VectraClient api;
   final String instanceId;
   final Future<void> Function(String prompt) onContinue;
-  final bool embedded;
   final String? botId;
   final String? chatId;
 
@@ -45,11 +44,12 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
   String? _module;
   String? _viewerError;
   bool _ready = false;
-  bool _connected = false;
   bool _loading = false;
   bool _closing = false;
   bool _allowPop = false;
   bool _tearingDown = false;
+  bool _finishing = false;
+  bool _inputPaused = false;
   int _generation = 0;
   int _loadedGeneration = -1;
   int? _suspendingGeneration;
@@ -66,16 +66,9 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
       botId: widget.botId,
       chatId: widget.chatId,
     )..addListener(_controlChanged);
-    if (!isDesktop) {
-      _web = WebViewController()
-        ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..setBackgroundColor(const Color(0xFF0B0B0D))
-        ..addJavaScriptChannel(
-          'BrowserViewer',
-          onMessageReceived: _viewerMessage,
-        );
-    }
-    unawaited(_initialize());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_initialize());
+    });
   }
 
   Map<String, Object?> _viewerState() => {
@@ -83,7 +76,8 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
     'hasControl': _control.hasControl,
     'canContinue': _control.canContinue,
     'busy': _control.busy || _closing,
-    'error': _control.error,
+    'inputPaused': _inputPaused,
+    'error': _control.error ?? _viewerError,
     'expiresAt': _control.expiresAt?.millisecondsSinceEpoch,
   };
 
@@ -94,62 +88,73 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
 
   Future<void> _initialize() async {
     try {
-      final module = await rootBundle.loadString('assets/novnc/rfb.mjs');
+      _module = await rootBundle.loadString('assets/novnc/rfb.mjs');
       if (!mounted || _tearingDown || _closing) return;
-      _module = module;
+      await _control.takeControl();
+      if (!mounted || !_manual || _tearingDown || _closing) return;
       if (isDesktop) {
         final viewer = await DesktopBrowserViewer.start(
-          html: browserViewerDocument(desktop: true, compact: widget.embedded),
-          viewerModule: module,
+          html: browserViewerDocument(desktop: true),
+          viewerModule: _module!,
           requestVncUrl: () => widget.api.openAiBrowserVnc(widget.instanceId),
           readState: _viewerState,
-          onAction: (action, notes) async {
-            if (_closing || _tearingDown) return;
+          onAction: (action, _) async {
+            if (_closing || _tearingDown || _finishing) return;
             switch (action) {
-              case 'takeControl':
-                await _control.takeControl();
               case 'returnControl':
-                await _control.returnControl(notes: notes);
+                unawaited(_requestClose());
               case 'reconnect':
                 await _reconnect();
             }
           },
-          onConnectionChanged: (connected) {
-            if (mounted && !_tearingDown) {
-              setState(() => _connected = connected);
-            }
-          },
         );
-        if (!mounted || _tearingDown || _closing) {
+        if (!mounted || _tearingDown || _closing || !_manual) {
           await viewer.close();
           return;
         }
-        _desktop = viewer;
-        if (mounted) setState(() => _ready = true);
+        setState(() {
+          _desktop = viewer;
+          _ready = true;
+        });
       } else {
+        _web = WebViewController()
+          ..setJavaScriptMode(JavaScriptMode.unrestricted)
+          ..setBackgroundColor(Vc.bg)
+          ..addJavaScriptChannel(
+            'BrowserViewer',
+            onMessageReceived: _viewerMessage,
+          );
         setState(() => _ready = true);
         await _loadNativeViewer();
       }
     } catch (error) {
       if (mounted && !_tearingDown) {
-        setState(
-          () => _viewerError = 'Could not open the browser viewer: $error',
-        );
+        setState(() => _viewerError = 'Could not open desktop control: $error');
       }
     }
   }
 
   Future<void> _loadNativeViewer() async {
-    if (_loading || _closing || _tearingDown || _control.busy) return;
+    if (_loading ||
+        _closing ||
+        _tearingDown ||
+        _control.busy ||
+        _inputPaused ||
+        !_manual) {
+      return;
+    }
     final generation = _generation;
     setState(() {
       _loading = true;
-      _connected = false;
       _viewerError = null;
     });
     try {
       final wsUrl = await widget.api.openAiBrowserVnc(widget.instanceId);
-      if (!mounted || _tearingDown || _closing || generation != _generation) {
+      if (!mounted ||
+          _tearingDown ||
+          _closing ||
+          generation != _generation ||
+          !_manual) {
         return;
       }
       _loadedGeneration = generation;
@@ -158,7 +163,7 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
           desktop: false,
           viewerModule: _module!,
           wsUrl: wsUrl,
-          controlling: _manual,
+          controlling: true,
           expiresAt: _control.expiresAt?.millisecondsSinceEpoch,
           generation: generation,
         ),
@@ -185,37 +190,32 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
       if (!mounted || _tearingDown || event['generation'] != _generation) {
         return;
       }
-      setState(() {
-        switch (event['kind']) {
-          case 'connected':
-            _connected = true;
-            _viewerError = null;
-          case 'disconnected':
-          case 'error':
-            _connected = false;
-            // The embedded viewer keeps its transport error visible in context.
-            _viewerError = null;
-        }
-      });
+      switch (event['kind']) {
+        case 'returnControl':
+          unawaited(_requestClose());
+        case 'reconnect':
+          unawaited(_reconnect());
+        case 'connected':
+          setState(() => _viewerError = null);
+      }
     } catch (_) {}
   }
 
   void _controlChanged() {
     if (!mounted || _tearingDown) return;
     setState(() {});
-    if (!isDesktop &&
+    if (!_control.hasControl &&
         _ready &&
-        !_control.busy &&
+        !_finishing &&
         !_closing &&
-        _loadedGeneration != _generation) {
-      unawaited(_loadNativeViewer());
+        !_control.busy) {
+      unawaited(_exit());
     }
   }
 
   Future<void> _suspendViewer() async {
     _suspendingGeneration = _generation;
     _generation += 1;
-    if (mounted && !_tearingDown) setState(() => _connected = false);
     if (isDesktop) {
       await _desktop?.suspend();
       return;
@@ -235,7 +235,7 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
       _loadedGeneration = -1;
     } catch (_) {
       throw StateError(
-        'Could not confirm that browser input stopped. The AI has not been resumed. Retry returning control.',
+        'Could not confirm that desktop input stopped. Control has not been returned. Retry.',
       );
     } finally {
       _suspended = null;
@@ -243,7 +243,9 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
   }
 
   Future<void> _reconnect() async {
-    if (_control.busy || _closing || _tearingDown) return;
+    if (_control.busy || _closing || _tearingDown || _inputPaused || !_manual) {
+      return;
+    }
     try {
       await _suspendViewer();
       if (!isDesktop && mounted) await _loadNativeViewer();
@@ -252,97 +254,153 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
     }
   }
 
-  Future<void> _takeControl() async {
-    await _control.takeControl();
-  }
-
-  Future<void> _returnControl() async {
-    await _control.returnControl(notes: _notes.text.trim());
-    if (!_control.hasControl && _control.error == null) _notes.clear();
-  }
-
   Rect? _viewerBounds() {
     final object = _viewerKey.currentContext?.findRenderObject();
-    if (object is! RenderBox || !object.hasSize) return null;
-    return object.localToGlobal(Offset.zero) & object.size;
+    return object is RenderBox && object.hasSize
+        ? object.localToGlobal(Offset.zero) & object.size
+        : null;
+  }
+
+  Future<void> _resumeViewer() async {
+    if (!mounted || !_manual || _closing) return;
+    setState(() => _inputPaused = false);
+    if (!isDesktop) {
+      await _loadNativeViewer();
+      return;
+    }
+    final bounds = _viewerBounds();
+    if (bounds != null) {
+      await DesktopNative.inlineShow(
+        DesktopNative.viewerSurface,
+        bounds,
+        View.of(context).devicePixelRatio,
+      );
+    }
   }
 
   Future<void> _requestClose() async {
-    if (_closing || _control.busy) return;
-    var continueAi = false;
-    if (_control.hasControl && _control.canContinue) {
-      if (isDesktop) {
+    if (_closing || _control.busy || _finishing || _tearingDown) return;
+    if (!_control.hasControl) {
+      await _exit();
+      return;
+    }
+    _finishing = true;
+    setState(() => _inputPaused = true);
+    try {
+      await _suspendViewer();
+      if (isDesktop && _desktop != null) {
         await DesktopNative.inlineHide(DesktopNative.viewerSurface);
       }
       if (!mounted) return;
       final choice = await showDialog<String>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Finish using the browser?'),
-          content: const Text(
-            'Your browser input will be disconnected before control is returned. Continue in the same conversation, or leave the AI stopped.',
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Return control?'),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'What did you change? (optional)',
+                  style: TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const ValueKey('handoff-notes'),
+                  controller: _notes,
+                  minLines: 2,
+                  maxLines: 4,
+                  maxLength: 4000,
+                  decoration: const InputDecoration(
+                    hintText: 'For example: signed in and opened the project.',
+                    helperText: 'Do not include passwords or codes.',
+                    counterText: '',
+                  ),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Keep control'),
             ),
             TextButton(
-              onPressed: () => Navigator.pop(context, 'stop'),
-              child: const Text('Leave AI stopped'),
+              onPressed: () => Navigator.pop(dialogContext, 'stop'),
+              child: const Text('Exit without resuming'),
             ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, 'continue'),
-              child: const Text('Done & continue'),
-            ),
+            if (_control.canContinue)
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, 'continue'),
+                child: const Text('Return & continue'),
+              ),
           ],
         ),
       );
-      if (choice == null || !mounted) {
-        if (isDesktop && mounted && _desktop != null) {
-          setState(() => _ready = true);
-          await DesktopNative.inlineCommand(
-            DesktopNative.viewerSurface,
-            'reload',
-          );
-          final bounds = _viewerBounds();
-          if (bounds != null && mounted) {
-            final ratio = View.of(context).devicePixelRatio;
-            await DesktopNative.inlineShow(
-              DesktopNative.viewerSurface,
-              bounds,
-              ratio,
-            );
-          }
+      if (!mounted) return;
+      if (choice == null) {
+        if (_control.hasControl) {
+          await _resumeViewer();
+        } else {
+          await _exit();
         }
         return;
       }
-      continueAi = choice == 'continue';
+      await _control.returnControl(
+        notes: _notes.text.trim(),
+        continueTask: choice == 'continue',
+      );
+      if (!mounted) return;
+      if (_control.hasControl) {
+        if (isDesktop && _desktop != null) {
+          final bounds = _viewerBounds();
+          if (bounds != null) {
+            await DesktopNative.inlineShow(
+              DesktopNative.viewerSurface,
+              bounds,
+              View.of(context).devicePixelRatio,
+            );
+          }
+        }
+        setState(() => _inputPaused = true);
+        return;
+      }
+      await _exit();
+    } catch (error) {
+      if (mounted) setState(() => _viewerError = '$error');
+    } finally {
+      _finishing = false;
+      if (mounted) setState(() {});
     }
+  }
+
+  Future<void> _exit() async {
+    if (_closing || _tearingDown) return;
+    final priorError = _control.error;
     setState(() => _closing = true);
-    if (continueAi) await _control.returnControl(notes: _notes.text.trim());
-    if (!_control.hasControl) await _control.close();
-    if (_control.hasControl && !continueAi) await _control.close();
-    if (!mounted) return;
-    if (_control.hasControl || (continueAi && _control.error != null)) {
-      setState(() => _closing = false);
+    await _control.close();
+    if (_control.hasControl) {
+      if (mounted) setState(() => _closing = false);
       return;
     }
+    final error = _control.error ?? priorError;
     await _desktop?.close();
-    if (isDesktop) {
+    if (isDesktop && _desktop != null) {
       await DesktopNative.inlineDispose(DesktopNative.viewerSurface);
     }
     if (!mounted) return;
     setState(() => _allowPop = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) Navigator.of(context).pop(error);
     });
   }
 
   Future<void> _disposeViewer() async {
     await _control.close();
     await _desktop?.close();
-    if (isDesktop) {
+    if (isDesktop && _desktop != null) {
       await DesktopNative.inlineDispose(DesktopNative.viewerSurface);
     }
     _control.dispose();
@@ -361,154 +419,98 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
   Widget build(BuildContext context) {
     final busy = _control.busy || _closing;
     final error = _control.error ?? _viewerError;
+    final hasViewer = _ready && (isDesktop ? _desktop != null : _web != null);
     return PopScope(
-      canPop: widget.embedded || _allowPop,
+      canPop: _allowPop,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && !widget.embedded) unawaited(_requestClose());
+        if (!didPop) unawaited(_requestClose());
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF0B0B0D),
-        appBar: widget.embedded
-            ? null
-            : AppBar(
-                title: Text(
-                  _manual
-                      ? 'AI browser · your control'
-                      : 'AI browser · view only',
-                ),
-                backgroundColor: const Color(0xFF141518),
-                foregroundColor: Colors.white,
-                leading: IconButton(
-                  tooltip: 'Close browser viewer',
-                  onPressed: busy ? null : _requestClose,
-                  icon: const Icon(Icons.close),
-                ),
-                actions: [
-                  IconButton(
-                    tooltip: 'Reconnect browser viewer',
-                    onPressed: busy || !_ready ? null : _reconnect,
-                    icon: const Icon(Icons.refresh),
-                  ),
-                ],
-              ),
+        backgroundColor: Vc.bg,
         body: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
-              if (busy) const LinearProgressIndicator(),
-              if (error != null)
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    error,
-                    style: const TextStyle(color: Color(0xFFFFB1AE)),
-                  ),
+              if (hasViewer)
+                Positioned.fill(
+                  child: isDesktop
+                      ? InlineBrowserView(
+                          key: _viewerKey,
+                          surface: DesktopNative.viewerSurface,
+                          active: !_finishing && _manual && error == null,
+                          url: embeddedNoVncUrl(
+                            _desktop!.url,
+                            websocketUrl: 'vnc',
+                            controlling: true,
+                          ).toString(),
+                        )
+                      : WebViewWidget(controller: _web!),
                 ),
-              Expanded(
-                child: isDesktop
-                    ? _desktop == null
-                          ? const Center(child: CircularProgressIndicator())
-                          : InlineBrowserView(
-                              key: _viewerKey,
-                              surface: DesktopNative.viewerSurface,
-                              url: embeddedNoVncUrl(
-                                _desktop!.url,
-                                websocketUrl: 'vnc',
-                                controlling: _manual,
-                              ).toString(),
-                            )
-                    : Stack(
-                        children: [
-                          WebViewWidget(controller: _web!),
-                          if (!_ready || _loading)
-                            const Center(child: CircularProgressIndicator()),
-                        ],
-                      ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _control.hasControl
-                          ? 'Stay in this browser view. The AI will inspect its current state before continuing. Avoid running tasks from another client during control.'
-                          : !_connected
-                          ? 'Reconnect the browser viewer before taking control. The Computer preview may remain live if the VNC tunnel is unavailable.'
-                          : 'Watching does not interrupt the AI. Take control stops its current task before enabling your input.',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.white70,
-                      ),
-                    ),
-                    if (_control.hasControl) ...[
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _notes,
-                        enabled: !busy,
-                        maxLength: 4000,
-                        minLines: 1,
-                        maxLines: 3,
-                        decoration: const InputDecoration(
-                          labelText: 'What did you change? (optional)',
-                          hintText:
-                              'Do not include passwords or other secrets.',
-                          border: OutlineInputBorder(),
-                          counterText: '',
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    if (widget.embedded)
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _manual ? 'You have control' : 'View only',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 12,
+              if (!hasViewer ||
+                  (error != null && !_finishing) ||
+                  _loading)
+                Positioned.fill(
+                  child: ColoredBox(
+                    color: Vc.bg,
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (busy ||
+                                      _loading ||
+                                      (error == null && !_ready))
+                                    const SizedBox(
+                                      width: 26,
+                                      height: 26,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    error ?? 'Taking over desktop…',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: Vc.muted),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                          IconButton(
-                            tooltip: 'Reconnect desktop',
-                            onPressed: busy || !_ready ? null : _reconnect,
-                            icon: const Icon(Icons.refresh, size: 18),
+                        ),
+                        SizedBox(
+                          height: 46,
+                          child: Row(
+                            children: [
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Text(
+                                  'Desktop control',
+                                  style: TextStyle(
+                                    color: Vc.muted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: busy ? null : _requestClose,
+                                child: Text(
+                                  _control.hasControl
+                                      ? 'Return control'
+                                      : 'Back to viewing',
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                            ],
                           ),
-                        ],
-                      ),
-                    FilledButton.icon(
-                      onPressed: busy || (!_control.hasControl && !_connected)
-                          ? null
-                          : _control.hasControl
-                          ? _returnControl
-                          : _takeControl,
-                      icon: Icon(
-                        _control.hasControl
-                            ? Icons.play_arrow
-                            : _connected
-                            ? Icons.ads_click
-                            : Icons.link_off,
-                      ),
-                      label: Text(
-                        busy
-                            ? _control.phase ==
-                                      BrowserHandoffPhase.takingControl
-                                  ? 'Stopping AI…'
-                                  : 'Returning control…'
-                            : _control.hasControl
-                            ? _control.canContinue
-                                  ? 'Done & continue'
-                                  : 'Return control'
-                            : _connected
-                            ? 'Take over'
-                            : 'Reconnect browser first',
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
             ],
           ),
         ),

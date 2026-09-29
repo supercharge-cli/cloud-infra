@@ -135,6 +135,15 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
     } finally { if (generation.current === selection) setSending(false); }
   }
 
+  async function continueAfterControl(notes: string) {
+    const prompt = 'Manual browser control is complete. Inspect the current page in the SAME browser and continue the original task without replaying manual actions or exposing secrets.' +
+      (notes ? `\n\nUser notes about the manual changes:\n${notes}` : '');
+    if (!group && !thread) throw new Error('No conversation is selected');
+    await json(group ? `${base}/group` : `${base}/chat`, { method: 'POST', body: JSON.stringify(group
+      ? { text: prompt, requestId: crypto.randomUUID(), mentions: ['main'] }
+      : { text: prompt, botId: selected, chatId: thread }) });
+  }
+
   async function createAgent() {
     if (!agentName.trim() || creating) return;
     setCreating(true); setError('');
@@ -163,7 +172,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
       {mentionOpen && <div className="agent-mentions">{bots.map((bot) => <button type="button" key={bot.id} onClick={() => { setDrafts((all) => ({ ...all, [selected]: `${draft.replace(/@[^@\n]*$/, '')}@${bot.name} ` })); setMentions((ids) => [...new Set([...ids, bot.id])]); setMentionOpen(false); }}><Avatar bot={bot} instance={workspace.id} />{bot.name}</button>)}</div>}
       <form className="agent-composer" onSubmit={(e) => { e.preventDefault(); void send(); }}>{group && <button type="button" aria-label="Mention an agent" onClick={() => setMentionOpen(!mentionOpen)}><AtSign size={20} /></button>}<textarea aria-label={group ? 'Message the group' : `Message ${current?.name ?? 'agent'}`} placeholder={group ? 'Message the group · @ to mention' : 'Write a message…'} value={draft} rows={1} onChange={(e) => { setDrafts((all) => ({ ...all, [selected]: e.target.value })); if (group) setMentionOpen(/@[^@\n ]*$/.test(e.target.value)); }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} /><button className="agent-send" type="submit" aria-label="Send message" disabled={!draft.trim() || loading || sending}>{sending ? <LoaderCircle size={20} /> : <ArrowUp size={20} />}</button></form>
     </div>
-    <aside className="agent-computer"><SandboxWorkspace instanceId={workspace.id} sandboxId={workspace.sandboxId} runtime="supercharge" /></aside>
+    <aside className="agent-computer"><SandboxWorkspace instanceId={workspace.id} sandboxId={workspace.sandboxId} runtime="supercharge" onContinue={continueAfterControl} /></aside>
     {newAgent && <div className="agent-dialog-backdrop"><form role="dialog" aria-modal="true" aria-labelledby="new-agent-title" onSubmit={(e) => { e.preventDefault(); void createAgent(); }}><h2 id="new-agent-title">New agent</h2><label>Name<input value={agentName} onChange={(e) => setAgentName(e.target.value)} maxLength={80} required autoFocus /></label><label>Instructions<textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} maxLength={16000} rows={5} /></label><p>Agents share this workspace. Folders organize files, but are not security boundaries.</p><div><button type="button" onClick={() => setNewAgent(false)} disabled={creating}>Cancel</button><button type="submit" disabled={creating || !agentName.trim()}>{creating ? 'Creating…' : 'Create agent'}</button></div></form></div>}
   </section>;
 }

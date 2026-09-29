@@ -211,6 +211,20 @@ void main() {
     },
   );
 
+  test('notes popup state rejects new VNC sockets until Keep control', () async {
+    final upstream = await _EchoVncServer.start();
+    addTearDown(upstream.close);
+    final state = <String, Object?>{'phase': 'controlling', 'expiresAt': DateTime.now().add(const Duration(minutes: 1)).millisecondsSinceEpoch, 'inputPaused': true};
+    final viewer = await _startViewer(requestVncUrl: () async => upstream.wsUrl, state: state);
+    addTearDown(viewer.close);
+    await expectLater(_connectViewer(viewer), throwsA(isA<WebSocketException>()));
+    expect(upstream.connections, 0);
+    state['inputPaused'] = false;
+    final socket = await _connectViewer(viewer);
+    expect(upstream.connections, 1);
+    await socket.close();
+  });
+
   test(
     'suspend closes both sides and invalidates the old generation',
     () async {

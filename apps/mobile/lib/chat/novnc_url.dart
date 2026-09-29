@@ -7,6 +7,8 @@ Map<String, String> noVncSettings({
   'reconnect': '1',
   'reconnect_delay': '2000',
   'resize': 'scale',
+  'quality': '9',
+  'compression': '0',
   'view_only': controlling ? '0' : '1',
   'bell': '0',
 };

@@ -155,6 +155,9 @@ class DesktopBrowserViewer {
     if (phase != 'watching' && phase != 'controlling') {
       throw const _ViewerFailure(409, 'Browser is not available for viewing.');
     }
+    if (state['inputPaused'] == true) {
+      throw const _ViewerFailure(409, 'Desktop input is paused.');
+    }
     if (!connection.active &&
         (state['busy'] == true || _actionPending || _suspending != 0)) {
       throw const _ViewerFailure(409, 'Browser is busy.');

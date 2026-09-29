@@ -13,6 +13,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:vectra_cloud/chat/event_stream.dart';
 import 'package:vectra_cloud/screens/chat.dart';
+import 'package:vectra_cloud/screens/browser_handoff.dart';
 import 'package:vectra_cloud/screens/instance_settings.dart';
 import 'package:vectra_cloud/widgets/computer_pane.dart';
 import 'package:vectra_cloud/widgets/ui.dart';
@@ -83,7 +84,7 @@ class _Client extends VectraClient {
   }
 
   @override
-  Stream<ComputerFrame> browserFrames(String id) =>
+  Stream<ComputerFrame> browserFrames(String id, {EventStreamCancellation? cancellation}) =>
       StreamController<ComputerFrame>().stream;
 
   @override
@@ -130,6 +131,34 @@ class _Client extends VectraClient {
   @override
   Future<String> readWorkspaceFile(String id, String path) async =>
       '# Workspace\n\nThis is a local desktop layout fixture.\n\nNo live account data is used.';
+}
+
+class _PreviewClient extends _Client {
+  int frameSubscriptions = 0;
+  int frameCancellations = 0;
+  int ticketRequests = 0;
+  int takeoverRequests = 0;
+
+  @override
+  Future<CloudInstance> getInstance(String id) async => CloudInstance(id: id, name: 'Design workspace', status: 'running',
+    sandboxId: 'fixture-sandbox', runtime: AgentRuntime.supercharge, isFree: true);
+
+  @override
+  Stream<ComputerFrame> browserFrames(String id, {EventStreamCancellation? cancellation}) {
+    frameSubscriptions++;
+    final controller = StreamController<ComputerFrame>();
+    cancellation?.onCancel(() { frameCancellations++; unawaited(controller.close()); });
+    return controller.stream;
+  }
+
+  @override
+  Future<Map<String, dynamic>> computerStatus(String id) async => {'handoff': true};
+
+  @override
+  Future<DateTime> startBrowserHandoff(String id, {int minutes = 10}) async { takeoverRequests++; return DateTime.now().add(const Duration(minutes: 1)); }
+
+  @override
+  Future<String> openAiBrowserVnc(String id) async { ticketRequests++; return 'wss://example.invalid/vnc'; }
 }
 
 class _BotClient extends _Client {
@@ -660,6 +689,43 @@ void main() {
     await _capture(tester, 'login-mobile');
     debugDefaultTargetPlatformOverride = null;
   });
+  testWidgets('passive browser uses image stream; takeover opens full-window and restores viewing on exit', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    PathProviderPlatform.instance = _Paths();
+    await _size(tester, const Size(1440, 900));
+    final client = _PreviewClient();
+    await _app(tester, client, path: '/chat/design');
+    for (var i = 0; i < 8; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    expect(client.frameSubscriptions, 1);
+    expect(client.ticketRequests, 0);
+    expect(find.byType(BrowserHandoffScreen), findsNothing);
+    final workspace = tester.widget<DesktopChatWorkspace>(find.byType(DesktopChatWorkspace));
+    workspace.computer.tab = 'browser';
+    await tester.pump();
+    expect(find.byType(ComputerBrowserView), findsWidgets);
+    await tester.tap(find.text('Take over'));
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 25)));
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    expect(client.frameCancellations, 1);
+    expect(client.ticketRequests, 0, reason: 'A conflicting handoff must never connect noVNC');
+    expect(client.takeoverRequests, 0);
+    expect(tester.getSize(find.byType(BrowserHandoffScreen)).width, 1440);
+    expect(find.byKey(const ValueKey('handoff-notes')), findsNothing);
+    await tester.tap(find.text('Back to viewing'));
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.byType(BrowserHandoffScreen), findsNothing);
+    expect(client.frameSubscriptions, 2);
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('desktop chat has inline computer and keyboard navigation', (
     tester,
   ) async {

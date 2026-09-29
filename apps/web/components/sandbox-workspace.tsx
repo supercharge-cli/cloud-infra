@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Monitor,
   Check,
@@ -13,6 +14,7 @@ import {
   Share2,
 } from 'lucide-react';
 import { BrowserHandoffView } from './browser-handoff-view';
+import './browser-control.css';
 
 type WorkspaceEntry = {
   name: string;
@@ -25,6 +27,7 @@ type Props = {
   sandboxId?: string;
   runtime?: 'xibecode' | 'supercharge';
   disabled?: boolean;
+  onContinue?: (notes: string) => Promise<void>;
 };
 
 type BrowserEvent = {
@@ -57,7 +60,7 @@ function frameData(event: BrowserEvent): string | null {
   return `data:image/jpeg;base64,${candidate}`;
 }
 
-export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', disabled = false }: Props) {
+export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', disabled = false, onContinue }: Props) {
   const [tab, setTab] = useState<'browser' | 'files'>('browser');
   const [directory, setDirectory] = useState('/home/user/workspace');
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
@@ -79,17 +82,26 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
   const [handoffWsUrl, setHandoffWsUrl] = useState('');
   const [handoffExpires, setHandoffExpires] = useState(0);
   const [viewerRevision, setViewerRevision] = useState(0);
+  const [controlOpen, setControlOpen] = useState(false);
+  const [finishOpen, setFinishOpen] = useState(false);
+  const [controlNotes, setControlNotes] = useState('');
   const ownedHandoff = useRef(false);
+  const handoffPending = useRef(false);
+  const finishDialog = useRef<HTMLDialogElement>(null);
+  const continuation = useRef(onContinue);
+  const mounted = useRef(true);
 
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
-    if (runtime !== 'supercharge' || disabled || tab !== 'browser') return;
-    let disposed = false;
-    void fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/vnc-ticket`, { method: 'POST' })
-      .then(async (response) => { const data = await response.json(); if (!response.ok || !data.wsUrl) throw new Error(data.error || 'Desktop ticket unavailable'); return data; })
-      .then((data) => { if (!disposed) setHandoffWsUrl(String(data.wsUrl)); })
-      .catch((error) => { if (!disposed) setMessage((error as Error).message); });
-    return () => { disposed = true; };
-  }, [runtime, disabled, instanceId, tab, viewerRevision]);
+    if (finishOpen) finishDialog.current?.showModal();
+    else finishDialog.current?.close();
+  }, [finishOpen]);
+  useEffect(() => {
+    if (!controlOpen) return;
+    const before = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = before; };
+  }, [controlOpen]);
 
   useEffect(() => () => {
     if (ownedHandoff.current) void fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
@@ -136,54 +148,53 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
   }, [disabled, instanceId]);
 
   useEffect(() => {
-    if (tab !== 'browser' || disabled || runtime === 'supercharge') return;
-    const controller = new AbortController();
-    setBrowserStatus('connecting');
-    setMessage('');
-    setFrame('');
-    void (async () => {
+    if (tab !== 'browser' || disabled || controlOpen) return;
+    let disposed = false;
+    let controller: AbortController | null = null;
+    let reconnect: ReturnType<typeof setTimeout> | undefined;
+    async function listen() {
+      if (disposed || document.hidden) return;
+      controller?.abort();
+      const request = new AbortController();
+      controller = request;
+      setBrowserStatus('connecting');
       try {
         const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/browser`, {
-          headers: { accept: 'text/event-stream' },
-          signal: controller.signal,
+          headers: { accept: 'text/event-stream' }, signal: request.signal,
         });
         if (!res.ok || !res.body) throw new Error(`Browser stream unavailable (${res.status})`);
         setBrowserStatus('connected');
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
+        const reader = res.body.getReader(), decoder = new TextDecoder();
         let buffer = '';
-        while (!controller.signal.aborted) {
+        while (!request.signal.aborted) {
           const next = await reader.read();
           if (next.done) break;
-          buffer += decoder.decode(next.value, { stream: true });
-          const events = buffer.split('\n\n');
-          buffer = events.pop() || '';
-          for (const eventText of events) {
-            const dataLine = eventText
-              .split('\n')
-              .find((line) => line.startsWith('data:'));
-            if (!dataLine) continue;
+          buffer += decoder.decode(next.value, { stream: true }).replace(/\r\n/g, '\n');
+          const events = buffer.split('\n\n'); buffer = events.pop() || '';
+          for (const text of events) {
+            const line = text.split('\n').find((line) => line.startsWith('data:'));
+            if (!line) continue;
             try {
-              const event = JSON.parse(dataLine.slice(5).trim()) as BrowserEvent;
-              const nextFrame = frameData(event);
-              if (nextFrame) setFrame(nextFrame);
-              if (event.type === 'status') {
-                setBrowserStatus(event.error ? `error: ${event.error}` : event.connected ? 'connected' : 'starting');
-              }
-            } catch {
-              // Ignore comments and incomplete frames; the stream remains usable.
-            }
+              const event = JSON.parse(line.slice(5).trim()) as BrowserEvent;
+              const image = frameData(event);
+              if (image && !request.signal.aborted) setFrame(image);
+              if (event.type === 'status') setBrowserStatus(event.error ? 'offline' : event.connected ? 'connected' : 'starting');
+            } catch { /* The next complete frame replaces malformed data. */ }
           }
         }
       } catch (error) {
-        if (!controller.signal.aborted) {
-          setBrowserStatus('offline');
-          setMessage((error as Error).message);
-        }
+        if (!request.signal.aborted && !disposed) { setBrowserStatus('offline'); setMessage((error as Error).message); }
+      } finally {
+        if (!disposed && !request.signal.aborted) reconnect = setTimeout(() => void listen(), 1500);
       }
-    })();
-    return () => controller.abort();
-  }, [disabled, instanceId, tab, runtime]);
+    }
+    const visibility = () => {
+      clearTimeout(reconnect);
+      if (document.hidden) controller?.abort(); else void listen();
+    };
+    void listen(); document.addEventListener('visibilitychange', visibility);
+    return () => { disposed = true; clearTimeout(reconnect); controller?.abort(); document.removeEventListener('visibilitychange', visibility); };
+  }, [disabled, instanceId, tab, controlOpen]);
 
   const parentPath = useMemo(() => {
     if (directory === '/home/user/workspace') return directory;
@@ -276,66 +287,88 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
   }
 
   const handleHandoffDisconnected = useCallback(() => {
-    setHandoffWsUrl('');
-    setHandoffExpires(0);
-    if (!ownedHandoff.current) { setViewerRevision((value) => value + 1); return; }
-    ownedHandoff.current = false;
-    void fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'stop' }),
-    }).then((response) => {
-      if (!response.ok) throw new Error(`Return control failed (${response.status})`);
-      setMessage('Manual control ended. Watching the AI browser again.');
-    }).catch((error) => {
-      setMessage(`Manual control disconnected. Return control before continuing: ${(error as Error).message}`);
-    });
-  }, [instanceId]);
+    setMessage('Desktop disconnected. Reconnect or return control.');
+  }, []);
 
-  async function setBrowserHandoff(action: 'start' | 'stop') {
-    if (handoffBusy) return;
-    setHandoffBusy(true);
-    setMessage('');
+  async function openControlConnection() {
+    const ticket = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/vnc-ticket`, { method: 'POST' });
+    const data = await ticket.json();
+    if (!ticket.ok || !data.wsUrl) throw new Error(data.error || 'Desktop connection unavailable');
+    if (mounted.current && ownedHandoff.current) { setHandoffWsUrl(String(data.wsUrl)); setViewerRevision((value) => value + 1); }
+  }
+
+  async function takeOver() {
+    if (handoffPending.current || ownedHandoff.current) return;
+    handoffPending.current = true; setHandoffBusy(true); setControlOpen(true); setMessage('');
+    continuation.current = onContinue;
     try {
-      if (action === 'start') {
-        const statusResponse = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/chat/status`);
-        const status = await statusResponse.json();
-        if (!statusResponse.ok || typeof status.turn?.busy !== 'boolean') throw new Error('Cannot verify agent state. Reconnect before taking over.');
-        if (status.turn.busy || status.activeBotChats?.length || status.queuedBotChats?.length || status.backgroundTasks?.length) {
-          throw new Error('An agent is working or queued. Open its chat and stop that task before taking over.');
-        }
-      } else { setHandoffExpires(0); setHandoffWsUrl(''); }
+      const response = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/chat/status`);
+      const status = await response.json();
+      if (!response.ok || typeof status.turn?.busy !== 'boolean') throw new Error('Cannot verify agent state. Retry before taking over.');
+      if (status.turn.busy || status.activeBotChats?.length || status.queuedBotChats?.length || status.backgroundTasks?.length) {
+        throw new Error('An agent is working or queued. Open its chat and stop that task before taking over.');
+      }
+      if (!mounted.current) return;
       const handoff = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action, minutes: 10 }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'start', minutes: 10 }),
       });
-      const data = await handoff.json().catch(() => ({}));
-      if (!handoff.ok || data.ok !== true) throw new Error(data.error || 'Browser handoff request failed');
-      if (action === 'stop') {
-        ownedHandoff.current = false;
-        setHandoffExpires(0);
-        setViewerRevision((value) => value + 1);
-        setHandoffWsUrl('');
-        setMessage('Browser control returned to Supercharge.');
+      const data = await handoff.json();
+      if (!handoff.ok || data.ok !== true || data.handoff !== true) throw new Error(data.error || 'Takeover could not be confirmed');
+      ownedHandoff.current = true;
+      if (!mounted.current) {
+        await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop' }), keepalive: true });
         return;
       }
-      ownedHandoff.current = true;
       const expiry = Number(data.expiresAt);
-      if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('Control lease is unavailable. Return control and retry.');
+      if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('Control lease expired. Return control and retry.');
       setHandoffExpires(expiry);
-      const ticket = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/vnc-ticket`, {
-        method: 'POST',
-      });
-      const ticketData = await ticket.json().catch(() => ({}));
-      if (!ticket.ok || !ticketData.wsUrl) throw new Error(ticketData.error || 'Browser handoff ticket failed');
-      setHandoffWsUrl(String(ticketData.wsUrl));
-      setMessage('Manual browser control is active in this tab. Complete the required step, then return control to the AI.');
+      await openControlConnection();
     } catch (error) {
-      setMessage((error as Error).message);
+      if (mounted.current) { setMessage((error as Error).message); if (!ownedHandoff.current) setControlOpen(false); }
     } finally {
-      setHandoffBusy(false);
+      handoffPending.current = false; if (mounted.current) setHandoffBusy(false);
     }
+  }
+
+  async function reconnectControl() {
+    if (handoffPending.current || !ownedHandoff.current) return;
+    if (handoffExpires <= Date.now()) { setFinishOpen(true); setMessage('Control expired. Return to viewing before taking over again.'); return; }
+    handoffPending.current = true; setHandoffBusy(true); setHandoffWsUrl(''); setMessage('');
+    try { await openControlConnection(); }
+    catch (error) { setMessage((error as Error).message); }
+    finally { handoffPending.current = false; if (mounted.current) setHandoffBusy(false); }
+  }
+
+  function requestReturn() {
+    if (handoffPending.current) return;
+    if (!ownedHandoff.current) { setControlOpen(false); return; }
+    setHandoffWsUrl('');
+    setFinishOpen(true);
+  }
+
+  async function keepControl() {
+    setFinishOpen(false);
+    await reconnectControl();
+  }
+
+  async function returnControl(resume: boolean) {
+    if (handoffPending.current || !ownedHandoff.current) return;
+    handoffPending.current = true; setHandoffBusy(true); setHandoffWsUrl('');
+    try {
+      const response = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop' }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok !== true || data.handoff !== false) throw new Error(data.error || 'Return could not be confirmed. Input stays disabled; retry.');
+      ownedHandoff.current = false; setHandoffExpires(0); setFinishOpen(false); setControlOpen(false);
+      setMessage('Control returned.');
+      if (resume && continuation.current && handoffExpires > Date.now()) {
+        try { await continuation.current(controlNotes.trim()); }
+        catch { setMessage('Control returned, but the agent could not continue. Send a message to retry.'); }
+      }
+      setControlNotes('');
+    } catch (error) { setMessage((error as Error).message); }
+    finally { handoffPending.current = false; if (mounted.current) setHandoffBusy(false); }
   }
 
   const tabs = [
@@ -387,21 +420,6 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
             </div>
             {sandboxId ? <span className="font-mono text-zinc-600">{sandboxId.slice(0, 16)}…</span> : null}
           </div>
-          {runtime === 'supercharge' ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 bg-amber-500/5 p-3 text-xs">
-              <p className="text-amber-200/80">You are watching the AI&apos;s live E2B browser below. Open manual control only for login, MFA, OAuth, CAPTCHA, or another step that requires your input.</p>
-              <div className="flex gap-2">
-                <button type="button" disabled={disabled || handoffBusy || handoffExpires > Date.now()} onClick={() => void setBrowserHandoff('start')} className="rounded border border-amber-400/50 px-3 py-1.5 text-amber-100 hover:bg-amber-400/10 disabled:opacity-50">Take over</button>
-                <button type="button" disabled={disabled || handoffBusy || !ownedHandoff.current} onClick={() => void setBrowserHandoff('stop')} className="rounded border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-900 disabled:opacity-50">Return to AI</button>
-              </div>
-            </div>
-          ) : null}
-          {handoffWsUrl ? (
-            <div className="min-h-[520px] bg-zinc-950">
-              <BrowserHandoffView wsUrl={handoffWsUrl} viewOnly={handoffExpires <= Date.now()} expiresAt={handoffExpires} onDisconnected={handleHandoffDisconnected} />
-            </div>
-          ) : (
-          <>
           {runtime !== 'supercharge' ? (
           <div className="grid gap-2 border-b border-zinc-800 bg-zinc-950 p-3 text-xs sm:grid-cols-2">
             <div className="flex gap-2 sm:col-span-2">
@@ -435,8 +453,10 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
               </div>
             )}
           </div>
-          </>
-          )}
+          {runtime === 'supercharge' && <footer className="browser-control-bar">
+            <span>Live view</span>
+            <button type="button" disabled={disabled || handoffBusy} onClick={() => void takeOver()}>Take over</button>
+          </footer>}
         </div>
       ) : (
         <>
@@ -482,6 +502,27 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
           </div>
         </>
       )}
+      {controlOpen && typeof document !== 'undefined' && createPortal(
+        <div className="browser-control-overlay" role="dialog" aria-modal="true" aria-label="Control desktop">
+          {handoffWsUrl && !finishOpen
+            ? <BrowserHandoffView key={viewerRevision} wsUrl={handoffWsUrl} expiresAt={handoffExpires} paused={handoffBusy}
+                onDisconnected={handleHandoffDisconnected} onReturn={requestReturn} onReconnect={() => void reconnectControl()} />
+            : <><div className="browser-control-pending">{handoffBusy ? 'Taking over…' : finishOpen ? 'Input paused' : message || 'Desktop disconnected'}</div>
+                <footer className="browser-control-bar"><span>Desktop control</span><button type="button" disabled={handoffBusy} onClick={requestReturn}>Return control</button></footer></>}
+          <dialog ref={finishDialog} className="browser-finish-dialog" onCancel={(event) => { event.preventDefault(); if (!handoffBusy) void keepControl(); }}>
+            <h2>Return control?</h2>
+            <label>What did you change? (optional)
+              <textarea value={controlNotes} onChange={(event) => setControlNotes(event.target.value)} maxLength={4000} rows={3} placeholder="For example: signed in and opened the project." disabled={handoffBusy} />
+            </label>
+            <small>Do not include passwords or codes.</small>
+            {message && <p className="browser-control-error" role="alert">{message}</p>}
+            <div className="actions">
+              <button type="button" disabled={handoffBusy} onClick={() => void keepControl()}>Keep control</button>
+              <button type="button" disabled={handoffBusy} onClick={() => void returnControl(false)}>Exit without resuming</button>
+              {continuation.current && <button type="button" className="primary" disabled={handoffBusy} onClick={() => void returnControl(true)}>Return & continue</button>}
+            </div>
+          </dialog>
+        </div>, document.body)}
     </section>
   );
 }

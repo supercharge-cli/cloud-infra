@@ -759,7 +759,7 @@ class VectraClient {
     }
   }
 
-  Stream<ComputerFrame> browserFrames(String id) async* {
+  Stream<ComputerFrame> browserFrames(String id, {EventStreamCancellation? cancellation}) async* {
     final uri = _u('/api/instances/$id/computer/browser');
     final req = http.Request('GET', uri);
     req.headers.addAll({
@@ -767,8 +767,11 @@ class VectraClient {
       if (token != null && token!.isNotEmpty) 'authorization': 'Bearer $token',
     });
     final client = http.Client();
+    final removeCancel = cancellation?.onCancel(client.close);
     try {
+      if (cancellation?.isCancelled == true) return;
       final res = await client.send(req).timeout(_sseConnect);
+      if (cancellation?.isCancelled == true) return;
       if (res.statusCode >= 400) {
         final body = await res.stream.bytesToString();
         throw ApiException(
@@ -778,6 +781,7 @@ class VectraClient {
       }
       var buf = '';
       await for (final chunk in res.stream.transform(utf8.decoder)) {
+        if (cancellation?.isCancelled == true) return;
         buf += chunk;
         while (true) {
           final i = buf.indexOf('\n\n');
@@ -818,6 +822,7 @@ class VectraClient {
     } on TimeoutException {
       throw ApiException(0, 'Browser stream timed out while connecting.');
     } finally {
+      removeCancel?.call();
       client.close();
     }
   }

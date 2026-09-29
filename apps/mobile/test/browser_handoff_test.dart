@@ -178,6 +178,15 @@ void main() {
     ]);
   });
 
+  test('return without resuming releases input but sends no continuation', () async {
+    await controller.takeControl();
+    expect(controller.hasControl, isTrue);
+    await controller.returnControl(notes: 'Signed in', continueTask: false);
+    expect(controller.hasControl, isFalse);
+    expect(api.calls.last, 'release');
+    expect(prompts, isEmpty);
+  });
+
   test('duplicate takeovers do not acquire twice', () async {
     await Future.wait([controller.takeControl(), controller.takeControl()]);
     expect(api.calls.where((call) => call == 'start'), hasLength(1));

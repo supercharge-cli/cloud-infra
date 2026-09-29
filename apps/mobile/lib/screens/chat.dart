@@ -123,6 +123,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   int _catalogueGeneration = 0;
   final backgroundTasks = <String, Map<String, dynamic>>{};
   StreamSubscription<ComputerFrame>? _browserSub;
+  EventStreamCancellation? _browserCancellation;
+  int _browserGeneration = 0;
   List<BotCommand> commands = defaultBotCommandsFor(AgentRuntime.supercharge);
   CloudInstance? inst;
   Map<String, dynamic>? cli;
@@ -260,6 +262,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (isDesktop) {
       backgrounded = state != AppLifecycleState.resumed;
       if (!backgrounded) { unawaited(_refreshBots()); unawaited(_pollBotStatus()); }
+      _syncBrowserStream();
       return;
     }
     if (state == AppLifecycleState.resumed) {
@@ -268,14 +271,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       unawaited(_catchUp());
       if (_isSupercharge) unawaited(_refreshBots());
       unawaited(context.read<SessionController>().workspaces.refresh(force: false));
+      _syncBrowserStream();
       return;
     }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       backgrounded = true;
-      _browserSub?.cancel();
-      _browserSub = null;
-      _browserListening = false;
+      _stopBrowserStream();
       if (working) {
         unawaited(TaskNotifications.enterBackground());
       } else {
@@ -584,17 +586,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _syncBrowserStream() {
-    if (_isSupercharge && _sandboxId != null && (isDesktop || _computerOpen || _browserViewerOpen)) {
-      _browserSub?.cancel();
-      _browserSub = null;
-      _browserListening = false;
-      _liveTick?.cancel();
-      _liveTick = null;
-      return;
-    }
     final want =
         !disposed &&
         !backgrounded &&
+        !_browserViewerOpen &&
         !paymentBlocked &&
         (_computerOpen ||
             (isDesktop && _desktopComputer) ||
@@ -604,12 +599,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (want) {
       _listenBrowser();
     } else {
-      _browserSub?.cancel();
-      _browserSub = null;
-      _browserListening = false;
-      _liveTick?.cancel();
-      _liveTick = null;
+      _stopBrowserStream();
     }
+  }
+
+  void _stopBrowserStream() {
+    _browserCancellation?.cancel();
+    _browserCancellation = null;
+    _browserGeneration++;
+    unawaited(_browserSub?.cancel());
+    _browserSub = null;
+    _browserListening = false;
+    _liveTick?.cancel();
+    _liveTick = null;
   }
 
   void _listenBrowser() {
@@ -620,10 +622,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(_checkLivePause);
     });
-    _browserSub?.cancel();
-    _browserSub = _browserLoop().listen(
+    _browserCancellation?.cancel();
+    unawaited(_browserSub?.cancel());
+    final cancellation = EventStreamCancellation();
+    _browserCancellation = cancellation;
+    final generation = ++_browserGeneration;
+    _browserSub = _browserLoop(generation, cancellation).listen(
       (frame) {
-        if (!mounted) return;
+        if (!mounted || generation != _browserGeneration) return;
         setState(() {
           if (frame.type == 'frame' &&
               frame.bytes != null &&
@@ -638,25 +644,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         });
       },
       onError: (_) {
+        if (generation != _browserGeneration) return;
         _browserListening = false;
         if (mounted) setState(computer.markLivePaused);
       },
       onDone: () {
-        _browserListening = false;
+        if (generation == _browserGeneration) _browserListening = false;
       },
     );
   }
 
-  Stream<ComputerFrame> _browserLoop() async* {
+  Stream<ComputerFrame> _browserLoop(int generation, EventStreamCancellation cancellation) async* {
     var delay = 1;
-    while (!disposed) {
+    while (!disposed && generation == _browserGeneration && !cancellation.isCancelled) {
       try {
-        await for (final frame in api.browserFrames(id)) {
+        await for (final frame in api.browserFrames(id, cancellation: cancellation)) {
+          if (generation != _browserGeneration || cancellation.isCancelled) return;
           delay = 1;
           yield frame;
         }
       } catch (_) {}
-      if (disposed) return;
+      if (disposed || generation != _browserGeneration || cancellation.isCancelled) return;
       await Future<void>.delayed(Duration(seconds: delay));
       if (delay < 8) delay *= 2;
     }
@@ -2036,7 +2044,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _eventCancellation?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
-    _browserSub?.cancel();
+    _stopBrowserStream();
     _tick?.cancel();
     _liveTick?.cancel();
     _botsRefresh?.cancel();
@@ -3315,10 +3323,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 if (tab == 'browser') _syncBrowserStream();
               },
               onRunCommand: _runComputerCommand,
-              browser: _isSupercharge && _sandboxId != null ? BrowserHandoffScreen(
-                api: api, instanceId: id, botId: _botScope, chatId: _chatScope,
-                onContinue: _sendBrowserContinuation, embedded: true,
-              ) : null,
               onManualBrowserControl: _isSupercharge
                   ? _openBrowserHandoff
                   : null,
@@ -3382,11 +3386,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _openBrowserHandoff() async {
     if (_browserViewerOpen) return;
     computer.tab = 'browser';
-    _syncBrowserStream();
     _browserViewerOpen = true;
+    _syncBrowserStream();
     try {
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
+      final result = await Navigator.of(context, rootNavigator: true).push<String>(
+        MaterialPageRoute<String>(
+          fullscreenDialog: true,
           builder: (_) => BrowserHandoffScreen(
             api: api,
             instanceId: id,
@@ -3396,6 +3401,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
         ),
       );
+      if (mounted && result != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result)));
+      }
     } finally {
       _browserViewerOpen = false;
       if (mounted) _syncBrowserStream();
@@ -3995,11 +4003,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     onCloseComputer: _openComputer,
                     onRunCommand: _runComputerCommand,
                     onManualControl: _isSupercharge ? _openBrowserHandoff : null,
-                    browser: _isSupercharge && _sandboxId != null ? BrowserHandoffScreen(
-                      key: ValueKey('desktop-viewer-$id-${store.activeSessionId ?? 'main'}'),
-                      api: api, instanceId: id, botId: _botScope, chatId: _chatScope,
-                      onContinue: _sendBrowserContinuation, embedded: true,
-                    ) : null,
                   ),
                 ),
               ],

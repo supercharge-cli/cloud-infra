@@ -12,6 +12,8 @@ void main() {
     expect(settings['view_only'], '1');
     expect(settings['autoconnect'], '1');
     expect(settings['resize'], 'scale');
+    expect(settings['quality'], '9');
+    expect(settings['compression'], '0');
     expect(settings['reconnect_delay'], '2000');
   });
 

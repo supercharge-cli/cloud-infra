@@ -319,7 +319,7 @@ class _ComputerPageState extends State<ComputerPage> {
                               onPressed: () =>
                                   widget.onManualBrowserControl?.call(),
                               icon: const Icon(Icons.ads_click, size: 18),
-                              label: const Text('Manual control'),
+                              label: const Text('Take over'),
                             ),
                           ],
                         ],

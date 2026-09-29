@@ -24,7 +24,7 @@ void main() {
   }
 
   test(
-    'watching requests one ticket and preserves a valid WebSocket URL',
+    'manual control requests one ticket and preserves a valid WebSocket URL',
     () async {
       for (final url in [
         'wss://browser.example.test/vnc?ticket=opaque-token',

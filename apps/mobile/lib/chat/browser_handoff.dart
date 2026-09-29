@@ -83,8 +83,10 @@ class BrowserHandoffController extends ChangeNotifier {
 
   Future<void> takeControl() => _enqueue(_takeControl);
 
-  Future<void> returnControl({String notes = ''}) =>
-      _enqueue(() => _release(continueTask: canContinue, notes: notes));
+  Future<void> returnControl({String notes = '', bool continueTask = true}) =>
+      _enqueue(
+        () => _release(continueTask: continueTask && canContinue, notes: notes),
+      );
 
   /// Prevents any queued takeover/continuation, but permits release retries.
   /// Closing a watcher never stops the AI or releases another viewer's handoff.
