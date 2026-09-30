@@ -136,7 +136,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
   }
 
   async function continueAfterControl(notes: string) {
-    const prompt = 'Manual browser control is complete. Inspect the current page in the SAME browser and continue the original task without replaying manual actions or exposing secrets.' +
+    const prompt = 'Manual desktop control is complete. Use desktop_observe to inspect the current window and browser tab in the SAME E2B desktop, then continue the original task without replaying manual actions or exposing secrets.' +
       (notes ? `\n\nUser notes about the manual changes:\n${notes}` : '');
     if (!group && !thread) throw new Error('No conversation is selected');
     await json(group ? `${base}/group` : `${base}/chat`, { method: 'POST', body: JSON.stringify(group

@@ -58,14 +58,23 @@ class _Client extends VectraClient {
   }
 
   @override
-  Future<DateTime> startBrowserHandoff(String id, {int minutes = 10}) async {
+  Future<DateTime> startBrowserHandoff(
+    String id, {
+    required String handoffId,
+    String? botId,
+    String? sessionId,
+    int minutes = 10,
+  }) async {
     calls.add('start');
     if (startFailure != null) throw startFailure!;
     return pendingStart == null ? expiry : pendingStart!.future;
   }
 
   @override
-  Future<void> stopBrowserHandoff(String id) async {
+  Future<void> stopBrowserHandoff(
+    String id, {
+    required String handoffId,
+  }) async {
     calls.add('release');
     if (releaseFailure != null) throw releaseFailure!;
     if (pendingRelease != null) await pendingRelease!.future;
@@ -178,14 +187,17 @@ void main() {
     ]);
   });
 
-  test('return without resuming releases input but sends no continuation', () async {
-    await controller.takeControl();
-    expect(controller.hasControl, isTrue);
-    await controller.returnControl(notes: 'Signed in', continueTask: false);
-    expect(controller.hasControl, isFalse);
-    expect(api.calls.last, 'release');
-    expect(prompts, isEmpty);
-  });
+  test(
+    'return without resuming releases input but sends no continuation',
+    () async {
+      await controller.takeControl();
+      expect(controller.hasControl, isTrue);
+      await controller.returnControl(notes: 'Signed in', continueTask: false);
+      expect(controller.hasControl, isFalse);
+      expect(api.calls.last, 'release');
+      expect(prompts, isEmpty);
+    },
+  );
 
   test('duplicate takeovers do not acquire twice', () async {
     await Future.wait([controller.takeControl(), controller.takeControl()]);
@@ -278,9 +290,19 @@ void main() {
 
   test('another bot working prevents takeover without stopping it', () async {
     controller.dispose();
-    controller = BrowserHandoffController(api: api, instanceId: 'instance-1', botId: 'research', chatId: 'chat-research',
-      suspendViewer: () async => api.calls.add('suspend'), continueChat: (_) async {});
-    api.statuses.add({..._status(false), 'activeBotChats': ['chat-main'], 'queuedBotChats': []});
+    controller = BrowserHandoffController(
+      api: api,
+      instanceId: 'instance-1',
+      botId: 'research',
+      chatId: 'chat-research',
+      suspendViewer: () async => api.calls.add('suspend'),
+      continueChat: (_) async {},
+    );
+    api.statuses.add({
+      ..._status(false),
+      'activeBotChats': ['chat-main'],
+      'queuedBotChats': [],
+    });
     await controller.takeControl();
     expect(api.calls, isNot(contains('stop')));
     expect(api.calls, isNot(contains('start')));
@@ -414,8 +436,9 @@ void main() {
       expect(controller.phase, BrowserHandoffPhase.watching);
       expect(controller.hasControl, isFalse);
       expect(controller.expiresAt, isNull);
-      expect(prompts.single, contains('SAME browser session'));
-      expect(prompts.single, contains('SAME active browser tab'));
+      expect(prompts.single, contains('SAME E2B desktop and browser session'));
+      expect(prompts.single, contains('desktop_observe'));
+      expect(prompts.single, contains('active window, tab and desktop state'));
       expect(prompts.single, contains('fresh screenshot'));
       expect(prompts.single, contains('original task'));
       expect(prompts.single, contains('automatically replay'));

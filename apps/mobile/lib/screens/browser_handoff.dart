@@ -96,7 +96,10 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
         final viewer = await DesktopBrowserViewer.start(
           html: browserViewerDocument(desktop: true),
           viewerModule: _module!,
-          requestVncUrl: () => widget.api.openAiBrowserVnc(widget.instanceId),
+          requestVncUrl: () => widget.api.openAiBrowserVnc(
+            widget.instanceId,
+            handoffId: _control.handoffId!,
+          ),
           readState: _viewerState,
           onAction: (action, _) async {
             if (_closing || _tearingDown || _finishing) return;
@@ -149,7 +152,10 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
       _viewerError = null;
     });
     try {
-      final wsUrl = await widget.api.openAiBrowserVnc(widget.instanceId);
+      final wsUrl = await widget.api.openAiBrowserVnc(
+        widget.instanceId,
+        handoffId: _control.handoffId!,
+      );
       if (!mounted ||
           _tearingDown ||
           _closing ||
@@ -445,9 +451,7 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
                         )
                       : WebViewWidget(controller: _web!),
                 ),
-              if (!hasViewer ||
-                  (error != null && !_finishing) ||
-                  _loading)
+              if (!hasViewer || (error != null && !_finishing) || _loading)
                 Positioned.fill(
                   child: ColoredBox(
                     color: Vc.bg,

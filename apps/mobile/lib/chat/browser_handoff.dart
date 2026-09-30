@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
@@ -62,6 +64,8 @@ class BrowserHandoffController extends ChangeNotifier {
   bool _disposed = false;
   String? _error;
   DateTime? _expiresAt;
+  String? _handoffId;
+  String? get handoffId => _handoffId;
   Timer? _expiryTimer;
   Future<void> _pending = Future<void>.value();
 
@@ -133,7 +137,8 @@ class BrowserHandoffController extends ChangeNotifier {
       await _suspendViewer();
       if (_closeRequested) return;
       final computer = await _api.computerStatus(_instanceId);
-      if (computer['handoff'] != false) {
+      if (computer['handoff'] != false &&
+          (_handoffId == null || computer['handoffId'] != _handoffId)) {
         throw StateError(
           computer['handoff'] == true
               ? 'Another viewer already has browser control.'
@@ -148,7 +153,15 @@ class BrowserHandoffController extends ChangeNotifier {
       if (_closeRequested) return;
       await _waitUntilIdle();
       if (_closeRequested) return;
-      final expiry = await _api.startBrowserHandoff(_instanceId);
+      _handoffId ??= base64Url
+          .encode(List<int>.generate(24, (_) => Random.secure().nextInt(256)))
+          .replaceAll('=', '');
+      final expiry = await _api.startBrowserHandoff(
+        _instanceId,
+        handoffId: _handoffId!,
+        botId: _botId,
+        sessionId: _chatId,
+      );
       // Record ownership immediately: later checks must not hide a live lease.
       _hasControl = true;
       _expiresAt = expiry;
@@ -265,10 +278,11 @@ class BrowserHandoffController extends ChangeNotifier {
         _expired = true;
         _mayContinue = false;
       }
-      await _api.stopBrowserHandoff(_instanceId);
+      await _api.stopBrowserHandoff(_instanceId, handoffId: _handoffId!);
       final shouldContinue =
           continueTask && _mayContinue && !_expired && !_closeRequested;
       _hasControl = false;
+      _handoffId = null;
       _expiresAt = null;
       _expiryTimer?.cancel();
       _expiryTimer = null;
@@ -300,8 +314,8 @@ class BrowserHandoffController extends ChangeNotifier {
     final userNotes = notes.trim();
     return 'Manual browser work is complete and control has been returned. '
         '${_wasBusy ? 'The running task was interrupted for this manual step. ' : ''}'
-        'Continue the original task in the SAME browser session and SAME active browser tab. '
-        'First take a fresh screenshot and inspect the current page and browser state to '
+        'Continue the original task in the SAME E2B desktop and browser session. '
+        'First use desktop_observe for a fresh screenshot and inspect the active window, tab and desktop state to '
         'understand the user\'s manual changes. Do not assume the page is unchanged or '
         'automatically replay the manual actions. Preserve login and session changes; '
         'do not request, repeat, or expose passwords, one-time codes, or other secrets.'

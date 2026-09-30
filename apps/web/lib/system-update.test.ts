@@ -22,6 +22,26 @@ test("manifest rejects user home and surprise shell", () => {
   );
 });
 
+test("desktop bundles require an opt-in marker, checksum and no install commands", () => {
+  const desktop = {
+    ...manifest,
+    archive: "sandbox-desktop-1.4.0.tar.gz",
+    commands: [],
+    desktopProtocol: 1,
+    requiresOptIn: true,
+    sha256: "f".repeat(64),
+  };
+  assert.equal(parseSystemManifest(desktop)?.desktopProtocol, 1);
+  assert.equal(parseSystemManifest({ ...desktop, requiresOptIn: false }), null);
+  assert.equal(parseSystemManifest({ ...desktop, sha256: "invalid" }), null);
+  assert.equal(parseSystemManifest({ ...desktop, commands: ["true"] }), null);
+  assert.equal(parseSystemManifest({ ...manifest, desktopProtocol: 1 }), null);
+  const script = systemUpdateScript(parseSystemManifest(desktop)!, "https://example.test");
+  assert.match(script, /Missing desktop dependency/);
+  assert.match(script, /legacy browser requires an explicit desktop migration/i);
+  assert.match(script, /sha256sum -c/);
+});
+
 test("apply script stops services before unpack and does not stamp", () => {
   const script = systemUpdateScript(
     parseSystemManifest(manifest)!,
@@ -30,6 +50,10 @@ test("apply script stops services before unpack and does not stamp", () => {
   const stopAt = script.indexOf("--- stop services ---");
   const unpackAt = script.indexOf("--- unpack ---");
   assert.ok(stopAt >= 0 && stopAt < unpackAt);
+  assert.ok(script.indexOf('--- download ---') < stopAt);
+  assert.ok(script.indexOf('--- check paths ---') < stopAt);
+  assert.match(script, /\/tmp\/supercharge-browser\/pid/);
+  assert.doesNotMatch(script, /kill -9/);
   assert.match(script, /refusing/);
   assert.match(script, /8788\/health/);
   assert.match(script, /startswith\('\/home\/user'\)/);

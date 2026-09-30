@@ -214,7 +214,7 @@ const maxExportBytes =
 const sessions = new Map<string, SessionRecord>();
 const browserVncTickets = new Map<
   string,
-  { sessionId: string; expiresAt: number }
+  { sessionId: string; handoffId: string; expiresAt: number }
 >();
 const defaultWorkspaceRoot =
   process.env.XIBECODE_SANDBOX_WORKSPACE_ROOT?.trim() || "/home/user/workspace";
@@ -387,16 +387,18 @@ function findSession(id: string): SessionRecord | undefined {
   );
 }
 
-function issueBrowserVncTicket(sessionId: string): string {
+function issueBrowserVncTicket(sessionId: string, handoffId: string): string {
+  for (const [key, record] of browserVncTickets) if (record.expiresAt <= Date.now()) browserVncTickets.delete(key);
+  if (browserVncTickets.size >= 4096) throw new Error("Too many outstanding desktop tickets");
   const ticket = randomBytes(32).toString("base64url");
-  browserVncTickets.set(ticket, { sessionId, expiresAt: Date.now() + 60_000 });
+  browserVncTickets.set(ticket, { sessionId, handoffId, expiresAt: Date.now() + 60_000 });
   return ticket;
 }
 
-function consumeBrowserVncTicket(ticket: string, sessionId: string): boolean {
+function consumeBrowserVncTicket(ticket: string, sessionId: string): string | undefined {
   const record = browserVncTickets.get(ticket);
   browserVncTickets.delete(ticket);
-  return Boolean(record && record.sessionId === sessionId && record.expiresAt > Date.now());
+  return record && record.sessionId === sessionId && record.expiresAt > Date.now() ? record.handoffId : undefined;
 }
 
 async function readJson<T>(req: IncomingMessage): Promise<T> {
@@ -1516,7 +1518,7 @@ const server = createServer(async (req, res) => {
         sendJson(res, 404, { success: false, error: true, message: "Browser handoff is available only for Supercharge sessions" });
         return;
       }
-      const body = await readJson<{ action?: unknown; minutes?: unknown }>(req);
+      const body = await readJson<{ action?: unknown; minutes?: unknown; handoffId?: string }>(req);
       const action = String(body.action || "").trim().toLowerCase();
       if (action !== "start" && action !== "stop") {
         sendJson(res, 400, { success: false, error: true, message: "action must be start or stop" });
@@ -1527,7 +1529,7 @@ const server = createServer(async (req, res) => {
         const upstream = await superchargeDaemonFetch(session, "/v1/computer/handoff", {
           method: "POST",
           headers: { "content-type": "application/json", accept: "application/json" },
-          body: JSON.stringify({ action, minutes }),
+          body: JSON.stringify({ action, minutes, handoffId: body.handoffId }),
         });
         const text = await upstream.text();
         sendJson(res, upstream.status, text ? JSON.parse(text) : { success: upstream.ok });
@@ -1547,9 +1549,18 @@ const server = createServer(async (req, res) => {
         sendJson(res, 404, { success: false, error: true, message: "Supercharge session not found" });
         return;
       }
+      const body = await readJson<{ handoffId?: unknown }>(req);
+      if (typeof body.handoffId !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(body.handoffId)) {
+        sendJson(res, 400, { error: "A current handoffId is required" }); return;
+      }
       try {
-        const ticket = issueBrowserVncTicket(session.sessionId);
-        sendJson(res, 200, { success: true, ticket, expiresInSeconds: 60, sessionId: session.sessionId });
+        const status = await superchargeDaemonFetch(session, "/v1/computer/status");
+        const state = await status.json() as { handoff?: boolean; handoffId?: string; expiresAt?: number; handoffProtocol?: number };
+        if (!status.ok || state.handoff !== true || state.handoffId !== body.handoffId || (state.expiresAt || 0) <= Date.now() || (state.handoffProtocol || 0) < 2) {
+          sendJson(res, 409, { error: "Take control using an updated E2B desktop before opening VNC" }); return;
+        }
+        const ticket = issueBrowserVncTicket(session.sessionId, body.handoffId);
+        sendJson(res, 200, { success: true, ticket, handoffId: body.handoffId, expiresInSeconds: 60, sessionId: session.sessionId });
       } catch (error) {
         sendJson(res, 502, { success: false, error: true, message: (error as Error).message });
       }
@@ -2247,7 +2258,8 @@ server.on("upgrade", (req, socket, head) => {
     const sessionId = match ? decodeURIComponent(match[1] || "") : "";
     const ticket = url.searchParams.get("ticket") || "";
     const session = findSession(sessionId);
-    if (!session || session.runtime !== "supercharge" || !consumeBrowserVncTicket(ticket, session.sessionId)) {
+    const handoffId = session ? consumeBrowserVncTicket(ticket, session.sessionId) : undefined;
+    if (!session || session.runtime !== "supercharge" || !handoffId) {
       socket.destroy();
       return;
     }
@@ -2255,7 +2267,8 @@ server.on("upgrade", (req, socket, head) => {
       void relayBrowserVnc(client, {
         resolveDaemonBase: () => resolvePreviewHost(session, 8790),
         headers: daemonAuthorizationHeaders(),
-        allowLegacyBearer: true,
+        handoffId,
+        allowLegacyBearer: false,
         onError: (message) => console.warn(`[browser-vnc] ${message}`),
       });
     });

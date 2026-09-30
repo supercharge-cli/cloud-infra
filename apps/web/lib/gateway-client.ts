@@ -2379,11 +2379,12 @@ export async function createSandboxShare(
 export async function setBrowserHandoff(
   sessionId: string,
   action: "start" | "stop",
+  handoffId: string,
   minutes = 10,
 ): Promise<{ success: boolean; handoff?: boolean; expiresAt?: number; message?: string }> {
   const res = await gwFetch(
     `/sessions/${encodeURIComponent(sessionId)}/browser/handoff`,
-    { method: "POST", body: JSON.stringify({ action, minutes }) },
+    { method: "POST", body: JSON.stringify({ action, minutes, handoffId }) },
   );
   const data = (await res.json().catch(() => ({}))) as {
     success?: boolean;
@@ -2407,10 +2408,11 @@ export async function setBrowserHandoff(
 /** Mint a short-lived, single-use ticket for the persistent gateway noVNC tunnel. */
 export async function createBrowserVncTicket(
   sessionId: string,
+  handoffId: string,
 ): Promise<{ ticket: string; expiresInSeconds: number }> {
   const res = await gwFetch(
     `/sessions/${encodeURIComponent(sessionId)}/browser/vnc-ticket`,
-    { method: "POST", body: "{}" },
+    { method: "POST", body: JSON.stringify({ handoffId }) },
   );
   const data = (await res.json().catch(() => ({}))) as {
     ticket?: string;

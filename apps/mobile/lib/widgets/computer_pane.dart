@@ -145,7 +145,7 @@ class _ComputerPageState extends State<ComputerPage> {
                           ),
                         ),
                         PopupMenuButton<String>(
-                          tooltip: 'Terminal or Browser',
+                          tooltip: 'Terminal or ${state.screenLabel}',
                           initialValue: state.tab,
                           onSelected: widget.onSelectTab,
                           position: PopupMenuPosition.under,
@@ -161,8 +161,10 @@ class _ComputerPageState extends State<ComputerPage> {
                             PopupMenuItem(
                               value: 'browser',
                               child: _ViewMenuRow(
-                                icon: Icons.public,
-                                label: 'Browser',
+                                icon: state.desktopAvailable
+                                    ? Icons.desktop_windows_outlined
+                                    : Icons.public,
+                                label: state.screenLabel,
                                 selected: state.isBrowser,
                               ),
                             ),
@@ -183,7 +185,7 @@ class _ComputerPageState extends State<ComputerPage> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(
-                                      state.isBrowser
+                                      state.isBrowser && !state.desktopAvailable
                                           ? Icons.public
                                           : Icons.desktop_windows_outlined,
                                       size: 18,
@@ -202,7 +204,9 @@ class _ComputerPageState extends State<ComputerPage> {
                           ),
                         ),
                         IconButton(
-                          tooltip: 'Watch the AI browser',
+                          tooltip: state.desktopAvailable
+                              ? 'Watch the E2B desktop'
+                              : 'Watch the AI browser',
                           onPressed: () => widget.onSelectTab('browser'),
                           icon: Icon(
                             Icons.visibility_outlined,
@@ -246,10 +250,11 @@ class _ComputerPageState extends State<ComputerPage> {
                               ),
                               Expanded(
                                 child: state.isBrowser
-                                    ? widget.browser ?? ComputerBrowserView(
-                                        state: state,
-                                        compact: false,
-                                      )
+                                    ? widget.browser ??
+                                          ComputerBrowserView(
+                                            state: state,
+                                            compact: false,
+                                          )
                                     : ComputerTerminalView(
                                         state: state,
                                         compact: false,
@@ -306,10 +311,10 @@ class _ComputerPageState extends State<ComputerPage> {
                               icon: const Icon(Icons.visibility, size: 18),
                               label: Text(
                                 state.live
-                                    ? 'Watching AI browser live'
+                                    ? 'Watching AI ${state.screenLabel.toLowerCase()} live'
                                     : state.livePaused
                                     ? 'Live view paused'
-                                    : 'Waiting for AI browser',
+                                    : 'Waiting for AI ${state.screenLabel.toLowerCase()}',
                               ),
                             ),
                           ),
@@ -338,7 +343,11 @@ class _ComputerPageState extends State<ComputerPage> {
                           child: Padding(
                             padding: const EdgeInsets.all(10),
                             child: Icon(
-                              state.isBrowser ? Icons.public : Icons.terminal,
+                              state.isBrowser
+                                  ? (state.desktopAvailable
+                                        ? Icons.desktop_windows_outlined
+                                        : Icons.public)
+                                  : Icons.terminal,
                               size: 22,
                               color: Colors.white,
                             ),
@@ -351,7 +360,7 @@ class _ComputerPageState extends State<ComputerPage> {
                             children: [
                               Text(
                                 state.isBrowser
-                                    ? 'Watching AI browser'
+                                    ? 'Watching AI ${state.screenLabel.toLowerCase()}'
                                     : state.usingLabel,
                                 style: const TextStyle(
                                   fontSize: 16,
@@ -361,9 +370,11 @@ class _ComputerPageState extends State<ComputerPage> {
                               const SizedBox(height: 2),
                               Text(
                                 state.isBrowser && state.live
-                                    ? state.browserUrl ??
-                                          state.browserLabel ??
-                                          'Live E2B browser'
+                                    ? state.desktopAvailable
+                                          ? 'Live Ubuntu VM • same screen as the agent'
+                                          : state.browserUrl ??
+                                                state.browserLabel ??
+                                                'Live E2B browser'
                                     : state.usingDetail,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -488,7 +499,7 @@ class ComputerThumb extends StatelessWidget {
                   alignment: Alignment.topLeft,
                   child: Text(
                     state.isBrowser
-                        ? 'browser'
+                        ? state.screenLabel.toLowerCase()
                         : (state.lines.isEmpty
                               ? '\$ _'
                               : '\$ ${state.peekLabel}'),
@@ -622,7 +633,9 @@ class ComputerBrowserView extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Text(
-            state.browserLabel ?? 'No page open',
+            state.desktopAvailable
+                ? 'Waiting for E2B desktop'
+                : (state.browserLabel ?? 'No page open'),
             textAlign: TextAlign.center,
             maxLines: 3,
             overflow: TextOverflow.ellipsis,

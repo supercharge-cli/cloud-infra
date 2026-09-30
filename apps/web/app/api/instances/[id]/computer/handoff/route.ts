@@ -10,16 +10,19 @@ export async function POST(req: Request, ctx: Ctx) {
   if ((gate.inst.runtime || "xibecode") !== "supercharge") {
     return NextResponse.json({ error: "Browser handoff is available only for Supercharge instances" }, { status: 404 });
   }
-  const body = (await req.json().catch(() => ({}))) as { action?: unknown; minutes?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { action?: unknown; minutes?: unknown; handoffId?: unknown; botId?: unknown; sessionId?: unknown };
   const action = typeof body.action === "string" ? body.action : "";
   if (action !== "start" && action !== "stop") {
     return NextResponse.json({ error: "action must be start or stop" }, { status: 400 });
+  }
+  if (typeof body.handoffId !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(body.handoffId)) {
+    return NextResponse.json({ error: "A unique handoffId is required. Update the app before taking control." }, { status: 400 });
   }
   try {
     const upstream = await proxyInbox(gate.inst, "/v1/computer/handoff", {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ action, minutes: body.minutes }),
+      body: JSON.stringify({ action, minutes: body.minutes, handoffId: body.handoffId, botId: typeof body.botId === "string" ? body.botId : undefined, sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined }),
     });
     const text = await upstream.text();
     return new NextResponse(text, {

@@ -3,6 +3,7 @@ import { WebSocket, type RawData } from "ws";
 export type BrowserVncRelayOptions = {
   resolveDaemonBase: () => Promise<string>;
   headers: Record<string, string>;
+  handoffId?: string;
   /** Older daemons without the ticket endpoint accepted the gateway bearer. */
   allowLegacyBearer?: boolean;
   onError?: (message: string) => void;
@@ -82,7 +83,7 @@ export async function relayBrowserVnc(
   try {
     const base = (await options.resolveDaemonBase()).replace(/\/$/, "");
     if (finished) return;
-    const response = await fetch(`${base}/v1/computer/vnc-ticket`, {
+    const response = await fetch(`${base}/v1/computer/vnc-ticket${options.handoffId ? `?handoffId=${encodeURIComponent(options.handoffId)}` : ''}`, {
       headers: { ...options.headers, accept: "application/json" },
       signal: abort.signal,
       redirect: "error",

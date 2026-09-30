@@ -12,6 +12,7 @@ class ComputerFrame {
     this.connected,
     this.screencasting,
     this.error,
+    this.desktop,
   });
 
   final String type;
@@ -20,6 +21,7 @@ class ComputerFrame {
   final bool? connected;
   final bool? screencasting;
   final String? error;
+  final bool? desktop;
 }
 
 class ComputerLine {
@@ -66,7 +68,9 @@ class ComputerState extends ChangeNotifier {
   DateTime? lastFrameAt;
   bool hasActivity = false;
   bool agentWorking = false;
+  bool desktopAvailable = false;
 
+  String get screenLabel => desktopAvailable ? 'Desktop' : 'Browser';
   String get tab => _tab;
   set tab(String value) {
     if (_tab == value) return;
@@ -81,13 +85,18 @@ class ComputerState extends ChangeNotifier {
       (stillPath != null && stillPath!.isNotEmpty) ||
       (stillUrl != null && stillUrl!.isNotEmpty);
 
-  String get usingLabel => isBrowser ? 'Vectra is using Browser' : 'Vectra is using Terminal';
+  String get usingLabel =>
+      isBrowser ? 'Vectra is using $screenLabel' : 'Vectra is using Terminal';
 
   String get usingDetail {
     if (isBrowser) {
       if (browserUrl != null && browserUrl!.isNotEmpty) return browserUrl!;
-      if (browserLabel != null && browserLabel!.isNotEmpty) return browserLabel!;
-      return 'No page open';
+      if (browserLabel != null && browserLabel!.isNotEmpty) {
+        return browserLabel!;
+      }
+      return desktopAvailable
+          ? 'Live Ubuntu desktop in this E2B VM'
+          : 'No page open';
     }
     if (lines.isEmpty) return 'Waiting for commands';
     final last = lines.last;
@@ -114,6 +123,7 @@ class ComputerState extends ChangeNotifier {
     lastFrameAt = null;
     hasActivity = false;
     agentWorking = false;
+    desktopAvailable = false;
     notifyListeners();
   }
 
@@ -130,7 +140,7 @@ class ComputerState extends ChangeNotifier {
   String get peekLabel {
     if (isBrowser) {
       return browserLabel == null || browserLabel!.isEmpty
-          ? 'Browser'
+          ? screenLabel
           : browserLabel!;
     }
     if (lines.isEmpty) return 'Terminal';
@@ -147,7 +157,9 @@ class ComputerState extends ChangeNotifier {
       _tab = nextTab!;
     }
     if (ev.kind == 'browser' || nextTab == 'browser') {
-      browserLabel = (ev.label != null && ev.label!.isNotEmpty) ? ev.label : ev.text;
+      browserLabel = (ev.label != null && ev.label!.isNotEmpty)
+          ? ev.label
+          : ev.text;
       if (ev.url != null && ev.url!.isNotEmpty) browserUrl = ev.url;
     }
     if (ev.kind != 'file' && ev.kind != 'focus') {
@@ -200,6 +212,12 @@ class ComputerState extends ChangeNotifier {
     }
   }
 
+  void setDesktopAvailable(bool enabled) {
+    if (desktopAvailable == enabled) return;
+    desktopAvailable = enabled;
+    notifyListeners();
+  }
+
   void setLiveStatus({bool? connected, bool? screencasting}) {
     if (screencasting == false || connected == false) {
       live = false;
@@ -248,7 +266,8 @@ String? parseComputerShow(String text) {
 /// Which Computer tab an event should focus. Ordinary shell/browser
 /// activity does not steal the pane — only an explicit focus.
 String? computerTabForEvent(AppChatEvent ev) {
-  if (ev.type == 'computer' && (ev.focus || ev.kind == 'focus' || ev.action == 'show')) {
+  if (ev.type == 'computer' &&
+      (ev.focus || ev.kind == 'focus' || ev.action == 'show')) {
     if (ev.tab == 'browser' || ev.tab == 'terminal') return ev.tab;
   }
   return null;

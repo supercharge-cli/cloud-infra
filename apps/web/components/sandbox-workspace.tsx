@@ -39,6 +39,7 @@ type BrowserEvent = {
   error?: string;
   connected?: boolean;
   screencasting?: boolean;
+  desktop?: boolean;
 };
 
 function formatBytes(value: number): string {
@@ -72,6 +73,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
   const [message, setMessage] = useState('');
   const [frame, setFrame] = useState('');
   const [browserStatus, setBrowserStatus] = useState('connecting');
+  const [desktopAvailable, setDesktopAvailable] = useState(false);
   const [previewHosts, setPreviewHosts] = useState<{ app: string; wake: string; browser: string }>({ app: '', wake: '', browser: '' });
   const [controlBusy, setControlBusy] = useState(false);
   const [browserUrl, setBrowserUrl] = useState('');
@@ -86,6 +88,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
   const [finishOpen, setFinishOpen] = useState(false);
   const [controlNotes, setControlNotes] = useState('');
   const ownedHandoff = useRef(false);
+  const handoffId = useRef('');
   const handoffPending = useRef(false);
   const finishDialog = useRef<HTMLDialogElement>(null);
   const continuation = useRef(onContinue);
@@ -105,7 +108,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
 
   useEffect(() => () => {
     if (ownedHandoff.current) void fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop' }), keepalive: true,
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop', handoffId: handoffId.current }), keepalive: true,
     });
   }, [instanceId]);
 
@@ -178,7 +181,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
               const event = JSON.parse(line.slice(5).trim()) as BrowserEvent;
               const image = frameData(event);
               if (image && !request.signal.aborted) setFrame(image);
-              if (event.type === 'status') setBrowserStatus(event.error ? 'offline' : event.connected ? 'connected' : 'starting');
+              if (event.type === 'status') { setBrowserStatus(event.error ? 'offline' : event.connected ? 'connected' : 'starting'); setDesktopAvailable(event.desktop === true); }
             } catch { /* The next complete frame replaces malformed data. */ }
           }
         }
@@ -291,7 +294,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
   }, []);
 
   async function openControlConnection() {
-    const ticket = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/vnc-ticket`, { method: 'POST' });
+    const ticket = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/vnc-ticket`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handoffId: handoffId.current }) });
     const data = await ticket.json();
     if (!ticket.ok || !data.wsUrl) throw new Error(data.error || 'Desktop connection unavailable');
     if (mounted.current && ownedHandoff.current) { setHandoffWsUrl(String(data.wsUrl)); setViewerRevision((value) => value + 1); }
@@ -309,14 +312,15 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
         throw new Error('An agent is working or queued. Open its chat and stop that task before taking over.');
       }
       if (!mounted.current) return;
+      handoffId.current ||= crypto.randomUUID();
       const handoff = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'start', minutes: 10 }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'start', minutes: 10, handoffId: handoffId.current }),
       });
       const data = await handoff.json();
-      if (!handoff.ok || data.ok !== true || data.handoff !== true) throw new Error(data.error || 'Takeover could not be confirmed');
+      if (!handoff.ok || data.ok !== true || data.handoff !== true || data.handoffId !== handoffId.current) throw new Error(data.error || 'Takeover could not be confirmed');
       ownedHandoff.current = true;
       if (!mounted.current) {
-        await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop' }), keepalive: true });
+        await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop', handoffId: handoffId.current }), keepalive: true });
         return;
       }
       const expiry = Number(data.expiresAt);
@@ -356,11 +360,11 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
     handoffPending.current = true; setHandoffBusy(true); setHandoffWsUrl('');
     try {
       const response = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop' }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop', handoffId: handoffId.current }),
       });
       const data = await response.json();
-      if (!response.ok || data.ok !== true || data.handoff !== false) throw new Error(data.error || 'Return could not be confirmed. Input stays disabled; retry.');
-      ownedHandoff.current = false; setHandoffExpires(0); setFinishOpen(false); setControlOpen(false);
+      if (!response.ok || data.ok !== true || data.handoff !== false || data.handoffId !== handoffId.current) throw new Error(data.error || 'Return could not be confirmed. Input stays disabled; retry.');
+      ownedHandoff.current = false; handoffId.current = ''; setHandoffExpires(0); setFinishOpen(false); setControlOpen(false);
       setMessage('Control returned.');
       if (resume && continuation.current && handoffExpires > Date.now()) {
         try { await continuation.current(controlNotes.trim()); }
@@ -372,7 +376,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
   }
 
   const tabs = [
-    { id: 'browser' as const, label: 'Browser', icon: Monitor },
+    { id: 'browser' as const, label: runtime === 'supercharge' && desktopAvailable ? 'Desktop' : 'Browser', icon: Monitor },
     { id: 'files' as const, label: 'Files', icon: File },
   ];
 
@@ -382,7 +386,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
         <div>
           <h3 className="font-semibold text-white">Workspace</h3>
           <p className="mt-0.5 text-xs text-zinc-500">
-            Browser visibility and file sharing for this sandbox. The terminal remains available in the Command pane above.
+            {desktopAvailable ? 'Live Ubuntu VM desktop' : 'Browser'} visibility and file sharing for this sandbox. The terminal remains available in the Command pane above.
           </p>
         </div>
         <div className="flex gap-2">
@@ -415,8 +419,8 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
         <div className="overflow-hidden rounded-xl border border-zinc-800 bg-black">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2 text-xs text-zinc-400">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-              <span>Watching AI browser · {browserStatus}</span>
-              {runtime === 'supercharge' ? <span className="text-emerald-400">E2B Playwright</span> : null}
+              <span>Watching AI {desktopAvailable ? 'desktop' : 'browser'} · {browserStatus}</span>
+              {runtime === 'supercharge' ? <span className="text-emerald-400">{desktopAvailable ? 'Ubuntu VM · same screen as the agent' : 'E2B browser'}</span> : null}
             </div>
             {sandboxId ? <span className="font-mono text-zinc-600">{sandboxId.slice(0, 16)}…</span> : null}
           </div>
@@ -445,11 +449,11 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
           <div className="flex min-h-[320px] items-center justify-center bg-zinc-950 p-2">
             {frame ? (
               // The stream is view-only by design; all browser input remains approval-gated elsewhere.
-              <img src={frame} alt="Live browser workspace" className="max-h-[540px] w-full rounded-lg object-contain" />
+              <img src={frame} alt={desktopAvailable ? 'Live Ubuntu VM desktop' : 'Live browser workspace'} className="max-h-[540px] w-full rounded-lg object-contain" />
             ) : (
               <div className="text-center text-sm text-zinc-600">
                 <Monitor className="mx-auto mb-2 h-8 w-8" />
-                Waiting for the browser stream…
+                Waiting for the {desktopAvailable ? 'desktop' : 'browser'} stream…
               </div>
             )}
           </div>

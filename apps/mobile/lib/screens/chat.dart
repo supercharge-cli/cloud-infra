@@ -636,6 +636,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               frame.bytes!.isNotEmpty) {
             computer.setLiveFrame(frame.bytes!);
           } else if (frame.type == 'status') {
+            computer.setDesktopAvailable(frame.desktop == true);
             computer.setLiveStatus(
               connected: frame.connected,
               screencasting: frame.screencasting,

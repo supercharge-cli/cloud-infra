@@ -326,9 +326,16 @@ class VectraClient {
       _json('GET', '/api/instances/$id/group', timeout: _fast);
 
   Future<Map<String, dynamic>> sendGroupMessage(
-    String id, String text, String requestId, List<String> mentions,
-  ) => _json('POST', '/api/instances/$id/group',
-      body: {'text': text, 'requestId': requestId, 'mentions': mentions}, timeout: _slow);
+    String id,
+    String text,
+    String requestId,
+    List<String> mentions,
+  ) => _json(
+    'POST',
+    '/api/instances/$id/group',
+    body: {'text': text, 'requestId': requestId, 'mentions': mentions},
+    timeout: _slow,
+  );
 
   Future<Map<String, dynamic>> createBot(
     String id,
@@ -352,27 +359,36 @@ class VectraClient {
     Uint8List bytes,
     String mime,
   ) async {
-    final res = await http.put(
-      _u('/api/instances/$id/bots/${Uri.encodeComponent(botId)}/avatar'),
-      headers: {..._headers, 'content-type': mime},
-      body: bytes,
-    ).timeout(_slow);
+    final res = await http
+        .put(
+          _u('/api/instances/$id/bots/${Uri.encodeComponent(botId)}/avatar'),
+          headers: {..._headers, 'content-type': mime},
+          body: bytes,
+        )
+        .timeout(_slow);
     if (res.statusCode >= 400) {
       var details = <String, dynamic>{};
       try {
         final parsed = jsonDecode(res.body);
         if (parsed is Map<String, dynamic>) details = parsed;
       } catch (_) {}
-      throw ApiException(res.statusCode, _friendlyError(res.statusCode, details, res.reasonPhrase));
+      throw ApiException(
+        res.statusCode,
+        _friendlyError(res.statusCode, details, res.reasonPhrase),
+      );
     }
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<Uint8List> botAvatar(String id, String botId, String version) async {
-    final res = await http.get(
-      _u('/api/instances/$id/bots/${Uri.encodeComponent(botId)}/avatar', {'v': version}),
-      headers: _headers,
-    ).timeout(_fast);
+    final res = await http
+        .get(
+          _u('/api/instances/$id/bots/${Uri.encodeComponent(botId)}/avatar', {
+            'v': version,
+          }),
+          headers: _headers,
+        )
+        .timeout(_fast);
     if (res.statusCode >= 400) {
       throw ApiException(res.statusCode, 'Could not load bot picture');
     }
@@ -759,7 +775,10 @@ class VectraClient {
     }
   }
 
-  Stream<ComputerFrame> browserFrames(String id, {EventStreamCancellation? cancellation}) async* {
+  Stream<ComputerFrame> browserFrames(
+    String id, {
+    EventStreamCancellation? cancellation,
+  }) async* {
     final uri = _u('/api/instances/$id/computer/browser');
     final req = http.Request('GET', uri);
     req.headers.addAll({
@@ -812,6 +831,7 @@ class VectraClient {
                   type: type,
                   connected: map['connected'] == true,
                   screencasting: map['screencasting'] == true,
+                  desktop: map['desktop'] == true,
                   error: map['error'] as String?,
                 );
               }
@@ -830,11 +850,14 @@ class VectraClient {
   Future<Map<String, dynamic>> computerStatus(String id) =>
       _json('GET', '/api/instances/$id/computer/status', timeout: _fast);
 
-  Future<String> openAiBrowserVnc(String id) async {
+  Future<String> openAiBrowserVnc(
+    String id, {
+    required String handoffId,
+  }) async {
     final ticket = await _json(
       'POST',
       '/api/instances/$id/computer/vnc-ticket',
-      body: {},
+      body: {'handoffId': handoffId},
     );
     final raw = ticket['wsUrl'];
     final wsUrl = raw is String ? raw.trim() : '';
@@ -854,15 +877,28 @@ class VectraClient {
     return wsUrl;
   }
 
-  Future<DateTime> startBrowserHandoff(String id, {int minutes = 10}) async {
+  Future<DateTime> startBrowserHandoff(
+    String id, {
+    required String handoffId,
+    String? botId,
+    String? sessionId,
+    int minutes = 10,
+  }) async {
     final result = await _json(
       'POST',
       '/api/instances/$id/computer/handoff',
-      body: {'action': 'start', 'minutes': minutes.clamp(1, 30)},
+      body: {
+        'action': 'start',
+        'minutes': minutes.clamp(1, 30),
+        'handoffId': handoffId,
+        'botId': ?botId,
+        'sessionId': ?sessionId,
+      },
     );
     final rawExpiry = result['expiresAt'];
     if (result['ok'] != true ||
         result['handoff'] != true ||
+        result['handoffId'] != handoffId ||
         rawExpiry is! num ||
         !rawExpiry.isFinite) {
       throw ApiException(
@@ -885,13 +921,18 @@ class VectraClient {
     return expiresAt;
   }
 
-  Future<void> stopBrowserHandoff(String id) async {
+  Future<void> stopBrowserHandoff(
+    String id, {
+    required String handoffId,
+  }) async {
     final result = await _json(
       'POST',
       '/api/instances/$id/computer/handoff',
-      body: {'action': 'stop'},
+      body: {'action': 'stop', 'handoffId': handoffId},
     );
-    if (result['ok'] != true || result['handoff'] != false) {
+    if (result['ok'] != true ||
+        result['handoff'] != false ||
+        result['handoffId'] != handoffId) {
       throw ApiException(
         502,
         'The AI did not confirm that browser control was returned.',

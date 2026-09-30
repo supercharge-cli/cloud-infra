@@ -84,8 +84,10 @@ class _Client extends VectraClient {
   }
 
   @override
-  Stream<ComputerFrame> browserFrames(String id, {EventStreamCancellation? cancellation}) =>
-      StreamController<ComputerFrame>().stream;
+  Stream<ComputerFrame> browserFrames(
+    String id, {
+    EventStreamCancellation? cancellation,
+  }) => StreamController<ComputerFrame>().stream;
 
   @override
   Future<DashboardData> dashboard() async {
@@ -140,25 +142,54 @@ class _PreviewClient extends _Client {
   int takeoverRequests = 0;
 
   @override
-  Future<CloudInstance> getInstance(String id) async => CloudInstance(id: id, name: 'Design workspace', status: 'running',
-    sandboxId: 'fixture-sandbox', runtime: AgentRuntime.supercharge, isFree: true);
+  Future<CloudInstance> getInstance(String id) async => CloudInstance(
+    id: id,
+    name: 'Design workspace',
+    status: 'running',
+    sandboxId: 'fixture-sandbox',
+    runtime: AgentRuntime.supercharge,
+    isFree: true,
+  );
 
   @override
-  Stream<ComputerFrame> browserFrames(String id, {EventStreamCancellation? cancellation}) {
+  Stream<ComputerFrame> browserFrames(
+    String id, {
+    EventStreamCancellation? cancellation,
+  }) {
     frameSubscriptions++;
     final controller = StreamController<ComputerFrame>();
-    cancellation?.onCancel(() { frameCancellations++; unawaited(controller.close()); });
+    cancellation?.onCancel(() {
+      frameCancellations++;
+      unawaited(controller.close());
+    });
     return controller.stream;
   }
 
   @override
-  Future<Map<String, dynamic>> computerStatus(String id) async => {'handoff': true};
+  Future<Map<String, dynamic>> computerStatus(String id) async => {
+    'handoff': true,
+  };
 
   @override
-  Future<DateTime> startBrowserHandoff(String id, {int minutes = 10}) async { takeoverRequests++; return DateTime.now().add(const Duration(minutes: 1)); }
+  Future<DateTime> startBrowserHandoff(
+    String id, {
+    required String handoffId,
+    String? botId,
+    String? sessionId,
+    int minutes = 10,
+  }) async {
+    takeoverRequests++;
+    return DateTime.now().add(const Duration(minutes: 1));
+  }
 
   @override
-  Future<String> openAiBrowserVnc(String id) async { ticketRequests++; return 'wss://example.invalid/vnc'; }
+  Future<String> openAiBrowserVnc(
+    String id, {
+    required String handoffId,
+  }) async {
+    ticketRequests++;
+    return 'wss://example.invalid/vnc';
+  }
 }
 
 class _BotClient extends _Client {
@@ -188,10 +219,24 @@ class _BotClient extends _Client {
   @override
   Future<Map<String, dynamic>> groupChat(String id) async => {
     'messages': [
-      {'id': 'group-question', 'text': '@Research check the sources for this plan.', 'createdAt': 1, 'senderBotId': null},
-      {'id': 'group-main', 'text': 'Research is checking the sources. I will combine the findings with the implementation plan.', 'createdAt': 2, 'senderBotId': 'main', 'sessionId': 'group-main'},
+      {
+        'id': 'group-question',
+        'text': '@Research check the sources for this plan.',
+        'createdAt': 1,
+        'senderBotId': null,
+      },
+      {
+        'id': 'group-main',
+        'text':
+            'Research is checking the sources. I will combine the findings with the implementation plan.',
+        'createdAt': 2,
+        'senderBotId': 'main',
+        'sessionId': 'group-main',
+      },
     ],
-    'activity': [{'botId': 'research', 'sessionId': 'group-research', 'state': 'working'}],
+    'activity': [
+      {'botId': 'research', 'sessionId': 'group-research', 'state': 'working'},
+    ],
   };
   @override
   Future<Map<String, dynamic>> listConversations(
@@ -291,9 +336,10 @@ class _DelayedBotClient extends _BotClient {
   final research = Completer<Map<String, dynamic>>();
 
   @override
-  Future<Map<String, dynamic>> listConversations(
-    String id, {String? botId}
-  ) => botId == 'research' ? research.future : super.listConversations(id, botId: botId);
+  Future<Map<String, dynamic>> listConversations(String id, {String? botId}) =>
+      botId == 'research'
+      ? research.future
+      : super.listConversations(id, botId: botId);
 }
 
 class _RapidBotClient extends _BotClient {
@@ -302,7 +348,9 @@ class _RapidBotClient extends _BotClient {
 
   _RapidBotClient() {
     savedBots.add({
-      'id': 'planning', 'name': 'Planning', 'icon': '📝',
+      'id': 'planning',
+      'name': 'Planning',
+      'icon': '📝',
       'instructions': 'Plan',
       'defaultFolder': '/home/user/workspace/bots/planning',
       'revision': 1,
@@ -318,12 +366,20 @@ class _RapidBotClient extends _BotClient {
 
   @override
   Future<Map<String, dynamic>> getConversation(
-    String id, String sessionId, {String? botId}
-  ) async => {
+    String id,
+    String sessionId, {
+    String? botId,
+  }) async => {
     'messages': [
-      {'id': '$sessionId:first', 'role': 'assistant',
-        'content': sessionId == 'chat-main' ? 'Main only reply' :
-          sessionId == 'chat-planning' ? 'Planning only reply' : 'Research only reply'},
+      {
+        'id': '$sessionId:first',
+        'role': 'assistant',
+        'content': sessionId == 'chat-main'
+            ? 'Main only reply'
+            : sessionId == 'chat-planning'
+            ? 'Planning only reply'
+            : 'Research only reply',
+      },
     ],
   };
 }
@@ -333,8 +389,9 @@ class _ActivityBotClient extends _BotClient {
 
   @override
   Future<Map<String, dynamic>> chatStatus(
-    String id, {String? sessionId}
-  ) async {
+    String id, {
+    String? sessionId,
+  }) async {
     statusRequests.add(sessionId);
     return {
       'turn': {'busy': sessionId == 'chat-main', 'startedAt': 1},
@@ -342,10 +399,20 @@ class _ActivityBotClient extends _BotClient {
       'activeBotChats': ['chat-research'],
       'queuedBotChats': [],
       'conversations': [
-        {'sessionId': 'chat-main', 'botId': 'main', 'updatedAt': 1,
-          'lastMessageId': 'main-1', 'lastMessage': 'Main only reply'},
-        {'sessionId': 'chat-research', 'botId': 'research', 'updatedAt': 2,
-          'lastMessageId': 'research-1', 'lastMessage': 'Research only reply'},
+        {
+          'sessionId': 'chat-main',
+          'botId': 'main',
+          'updatedAt': 1,
+          'lastMessageId': 'main-1',
+          'lastMessage': 'Main only reply',
+        },
+        {
+          'sessionId': 'chat-research',
+          'botId': 'research',
+          'updatedAt': 2,
+          'lastMessageId': 'research-1',
+          'lastMessage': 'Research only reply',
+        },
       ],
     };
   }
@@ -403,8 +470,12 @@ Future<void> _app(
           GoRoute(path: '/', builder: (_, _) => const InstancesScreen()),
           GoRoute(
             path: '/chat/design',
-            builder: (_, state) => ChatScreen(instanceId: 'design', initialBotId: state.uri.queryParameters['bot'],
-              initialSessionId: state.uri.queryParameters['thread'], showGroup: state.uri.queryParameters['group'] == '1'),
+            builder: (_, state) => ChatScreen(
+              instanceId: 'design',
+              initialBotId: state.uri.queryParameters['bot'],
+              initialSessionId: state.uri.queryParameters['thread'],
+              showGroup: state.uri.queryParameters['group'] == '1',
+            ),
           ),
           GoRoute(
             path: '/instance/design',
@@ -543,13 +614,17 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  testWidgets('group chat opens on desktop and agents remain in the menu', (tester) async {
+  testWidgets('group chat opens on desktop and agents remain in the menu', (
+    tester,
+  ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     PathProviderPlatform.instance = _Paths();
     await _size(tester, const Size(1440, 900));
     await _app(tester, _BotClient(), path: '/chat/design?group=1');
     for (var i = 0; i < 8; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 60)));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 60)),
+      );
       await tester.pump(const Duration(milliseconds: 100));
     }
     expect(find.byKey(const ValueKey('sidebar-group')), findsOneWidget);
@@ -560,19 +635,25 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  testWidgets('phone home shows contacts and opens the shared group', (tester) async {
+  testWidgets('phone home shows contacts and opens the shared group', (
+    tester,
+  ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     PathProviderPlatform.instance = _Paths();
     await _size(tester, const Size(390, 844));
     await _app(tester, _BotClient(), path: '/chat/design?group=1');
     for (var i = 0; i < 8; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 60)));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 60)),
+      );
       await tester.pump(const Duration(milliseconds: 100));
     }
     expect(find.byKey(const ValueKey('group-contact')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('group-contact')));
     for (var i = 0; i < 6; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 40)),
+      );
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(find.byKey(const ValueKey('group-composer')), findsOneWidget);
@@ -689,42 +770,55 @@ void main() {
     await _capture(tester, 'login-mobile');
     debugDefaultTargetPlatformOverride = null;
   });
-  testWidgets('passive browser uses image stream; takeover opens full-window and restores viewing on exit', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
-    PathProviderPlatform.instance = _Paths();
-    await _size(tester, const Size(1440, 900));
-    final client = _PreviewClient();
-    await _app(tester, client, path: '/chat/design');
-    for (var i = 0; i < 8; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
-      await tester.pump(const Duration(milliseconds: 40));
-    }
-    expect(client.frameSubscriptions, 1);
-    expect(client.ticketRequests, 0);
-    expect(find.byType(BrowserHandoffScreen), findsNothing);
-    final workspace = tester.widget<DesktopChatWorkspace>(find.byType(DesktopChatWorkspace));
-    workspace.computer.tab = 'browser';
-    await tester.pump();
-    expect(find.byType(ComputerBrowserView), findsWidgets);
-    await tester.tap(find.text('Take over'));
-    for (var i = 0; i < 10; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 25)));
-      await tester.pump(const Duration(milliseconds: 60));
-    }
-    expect(client.frameCancellations, 1);
-    expect(client.ticketRequests, 0, reason: 'A conflicting handoff must never connect noVNC');
-    expect(client.takeoverRequests, 0);
-    expect(tester.getSize(find.byType(BrowserHandoffScreen)).width, 1440);
-    expect(find.byKey(const ValueKey('handoff-notes')), findsNothing);
-    await tester.tap(find.text('Back to viewing'));
-    for (var i = 0; i < 6; i++) {
-      await tester.pump(const Duration(milliseconds: 100));
-    }
-    expect(find.byType(BrowserHandoffScreen), findsNothing);
-    expect(client.frameSubscriptions, 2);
-    await tester.pumpWidget(const SizedBox.shrink());
-    debugDefaultTargetPlatformOverride = null;
-  });
+  testWidgets(
+    'passive browser uses image stream; takeover opens full-window and restores viewing on exit',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      PathProviderPlatform.instance = _Paths();
+      await _size(tester, const Size(1440, 900));
+      final client = _PreviewClient();
+      await _app(tester, client, path: '/chat/design');
+      for (var i = 0; i < 8; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 40)),
+        );
+        await tester.pump(const Duration(milliseconds: 40));
+      }
+      expect(client.frameSubscriptions, 1);
+      expect(client.ticketRequests, 0);
+      expect(find.byType(BrowserHandoffScreen), findsNothing);
+      final workspace = tester.widget<DesktopChatWorkspace>(
+        find.byType(DesktopChatWorkspace),
+      );
+      workspace.computer.tab = 'browser';
+      await tester.pump();
+      expect(find.byType(ComputerBrowserView), findsWidgets);
+      await tester.tap(find.text('Take over'));
+      for (var i = 0; i < 10; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 25)),
+        );
+        await tester.pump(const Duration(milliseconds: 60));
+      }
+      expect(client.frameCancellations, 1);
+      expect(
+        client.ticketRequests,
+        0,
+        reason: 'A conflicting handoff must never connect noVNC',
+      );
+      expect(client.takeoverRequests, 0);
+      expect(tester.getSize(find.byType(BrowserHandoffScreen)).width, 1440);
+      expect(find.byKey(const ValueKey('handoff-notes')), findsNothing);
+      await tester.tap(find.text('Back to viewing'));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(find.byType(BrowserHandoffScreen), findsNothing);
+      expect(client.frameSubscriptions, 2);
+      await tester.pumpWidget(const SizedBox.shrink());
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 
   testWidgets('desktop chat has inline computer and keyboard navigation', (
     tester,
@@ -827,8 +921,12 @@ void main() {
       await tester.tap(find.byTooltip('Bots'));
       await tester.pump(const Duration(milliseconds: 350));
       expect(find.text('Research'), findsWidgets);
-      await tester.tap(find.descendant(
-        of: find.byType(Dialog), matching: find.text('Research')));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(Dialog),
+          matching: find.text('Research'),
+        ),
+      );
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 350)),
       );
@@ -884,195 +982,418 @@ void main() {
     },
   );
 
-  testWidgets('switching bots hides the prior transcript before delayed network work', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
-    await _size(tester, const Size(1440, 900));
-    PathProviderPlatform.instance = _Paths();
-    final client = _DelayedBotClient();
-    await _app(tester, client, path: '/chat/design');
-    for (var attempt = 0; attempt < 200 &&
-        find.textContaining('Main only reply', findRichText: true).evaluate().isEmpty;
-        attempt++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(find.descendant(of: find.byType(DesktopChatWorkspace),
-        matching: find.textContaining('Main only reply', findRichText: true)), findsWidgets);
-    await tester.tap(find.byTooltip('Bots'));
-    await tester.pump();
-    await tester.tap(find.descendant(of: find.byType(Dialog), matching: find.text('Research')));
-    await tester.pump();
-    expect(find.text('Opening Research…'), findsOneWidget);
-    expect(find.descendant(of: find.byType(DesktopChatWorkspace),
-        matching: find.textContaining('Main only reply', findRichText: true)), findsNothing);
-    await tester.runAsync(() async {
-      client.research.complete({
-        'active': 'chat-research',
-        'conversations': [{'sessionId': 'chat-research', 'botId': 'research',
-          'title': 'Research', 'createdAt': 1, 'updatedAt': 1}],
+  testWidgets(
+    'switching bots hides the prior transcript before delayed network work',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      await _size(tester, const Size(1440, 900));
+      PathProviderPlatform.instance = _Paths();
+      final client = _DelayedBotClient();
+      await _app(tester, client, path: '/chat/design');
+      for (
+        var attempt = 0;
+        attempt < 200 &&
+            find
+                .textContaining('Main only reply', findRichText: true)
+                .evaluate()
+                .isEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(
+        find.descendant(
+          of: find.byType(DesktopChatWorkspace),
+          matching: find.textContaining('Main only reply', findRichText: true),
+        ),
+        findsWidgets,
+      );
+      await tester.tap(find.byTooltip('Bots'));
+      await tester.pump();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(Dialog),
+          matching: find.text('Research'),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Opening Research…'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(DesktopChatWorkspace),
+          matching: find.textContaining('Main only reply', findRichText: true),
+        ),
+        findsNothing,
+      );
+      await tester.runAsync(() async {
+        client.research.complete({
+          'active': 'chat-research',
+          'conversations': [
+            {
+              'sessionId': 'chat-research',
+              'botId': 'research',
+              'title': 'Research',
+              'createdAt': 1,
+              'updatedAt': 1,
+            },
+          ],
+        });
       });
-    });
-    for (var attempt = 0; attempt < 200 &&
-        find.textContaining('Research only reply', findRichText: true).evaluate().isEmpty;
-        attempt++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(find.descendant(of: find.byType(DesktopChatWorkspace),
-        matching: find.textContaining('Research only reply', findRichText: true)), findsWidgets);
-    await tester.pumpWidget(const SizedBox());
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
-    debugDefaultTargetPlatformOverride = null;
-  });
+      for (
+        var attempt = 0;
+        attempt < 200 &&
+            find
+                .textContaining('Research only reply', findRichText: true)
+                .evaluate()
+                .isEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(
+        find.descendant(
+          of: find.byType(DesktopChatWorkspace),
+          matching: find.textContaining(
+            'Research only reply',
+            findRichText: true,
+          ),
+        ),
+        findsWidgets,
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 
-  testWidgets('rapid bot selections discard late replies from the previous selection', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
-    await _size(tester, const Size(1440, 900));
-    PathProviderPlatform.instance = _Paths();
-    final client = _RapidBotClient();
-    await _app(tester, client, path: '/chat/design');
-    for (var attempt = 0; attempt < 200 &&
-        find.descendant(of: find.byType(DesktopChatWorkspace),
-          matching: find.textContaining('Main only reply', findRichText: true)).evaluate().isEmpty;
-        attempt++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(find.descendant(of: find.byType(DesktopChatWorkspace),
-      matching: find.textContaining('Main only reply', findRichText: true)), findsWidgets);
-    await tester.tap(find.byTooltip('Bots'));
-    await tester.pump();
-    await tester.tap(find.descendant(of: find.byType(Dialog), matching: find.text('Research')));
-    await tester.pump();
-    expect(find.text('Opening Research…'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('agent-planning')));
-    await tester.pump();
-    expect(find.text('Opening Planning…'), findsOneWidget);
-    await tester.runAsync(() async => client.research.complete({
-      'active': 'chat-research',
-      'conversations': [{'sessionId': 'chat-research', 'botId': 'research',
-        'title': 'Research', 'createdAt': 1, 'updatedAt': 1}],
-    }));
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('Opening Planning…'), findsOneWidget);
-    await tester.runAsync(() async => client.planning.complete({
-      'active': 'chat-planning',
-      'conversations': [{'sessionId': 'chat-planning', 'botId': 'planning',
-        'title': 'Planning', 'createdAt': 1, 'updatedAt': 1}],
-    }));
-    for (var attempt = 0; attempt < 200 &&
-        find.descendant(of: find.byType(DesktopChatWorkspace),
-          matching: find.textContaining('Planning only reply', findRichText: true)).evaluate().isEmpty;
-        attempt++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(find.descendant(of: find.byType(DesktopChatWorkspace),
-      matching: find.textContaining('Planning only reply', findRichText: true)), findsWidgets);
-    expect(find.descendant(of: find.byType(DesktopChatWorkspace),
-      matching: find.textContaining('Research only reply', findRichText: true)), findsNothing);
-    expect(client.subscriptions.last, ('planning', 'chat-planning'));
-    await tester.pumpWidget(const SizedBox());
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
-    debugDefaultTargetPlatformOverride = null;
-  });
+  testWidgets(
+    'rapid bot selections discard late replies from the previous selection',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      await _size(tester, const Size(1440, 900));
+      PathProviderPlatform.instance = _Paths();
+      final client = _RapidBotClient();
+      await _app(tester, client, path: '/chat/design');
+      for (
+        var attempt = 0;
+        attempt < 200 &&
+            find
+                .descendant(
+                  of: find.byType(DesktopChatWorkspace),
+                  matching: find.textContaining(
+                    'Main only reply',
+                    findRichText: true,
+                  ),
+                )
+                .evaluate()
+                .isEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(
+        find.descendant(
+          of: find.byType(DesktopChatWorkspace),
+          matching: find.textContaining('Main only reply', findRichText: true),
+        ),
+        findsWidgets,
+      );
+      await tester.tap(find.byTooltip('Bots'));
+      await tester.pump();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(Dialog),
+          matching: find.text('Research'),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Opening Research…'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('agent-planning')));
+      await tester.pump();
+      expect(find.text('Opening Planning…'), findsOneWidget);
+      await tester.runAsync(
+        () async => client.research.complete({
+          'active': 'chat-research',
+          'conversations': [
+            {
+              'sessionId': 'chat-research',
+              'botId': 'research',
+              'title': 'Research',
+              'createdAt': 1,
+              'updatedAt': 1,
+            },
+          ],
+        }),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Opening Planning…'), findsOneWidget);
+      await tester.runAsync(
+        () async => client.planning.complete({
+          'active': 'chat-planning',
+          'conversations': [
+            {
+              'sessionId': 'chat-planning',
+              'botId': 'planning',
+              'title': 'Planning',
+              'createdAt': 1,
+              'updatedAt': 1,
+            },
+          ],
+        }),
+      );
+      for (
+        var attempt = 0;
+        attempt < 200 &&
+            find
+                .descendant(
+                  of: find.byType(DesktopChatWorkspace),
+                  matching: find.textContaining(
+                    'Planning only reply',
+                    findRichText: true,
+                  ),
+                )
+                .evaluate()
+                .isEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(
+        find.descendant(
+          of: find.byType(DesktopChatWorkspace),
+          matching: find.textContaining(
+            'Planning only reply',
+            findRichText: true,
+          ),
+        ),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(DesktopChatWorkspace),
+          matching: find.textContaining(
+            'Research only reply',
+            findRichText: true,
+          ),
+        ),
+        findsNothing,
+      );
+      expect(client.subscriptions.last, ('planning', 'chat-planning'));
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 
-  testWidgets('failed bot switch restores previous conversation without leaking another bot', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
-    await _size(tester, const Size(1440, 900));
-    PathProviderPlatform.instance = _Paths();
-    final client = _DelayedBotClient();
-    await _app(tester, client, path: '/chat/design');
-    for (var attempt = 0; attempt < 200 &&
-        find.textContaining('Main only reply', findRichText: true).evaluate().isEmpty;
-        attempt++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    await tester.tap(find.byTooltip('Bots'));
-    await tester.pump();
-    await tester.tap(find.descendant(of: find.byType(Dialog), matching: find.text('Research')));
-    await tester.pump();
-    expect(find.text('Opening Research…'), findsOneWidget);
-    await tester.runAsync(() async => client.research.completeError(StateError('Unavailable')));
-    for (var attempt = 0; attempt < 50 &&
-        find.text('Opening Research…').evaluate().isNotEmpty;
-        attempt++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(find.descendant(of: find.byType(DesktopChatWorkspace),
-        matching: find.textContaining('Main only reply', findRichText: true)), findsWidgets);
-    expect(find.descendant(of: find.byType(DesktopChatWorkspace),
-        matching: find.textContaining('Research only reply', findRichText: true)), findsNothing);
-    await tester.pumpWidget(const SizedBox());
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
-    debugDefaultTargetPlatformOverride = null;
-  });
+  testWidgets(
+    'failed bot switch restores previous conversation without leaking another bot',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      await _size(tester, const Size(1440, 900));
+      PathProviderPlatform.instance = _Paths();
+      final client = _DelayedBotClient();
+      await _app(tester, client, path: '/chat/design');
+      for (
+        var attempt = 0;
+        attempt < 200 &&
+            find
+                .textContaining('Main only reply', findRichText: true)
+                .evaluate()
+                .isEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      await tester.tap(find.byTooltip('Bots'));
+      await tester.pump();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(Dialog),
+          matching: find.text('Research'),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Opening Research…'), findsOneWidget);
+      await tester.runAsync(
+        () async => client.research.completeError(StateError('Unavailable')),
+      );
+      for (
+        var attempt = 0;
+        attempt < 50 && find.text('Opening Research…').evaluate().isNotEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(
+        find.descendant(
+          of: find.byType(DesktopChatWorkspace),
+          matching: find.textContaining('Main only reply', findRichText: true),
+        ),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(DesktopChatWorkspace),
+          matching: find.textContaining(
+            'Research only reply',
+            findRichText: true,
+          ),
+        ),
+        findsNothing,
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 
-  testWidgets('phone agent contacts open a bot chat without showing the prior chat', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    await _size(tester, const Size(390, 844));
-    PathProviderPlatform.instance = _Paths();
-    final client = _BotClient();
-    await _app(tester, client, path: '/chat/design');
-    for (var attempt = 0; attempt < 200 &&
-        (find.byTooltip('Bots').evaluate().isEmpty ||
-         find.textContaining('Main only reply', findRichText: true).evaluate().isEmpty);
-        attempt++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(find.textContaining('Main only reply', findRichText: true), findsWidgets);
-    await tester.tap(find.byTooltip('Bots'));
-    await tester.pump();
-    await _capture(tester, 'agents-phone');
-    expect(find.byKey(const ValueKey('agent-research')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('agent-research')));
-    for (var attempt = 0; attempt < 100 &&
-        find.textContaining('Research only reply', findRichText: true).evaluate().isEmpty;
-        attempt++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(find.textContaining('Research only reply', findRichText: true), findsWidgets,
-        reason: 'calls=${client.calls}; subscriptions=${client.subscriptions}; text=${tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).join(' | ')}');
-    expect(find.textContaining('Main only reply', findRichText: true), findsNothing);
-    expect(client.subscriptions.last, ('research', 'chat-research'));
-    await tester.pumpWidget(const SizedBox());
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
-    debugDefaultTargetPlatformOverride = null;
-  });
+  testWidgets(
+    'phone agent contacts open a bot chat without showing the prior chat',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      await _size(tester, const Size(390, 844));
+      PathProviderPlatform.instance = _Paths();
+      final client = _BotClient();
+      await _app(tester, client, path: '/chat/design');
+      for (
+        var attempt = 0;
+        attempt < 200 &&
+            (find.byTooltip('Bots').evaluate().isEmpty ||
+                find
+                    .textContaining('Main only reply', findRichText: true)
+                    .evaluate()
+                    .isEmpty);
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(
+        find.textContaining('Main only reply', findRichText: true),
+        findsWidgets,
+      );
+      await tester.tap(find.byTooltip('Bots'));
+      await tester.pump();
+      await _capture(tester, 'agents-phone');
+      expect(find.byKey(const ValueKey('agent-research')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('agent-research')));
+      for (
+        var attempt = 0;
+        attempt < 100 &&
+            find
+                .textContaining('Research only reply', findRichText: true)
+                .evaluate()
+                .isEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(
+        find.textContaining('Research only reply', findRichText: true),
+        findsWidgets,
+        reason:
+            'calls=${client.calls}; subscriptions=${client.subscriptions}; text=${tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).join(' | ')}',
+      );
+      expect(
+        find.textContaining('Main only reply', findRichText: true),
+        findsNothing,
+      );
+      expect(client.subscriptions.last, ('research', 'chat-research'));
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 
-  testWidgets('agent contact shows working state and recent reply without opening its thread', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
-    await _size(tester, const Size(1440, 900));
-    PathProviderPlatform.instance = _Paths();
-    final client = _ActivityBotClient();
-    await _app(tester, client, path: '/chat/design');
-    for (var attempt = 0; attempt < 200 &&
-        find.byKey(const ValueKey('agent-research')).evaluate().isEmpty;
-        attempt++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    await tester.pump(const Duration(seconds: 7));
-    for (var attempt = 0; attempt < 200 &&
-        find.descendant(of: find.byKey(const ValueKey('agent-research')),
-          matching: find.text('Working')).evaluate().isEmpty;
-        attempt++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(find.descendant(of: find.byKey(const ValueKey('agent-research')),
-        matching: find.text('Working')), findsOneWidget,
-        reason: 'status=${client.statusRequests}, bots=${client.savedBots}, '
-            'subscriptions=${client.subscriptions}, texts=${tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).join(' | ')}');
-    expect(client.subscriptions.where((pair) => pair.$1 == 'research'), isEmpty);
-    await tester.pumpWidget(const SizedBox());
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
-    debugDefaultTargetPlatformOverride = null;
-  });
+  testWidgets(
+    'agent contact shows working state and recent reply without opening its thread',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      await _size(tester, const Size(1440, 900));
+      PathProviderPlatform.instance = _Paths();
+      final client = _ActivityBotClient();
+      await _app(tester, client, path: '/chat/design');
+      for (
+        var attempt = 0;
+        attempt < 200 &&
+            find.byKey(const ValueKey('agent-research')).evaluate().isEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      await tester.pump(const Duration(seconds: 7));
+      for (
+        var attempt = 0;
+        attempt < 200 &&
+            find
+                .descendant(
+                  of: find.byKey(const ValueKey('agent-research')),
+                  matching: find.text('Working'),
+                )
+                .evaluate()
+                .isEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('agent-research')),
+          matching: find.text('Working'),
+        ),
+        findsOneWidget,
+        reason:
+            'status=${client.statusRequests}, bots=${client.savedBots}, '
+            'subscriptions=${client.subscriptions}, texts=${tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).join(' | ')}',
+      );
+      expect(
+        client.subscriptions.where((pair) => pair.$1 == 'research'),
+        isEmpty,
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 
   testWidgets('desktop settings sections scroll to the actual controls', (
     tester,

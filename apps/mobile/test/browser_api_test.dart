@@ -32,7 +32,10 @@ void main() {
       ]) {
         final requests = <http.Request>[];
         final result = await http.runWithClient(
-          () => api.openAiBrowserVnc('instance-1'),
+          () => api.openAiBrowserVnc(
+            'instance-1',
+            handoffId: 'test-handoff-123456',
+          ),
           () => MockClient((request) async {
             requests.add(request);
             return http.Response(jsonEncode({'wsUrl': url}), 200);
@@ -46,7 +49,9 @@ void main() {
           '/api/instances/instance-1/computer/vnc-ticket',
         );
         expect(requests.single.headers['authorization'], 'Bearer test-token');
-        expect(jsonDecode(requests.single.body), isEmpty);
+        expect(jsonDecode(requests.single.body), {
+          'handoffId': 'test-handoff-123456',
+        });
       }
     },
   );
@@ -65,7 +70,13 @@ void main() {
   ]) {
     test('rejects invalid VNC URL: $invalid', () async {
       await expectLater(
-        respond({'wsUrl': invalid}, () => api.openAiBrowserVnc('instance-1')),
+        respond(
+          {'wsUrl': invalid},
+          () => api.openAiBrowserVnc(
+            'instance-1',
+            handoffId: 'test-handoff-123456',
+          ),
+        ),
         throwsA(isA<ApiException>().having((e) => e.status, 'status', 502)),
       );
     });
@@ -92,11 +103,19 @@ void main() {
           .millisecondsSinceEpoch;
       final requests = <http.Request>[];
       final result = await http.runWithClient(
-        () => api.startBrowserHandoff('instance-1'),
+        () => api.startBrowserHandoff(
+          'instance-1',
+          handoffId: 'test-handoff-123456',
+        ),
         () => MockClient((request) async {
           requests.add(request);
           return http.Response(
-            jsonEncode({'ok': true, 'handoff': true, 'expiresAt': expiry}),
+            jsonEncode({
+              'ok': true,
+              'handoff': true,
+              'handoffId': 'test-handoff-123456',
+              'expiresAt': expiry,
+            }),
             200,
           );
         }),
@@ -110,6 +129,7 @@ void main() {
       );
       expect(jsonDecode(requests.single.body), {
         'action': 'start',
+        'handoffId': 'test-handoff-123456',
         'minutes': 10,
       });
     },
@@ -118,16 +138,22 @@ void main() {
   test('handoff duration is clamped to one through thirty minutes', () async {
     for (final requested in [-5, 1, 30, 99]) {
       await http.runWithClient(
-        () => api.startBrowserHandoff('instance-1', minutes: requested),
+        () => api.startBrowserHandoff(
+          'instance-1',
+          handoffId: 'test-handoff-123456',
+          minutes: requested,
+        ),
         () => MockClient((request) async {
           expect(jsonDecode(request.body), {
             'action': 'start',
+            'handoffId': 'test-handoff-123456',
             'minutes': requested.clamp(1, 30),
           });
           return http.Response(
             jsonEncode({
               'ok': true,
               'handoff': true,
+              'handoffId': 'test-handoff-123456',
               'expiresAt': DateTime.now()
                   .add(const Duration(minutes: 10))
                   .millisecondsSinceEpoch,
@@ -162,7 +188,13 @@ void main() {
       ];
       for (final body in invalid) {
         await expectLater(
-          respond(body, () => api.startBrowserHandoff('instance-1')),
+          respond(
+            body,
+            () => api.startBrowserHandoff(
+              'instance-1',
+              handoffId: 'test-handoff-123456',
+            ),
+          ),
           throwsA(isA<ApiException>().having((e) => e.status, 'status', 502)),
           reason: '$body',
         );
@@ -176,7 +208,10 @@ void main() {
       var requests = 0;
       await expectLater(
         http.runWithClient(
-          () => api.startBrowserHandoff('instance-1'),
+          () => api.startBrowserHandoff(
+            'instance-1',
+            handoffId: 'test-handoff-123456',
+          ),
           () => MockClient((request) async {
             requests += 1;
             expect(
@@ -194,12 +229,25 @@ void main() {
 
   test('release requires both ok true and handoff false', () async {
     await http.runWithClient(
-      () => api.stopBrowserHandoff('instance-1'),
+      () => api.stopBrowserHandoff(
+        'instance-1',
+        handoffId: 'test-handoff-123456',
+      ),
       () => MockClient((request) async {
         expect(request.method, 'POST');
         expect(request.url.path, '/api/instances/instance-1/computer/handoff');
-        expect(jsonDecode(request.body), {'action': 'stop'});
-        return http.Response(jsonEncode({'ok': true, 'handoff': false}), 200);
+        expect(jsonDecode(request.body), {
+          'action': 'stop',
+          'handoffId': 'test-handoff-123456',
+        });
+        return http.Response(
+          jsonEncode({
+            'ok': true,
+            'handoff': false,
+            'handoffId': 'test-handoff-123456',
+          }),
+          200,
+        );
       }),
     );
     for (final body in [
@@ -210,7 +258,13 @@ void main() {
       {'ok': true, 'handoff': 'false'},
     ]) {
       await expectLater(
-        respond(body, () => api.stopBrowserHandoff('instance-1')),
+        respond(
+          body,
+          () => api.stopBrowserHandoff(
+            'instance-1',
+            handoffId: 'test-handoff-123456',
+          ),
+        ),
         throwsA(isA<ApiException>().having((e) => e.status, 'status', 502)),
       );
     }
@@ -245,7 +299,10 @@ void main() {
   test('stop and release propagate server errors', () async {
     for (final action in <Future<void> Function()>[
       () => api.stopChat('instance-1'),
-      () => api.stopBrowserHandoff('instance-1'),
+      () => api.stopBrowserHandoff(
+        'instance-1',
+        handoffId: 'test-handoff-123456',
+      ),
     ]) {
       await expectLater(
         respond({'error': 'Unavailable'}, action, status: 503),

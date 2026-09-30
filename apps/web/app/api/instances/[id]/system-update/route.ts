@@ -28,7 +28,7 @@ export async function POST(req: Request, ctx: Ctx) {
       { status: 402 },
     );
   }
-  let body: { version?: string } = {};
+  let body: { version?: string; desktopOptIn?: boolean } = {};
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -44,7 +44,7 @@ export async function POST(req: Request, ctx: Ctx) {
       runtime: "supercharge",
       restartDaemon: false,
     });
-    const result = await applySystemUpdate(inst.sessionId, inst.sandboxId, version);
+    const result = await applySystemUpdate(inst.sessionId, inst.sandboxId, version, { desktopOptIn: body.desktopOptIn === true });
     const logs = [
       wake.ok === false ? `wake: ${wake.message || "not ok"}` : "wake: ok",
       ...(wake.logs || []),
