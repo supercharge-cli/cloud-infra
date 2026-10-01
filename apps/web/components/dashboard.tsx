@@ -24,6 +24,7 @@ import {
 } from "@/lib/api-format";
 import type { Instance } from "@/lib/store";
 import { SandboxWorkspace } from "@/components/sandbox-workspace";
+import { ManagedMcpCard } from "@/components/managed-mcp";
 import { AgentChats } from '@/components/agent-chats';
 
 type AgentRuntime = "xibecode" | "supercharge";
@@ -2072,6 +2073,18 @@ export function Dashboard({ email }: { email: string }) {
               selectedInst.billingStatus === "past_due"
             }
           />
+
+          {selectedInst.runtime === "supercharge" ? (
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
+              <h3 className="mb-3 font-semibold text-white">Managed MCP (isolated Plugin API)</h3>
+              <p className="mb-3 text-sm text-zinc-400">
+                Install a reviewed MCP definition into this sandbox&apos;s isolated
+                Plugin API service and apply it to one bot conversation. Secrets
+                stay inside the sandbox; mobile uses the same owner-checked route.
+              </p>
+              <ManagedMcpCard instanceId={selectedInst.id} />
+            </div>
+          ) : null}
 
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
             <h3 className="mb-3 font-semibold text-white">Channel pairing</h3>

@@ -11,6 +11,7 @@ import '../api/client.dart';
 import '../api/models.dart';
 import '../api/providers.dart';
 import '../chat/cli_update.dart';
+import 'managed_mcp_section.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../desktop.dart';
@@ -85,6 +86,7 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
     'Overview': GlobalKey(),
     'AI': GlobalKey(),
     'Channels': GlobalKey(),
+    'Managed MCP': GlobalKey(),
     'Pairing': GlobalKey(),
     'CLI': GlobalKey(),
     'Logs': GlobalKey(),
@@ -1383,6 +1385,19 @@ class _InstanceSettingsScreenState extends State<InstanceSettingsScreen> {
                                 hint: 'xapp-…',
                               ),
                             ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        SectionTitle(
+                          'Managed MCP',
+                          key: _sections['Managed MCP'],
+                        ),
+                        VcPanel(
+                          child: ManagedMcpSection(
+                            api: api,
+                            instanceId: id,
+                            superchargeRuntime:
+                                inst?.runtime == AgentRuntime.supercharge,
                           ),
                         ),
                         const SizedBox(height: 20),
