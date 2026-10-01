@@ -36,6 +36,9 @@ async function installFixture(options: {
   );
   await writeFile(join(assets, "supercharge-superagent-server"), "new daemon");
   await script(join(bin, "sudo"), 'if [ "$1" = "-n" ]; then shift; fi; exec "$@"');
+  await script(join(bin, "ldd"), options.incompatibleDaemon
+    ? "echo 'libc.so.6: GLIBC_2.43 not found'; exit 0"
+    : "echo 'libc.so.6 => /lib/libc.so.6'");
   await script(
     join(bin, "curl"),
     options.downloadFailure
@@ -46,17 +49,11 @@ async function installFixture(options: {
 done
 cp "$ASSETS/$(basename "$dest")" "$dest"`,
   );
-  await script(
-    join(bin, "ldd"),
-    options.incompatibleDaemon
-      ? "echo 'libc.so.6: GLIBC_2.43 not found'; exit 0"
-      : "echo 'libc.so.6 => /lib/libc.so.6'",
-  );
   const shell = superchargeE2bInstallScript()
     .replaceAll("/usr/local/bin", installed)
     .replaceAll("/var/lib/superagent", state);
-  const result = spawnSync("bash", ["-c", shell], {
-    env: { ...process.env, PATH: `${bin}:${installed}:/usr/bin:/bin`, ASSETS: assets },
+  const result = spawnSync("bash", ["--noprofile", "--norc", "-c", shell], {
+    env: { ...process.env, PATH: `${bin}:${installed}:/usr/bin:/bin`, ASSETS: assets, HOME: root },
     encoding: "utf8",
   });
   return { root, installed, state, result };
@@ -84,7 +81,7 @@ for (const [name, options] of [
 test("validated update records the executable version and succeeds", async () => {
   const fixture = await installFixture({});
   try {
-    assert.equal(fixture.result.status, 0, fixture.result.stderr);
+    assert.equal(fixture.result.status, 0, `${fixture.result.stdout}\n${fixture.result.stderr}`);
     assert.match(fixture.result.stdout, /^UPDATE_DONE$/m);
     assert.equal(await readFile(join(fixture.state, "e2b-version"), "utf8"), "1.3.16\n");
     assert.equal(await readFile(join(fixture.installed, "supercharge-superagent-server"), "utf8"), "new daemon");

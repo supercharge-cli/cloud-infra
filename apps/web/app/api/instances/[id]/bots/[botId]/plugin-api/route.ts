@@ -27,6 +27,11 @@ const MANAGED_MCP_ACTIONS = new Set([
  */
 export async function POST(req: Request, ctx: Ctx) {
   const { id, botId } = await ctx.params;
+  const gatewayToken = process.env.XIBECODE_GATEWAY_TOKEN?.trim() || process.env.XIBECODE_SANDBOX_AUTH_TOKEN?.trim();
+  const inboxSecret = process.env.XIBECODE_APP_INBOX_SECRET?.trim() || process.env.XIBECODE_GATEWAY_TOKEN?.trim();
+  if (!gatewayToken || !inboxSecret) {
+    return NextResponse.json({ error: 'Managed MCP requires authenticated gateway and sandbox control' }, { status: 503 });
+  }
   const gate = await requireChatInstance(id);
   if (!gate.ok) return gate.response;
   if (!botsEnabled(gate.inst)) {

@@ -1,13 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api/client.dart';
 import '../theme.dart';
 
-/// Managed MCP (isolated Plugin API) controls for one owned instance.
-///
-/// The app is only a controller: it sends owner-checked actions to the Vectra
-/// API and never receives or stores Plugin API credentials, bridge tokens, or
-/// sandbox target identity. Applied state comes from the sandbox daemon.
 class ManagedMcpSection extends StatefulWidget {
   const ManagedMcpSection({
     super.key,
@@ -25,60 +21,107 @@ class ManagedMcpSection extends StatefulWidget {
 }
 
 class _ManagedMcpSectionState extends State<ManagedMcpSection> {
+  final sessionController = TextEditingController();
   List<String> bots = const ['main'];
   String botId = 'main';
-  String? statusLine;
+  String? pluginId;
+  String? serverId;
+  Map<String, dynamic> bindings = {};
+  List<Map<String, dynamic>> plugins = [];
   String? error;
-  String sessionId = '';
   bool busy = false;
+  Timer? poll;
+  int requestGeneration = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadBots();
+    if (widget.superchargeRuntime) {
+      unawaited(_loadBots());
+      unawaited(_status());
+    }
+  }
+
+  @override
+  void dispose() {
+    poll?.cancel();
+    sessionController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadBots() async {
-    if (!widget.superchargeRuntime) return;
     try {
-      final data = await widget.api.listBots(widget.instanceId);
-      final list = (data['bots'] as List<dynamic>? ?? const [])
-          .map((bot) => '${(bot as Map)['id'] ?? ''}')
+      final response = await widget.api.listBots(widget.instanceId);
+      final loaded = (response['bots'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((bot) => '${bot['id'] ?? ''}')
           .where((id) => id.isNotEmpty)
           .toList();
       if (!mounted) return;
       setState(() {
-        bots = list.isEmpty ? const ['main'] : list;
+        bots = loaded.isEmpty ? const ['main'] : loaded;
         if (!bots.contains(botId)) botId = bots.first;
       });
     } catch (_) {
-      // Bot list is a convenience; actions still fail closed per bot.
+      if (mounted) {
+        setState(() => error = 'Could not load bots. Refresh when connected.');
+      }
     }
   }
 
-  Future<void> _run(String action, Map<String, dynamic> extra) async {
+  Future<void> _status() async {
+    final generation = ++requestGeneration;
+    try {
+      final response = await widget.api.botManagedMcp(
+        widget.instanceId,
+        botId,
+        {'action': 'status'},
+      );
+      if (!mounted || generation != requestGeneration) return;
+      final inventory = response['inventory'];
+      final items = inventory is Map ? inventory['plugins'] : null;
+      setState(() {
+        bindings = Map<String, dynamic>.from(
+          response['bindings'] as Map? ?? const {},
+        );
+        plugins = items is List
+            ? items
+                  .whereType<Map>()
+                  .map((item) => Map<String, dynamic>.from(item))
+                  .toList()
+            : [];
+        if (!plugins.any((item) => item['id'] == pluginId)) {
+          pluginId = plugins.isEmpty ? null : '${plugins.first['id']}';
+          serverId = null;
+        }
+        error = null;
+      });
+    } catch (failure) {
+      if (mounted && generation == requestGeneration) {
+        setState(() => error = '$failure');
+      }
+    }
+  }
+
+  Future<void> _act(String action, Map<String, dynamic> input) async {
+    if (busy) return;
     setState(() {
       busy = true;
       error = null;
     });
     try {
-      final data = await widget.api.botManagedMcp(widget.instanceId, botId, {
+      await widget.api.botManagedMcp(widget.instanceId, botId, {
         'action': action,
-        ...extra,
+        ...input,
       });
-      if (!mounted) return;
-      final binding =
-          data['bindings'] is Map && (data['bindings'] as Map).isNotEmpty
-          ? (data['bindings'] as Map).values.first as Map?
-          : data['binding'] as Map?;
-      setState(() {
-        statusLine = binding == null
-            ? 'Not configured'
-            : 'Sandbox state: ${binding['status'] ?? 'unknown'}${binding['lastError'] != null ? ' · ${binding['lastError']}' : ''}';
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => error = e.toString());
+      await _status();
+    } catch (failure) {
+      if (mounted) {
+        setState(
+          () => error =
+              '$failure Refresh status before retrying an unknown outcome.',
+        );
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -92,6 +135,33 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
         style: TextStyle(color: Vc.muted),
       );
     }
+    final selected = plugins
+        .where((plugin) => plugin['id'] == pluginId)
+        .firstOrNull;
+    final manifest = selected?['manifest'];
+    final definitions = manifest is Map ? manifest['mcpServers'] : null;
+    final servers = definitions is Map
+        ? definitions.keys.map((key) => '$key').toList()
+        : <String>[];
+    final activeServer = servers.contains(serverId)
+        ? serverId
+        : servers.firstOrNull;
+    final sessionId = sessionController.text.trim();
+    final binding = bindings[sessionId];
+    final bindingMap = binding is Map
+        ? Map<String, dynamic>.from(binding)
+        : null;
+    final revision = bindingMap?['revision'];
+    final state = '${bindingMap?['status'] ?? 'not configured'}';
+    final needsPoll = state == 'waiting' || state == 'removing';
+    if (needsPoll && poll == null) {
+      poll = Timer.periodic(const Duration(seconds: 2), (_) {
+        if (!busy) unawaited(_status());
+      });
+    } else if (!needsPoll && poll != null) {
+      poll?.cancel();
+      poll = null;
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -100,73 +170,143 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
           decoration: const InputDecoration(labelText: 'Bot'),
           items: [
             for (final id in bots)
-              DropdownMenuItem(value: id, child: Text(id == 'main' ? 'Main' : id)),
+              DropdownMenuItem(
+                value: id,
+                child: Text(id == 'main' ? 'Main' : id),
+              ),
           ],
-          onChanged: (value) {
-            if (value == null || value == botId) return;
-            setState(() {
-              botId = value;
-              statusLine = null;
-            });
-            _run('status', const {});
-          },
+          onChanged: busy
+              ? null
+              : (value) {
+                  if (value == null || value == botId) return;
+                  requestGeneration++;
+                  setState(() {
+                    botId = value;
+                    pluginId = null;
+                    serverId = null;
+                    bindings = {};
+                    plugins = [];
+                  });
+                  unawaited(_status());
+                },
         ),
         const SizedBox(height: 8),
         Text(
-          statusLine ?? 'Load status to see the sandbox binding state.',
+          'Conversation state: $state',
           style: const TextStyle(color: Vc.muted, fontSize: 12),
         ),
-        if (error != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              error!,
-              style: const TextStyle(color: Vc.red, fontSize: 12),
-            ),
+        if (bindingMap?['lastError'] != null)
+          Text(
+            '${bindingMap!['lastError']}',
+            style: const TextStyle(color: Vc.red, fontSize: 12),
           ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            OutlinedButton(
-              onPressed: busy ? null : () => _run('status', const {}),
-              child: const Text('Status'),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                onChanged: (value) => sessionId = value.trim(),
-                decoration: const InputDecoration(
-                  labelText: 'Conversation session id',
-                  isDense: true,
+        if (error != null)
+          Text(error!, style: const TextStyle(color: Vc.red, fontSize: 12)),
+        TextButton(
+          onPressed: busy ? null : () => unawaited(_status()),
+          child: const Text('Refresh status'),
+        ),
+        if (plugins.isNotEmpty)
+          DropdownButtonFormField<String>(
+            initialValue: selected?['id'] as String?,
+            decoration: const InputDecoration(labelText: 'Reviewed plugin'),
+            items: [
+              for (final plugin in plugins)
+                DropdownMenuItem(
+                  value: '${plugin['id']}',
+                  child: Text(
+                    '${(plugin['manifest'] as Map?)?['name'] ?? plugin['id']}',
+                  ),
                 ),
-              ),
+            ],
+            onChanged: busy
+                ? null
+                : (value) => setState(() {
+                    pluginId = value;
+                    serverId = null;
+                  }),
+          ),
+        if (selected != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Permissions: ${((manifest as Map?)?['permissions'] as List?)?.join(', ') ?? 'none'} · ${selected['trusted'] == true ? 'trusted' : 'needs approval'} · ${selected['enabled'] == true ? 'enabled' : 'disabled'}',
+            style: const TextStyle(color: Vc.muted, fontSize: 12),
+          ),
+          if (servers.isNotEmpty)
+            DropdownButtonFormField<String>(
+              initialValue: activeServer,
+              decoration: const InputDecoration(labelText: 'MCP server'),
+              items: [
+                for (final id in servers)
+                  DropdownMenuItem(value: id, child: Text(id)),
+              ],
+              onChanged: busy
+                  ? null
+                  : (value) => setState(() => serverId = value),
             ),
-          ],
+        ],
+        const SizedBox(height: 8),
+        TextField(
+          controller: sessionController,
+          onChanged: (_) => setState(() {}),
+          decoration: const InputDecoration(
+            labelText: 'Conversation session ID',
+          ),
         ),
         const SizedBox(height: 8),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
             FilledButton(
-              onPressed: busy || sessionId.isEmpty
+              onPressed:
+                  busy ||
+                      sessionId.isEmpty ||
+                      selected?['enabled'] != true ||
+                      selected?['trusted'] != true ||
+                      activeServer == null
                   ? null
-                  : () => _run('apply', {
-                      'sessionId': sessionId,
-                      'expectedRevision': null,
-                    }),
-              child: Text(busy ? 'Working…' : 'Apply'),
+                  : () => unawaited(
+                      _act('apply', {
+                        'sessionId': sessionId,
+                        'pluginId': selected!['id'],
+                        'serverId': activeServer,
+                        'expectedRevision': revision is int ? revision : null,
+                      }),
+                    ),
+              child: Text(busy ? 'Working…' : 'Apply to conversation'),
             ),
-            const SizedBox(width: 8),
             OutlinedButton(
-              onPressed: busy || sessionId.isEmpty ? null : () => _run('remove', {'sessionId': sessionId}),
+              onPressed:
+                  busy ||
+                      sessionId.isEmpty ||
+                      revision is! int ||
+                      state != 'failed'
+                  ? null
+                  : () => unawaited(
+                      _act('retry', {
+                        'sessionId': sessionId,
+                        'expectedRevision': revision,
+                      }),
+                    ),
+              child: const Text('Retry'),
+            ),
+            OutlinedButton(
+              onPressed: busy || sessionId.isEmpty || revision is! int
+                  ? null
+                  : () => unawaited(
+                      _act('remove', {
+                        'sessionId': sessionId,
+                        'expectedRevision': revision,
+                      }),
+                    ),
               child: const Text('Remove'),
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 8),
         const Text(
-          'Install and verify managed MCP definitions from the web dashboard; '
-          'this surface applies or removes the bridge for one conversation. '
-          'Credentials never reach the app.',
+          'Review, configure, trust, enable and verify tools from the web dashboard. This device never receives Plugin API credentials or sandbox management tokens.',
           style: TextStyle(color: Vc.muted, fontSize: 11),
         ),
       ],

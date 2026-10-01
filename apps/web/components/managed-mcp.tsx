@@ -1,247 +1,293 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import './managed-mcp.css';
 
 type Tool = { name: string; description: string | null };
 type Binding = {
   configured: boolean;
   revision: number | null;
+  sessionId?: string;
   status: string;
-  serverName?: string | null;
-  agentSessionId?: string | null;
-  pluginId?: string | null;
-  serverId?: string | null;
+  pluginId?: string;
+  serverId?: string;
   lastError?: string | null;
   tools?: Tool[];
 };
+type Plugin = {
+  id: string;
+  revision: number;
+  enabled: boolean;
+  trusted: boolean;
+  activeDigest: string;
+  configuredKeys: string[];
+  releases: Array<{ digest: string; version: string }>;
+  manifest: {
+    name: string;
+    version: string;
+    permissions: string[];
+    mcpServers: Record<string, unknown>;
+    userConfig: Record<string, { required?: boolean; sensitive?: boolean }>;
+  };
+};
+type Result = {
+  binding?: Binding;
+  bindings?: Record<string, Binding>;
+  inventory?: { plugins?: Plugin[] };
+  plugin?: Plugin;
+  valid?: boolean;
+};
 
-const STATES = ['saved', 'waiting', 'applied', 'ready', 'failed', 'removing', 'removed'] as const;
+const jsonObject = (value: string): Record<string, unknown> => {
+  const parsed: unknown = JSON.parse(value);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Enter a JSON object.');
+  }
+  return parsed as Record<string, unknown>;
+};
 
-/**
- * Managed MCP (isolated Plugin API) card for one owned instance.
- * Talks only to owner-checked Vectra routes; credentials, target
- * identity, and the bridge live entirely inside the sandbox.
- */
 export function ManagedMcpCard({ instanceId }: { instanceId: string }) {
   const [bots, setBots] = useState<Array<{ id: string; name: string }>>([]);
   const [botId, setBotId] = useState('main');
-  const [binding, setBinding] = useState<Binding | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [manifestText, setManifestText] = useState('');
+  const [bindings, setBindings] = useState<Record<string, Binding>>({});
+  const [plugins, setPlugins] = useState<Plugin[]>([]);
+  const [pluginId, setPluginId] = useState('');
+  const [serverId, setServerId] = useState('');
   const [conversationId, setConversationId] = useState('');
+  const [manifestText, setManifestText] = useState('');
+  const [trustConsent, setTrustConsent] = useState(false);
+  const [verifyConsent, setVerifyConsent] = useState(false);
   const [verifyTool, setVerifyTool] = useState('');
-  const [consent, setConsent] = useState(false);
+  const [rollbackDigest, setRollbackDigest] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const configRef = useRef<HTMLTextAreaElement>(null);
+  const argumentsRef = useRef<HTMLTextAreaElement>(null);
+  const statusSequence = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     void fetch(`/api/instances/${encodeURIComponent(instanceId)}/bots`)
-      .then((res) => (res.ok ? res.json() : { bots: [] }))
+      .then((response) => (response.ok ? response.json() : { bots: [] }))
       .then((data: { bots?: Array<{ id: string; name: string }> }) => {
         if (cancelled) return;
-        const list = data.bots ?? [];
-        setBots(list);
-        if (list.length && !list.some((bot) => bot.id === botId)) setBotId(list[0]!.id);
+        const available = data.bots ?? [];
+        setBots(available);
+        setBotId((current) => available.some((bot) => bot.id === current) ? current : available[0]?.id ?? 'main');
       })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      .catch(() => { if (!cancelled) setError('Could not load the instance bots.'); });
+    return () => { cancelled = true; };
   }, [instanceId]);
 
-  const call = useCallback(
-    async (action: string, extra: Record<string, unknown> = {}) => {
-      const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/bots/${encodeURIComponent(botId)}/plugin-api`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action, ...extra }),
-      });
-      const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : `HTTP ${res.status}`);
-      return data as { binding?: Binding; bindings?: Record<string, Binding>; plugin?: { id?: string } };
-    },
-    [instanceId, botId],
-  );
+  const call = useCallback(async (action: string, extra: Record<string, unknown> = {}): Promise<Result> => {
+    const response = await fetch(
+      `/api/instances/${encodeURIComponent(instanceId)}/bots/${encodeURIComponent(botId)}/plugin-api`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...extra }) },
+    );
+    const data: unknown = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string'
+        ? data.error : `Managed MCP request failed (HTTP ${response.status}).`;
+      throw new Error(message);
+    }
+    return data as Result;
+  }, [instanceId, botId]);
 
-  const run = useCallback(
-    async (key: string, task: () => Promise<void>) => {
-      if (busy) return;
-      setBusy(key);
-      setError(null);
-      try {
-        await task();
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setBusy(null);
-      }
-    },
-    [busy],
-  );
-
-  const load = useCallback(() => {
-    void run('status', async () => {
+  const load = useCallback(async () => {
+    const sequence = ++statusSequence.current;
+    try {
       const data = await call('status');
-      const all = data.bindings ?? {};
-      const values = Object.entries(all);
-      const picked = conversationId
-        ? values.find(([sessionId]) => sessionId === conversationId)?.[1]
-        : values[0]?.[1];
-      setBinding(picked ?? null);
-    });
-  }, [call, run, conversationId]);
+      if (sequence !== statusSequence.current) return;
+      setBindings(data.bindings ?? {});
+      setPlugins(data.inventory?.plugins ?? []);
+    } catch (failure) {
+      if (sequence === statusSequence.current) setError((failure as Error).message);
+    }
+  }, [call]);
 
-  useEffect(load, [load]);
-
-  const poll = binding && ['waiting', 'removing'].includes(binding.status);
   useEffect(() => {
-    if (!poll) return;
-    const timer = setInterval(load, 1500);
-    return () => clearInterval(timer);
-  }, [poll, load]);
+    const sequence = statusSequence;
+    const timer = setTimeout(() => { void load(); }, 0);
+    return () => { clearTimeout(timer); sequence.current++; };
+  }, [load]);
 
-  const stateTone = (status: string | undefined) =>
-    status === 'ready' ? 'ok' : status === 'failed' ? 'bad' : status === 'removed' || !status ? 'idle' : 'wait';
+  const binding = bindings[conversationId] ?? (!conversationId ? Object.values(bindings)[0] : undefined);
+  const selectedPlugin = plugins.find((plugin) => plugin.id === pluginId) ?? plugins[0];
+  const servers = Object.keys(selectedPlugin?.manifest.mcpServers ?? {});
+  const selectedServer = servers.includes(serverId) ? serverId : servers[0];
+  const echoTools = (binding?.tools ?? []).filter((tool) => tool.description?.includes('/echo:'));
+  const selectedEcho = echoTools.some((tool) => tool.name === verifyTool) ? verifyTool : echoTools[0]?.name;
+  const selectionMatches = !binding || binding.sessionId === conversationId;
+
+  useEffect(() => {
+    if (binding?.status !== 'waiting' && binding?.status !== 'removing') return;
+    const timer = setInterval(() => { void load(); }, 1500);
+    return () => clearInterval(timer);
+  }, [binding?.status, load]);
+
+  const run = async (key: string, action: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(key);
+    setError(null);
+    setNotice(null);
+    try {
+      await action();
+      await load();
+    } catch (failure) {
+      setError(`${(failure as Error).message} Refresh status before repeating a mutation with an unknown outcome.`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const changePlugin = async (action: Record<string, unknown>) => {
+    if (!selectedPlugin) return;
+    const result = await call('pluginAction', {
+      pluginId: selectedPlugin.id,
+      pluginAction: { ...action, expectedRevision: selectedPlugin.revision },
+      requestId: crypto.randomUUID(),
+    });
+    if (result.plugin) setPlugins((current) => current.map((plugin) => plugin.id === result.plugin?.id ? result.plugin : plugin));
+  };
 
   return (
-    <div className="mcp-card" data-testid="managed-mcp-card">
-      <header className="mcp-card__head">
-        <label className="mcp-field">
-          <span>Bot</span>
-          <select value={botId} onChange={(e) => { setBotId(e.target.value); setBinding(null); }}>
-            {bots.map((bot) => (
-              <option key={bot.id} value={bot.id}>{bot.name}</option>
-            ))}
+    <section className="mcp-card" aria-label="Managed MCP" data-testid="managed-mcp-card">
+      <div className="mcp-card__head">
+        <label className="mcp-field">Bot
+          <select value={botId} onChange={(event) => {
+            statusSequence.current++;
+            setBotId(event.target.value);
+            setConversationId('');
+            setBindings({});
+            setPlugins([]);
+            setPluginId('');
+            setError(null);
+          }}>
+            {bots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
           </select>
         </label>
-        <span className={`mcp-state mcp-state--${stateTone(binding?.status)}`} role="status">
-          {binding?.configured ? `Sandbox state: ${binding.status}` : 'Not configured'}
+        <span className={`mcp-state mcp-state--${binding?.status ?? 'removed'}`} role="status">
+          {binding?.configured ? `Conversation: ${binding.status}` : 'No conversation binding'}
         </span>
-      </header>
-      {error ? <p className="mcp-error" role="alert">{error}</p> : null}
-      {binding?.lastError ? <p className="mcp-error">{binding.lastError}</p> : null}
+      </div>
+      {error && <p className="mcp-error" role="alert">{error}</p>}
+      {binding?.lastError && <p className="mcp-error">{binding.lastError}</p>}
+      {notice && <p className="mcp-notice" role="status">{notice}</p>}
+      <button type="button" className="mcp-button" disabled={!!busy} onClick={() => { void load(); }}>Refresh target status</button>
 
       <details className="mcp-section">
-        <summary>Install a reviewed MCP definition</summary>
-        <textarea
-          className="mcp-json"
-          rows={8}
-          spellCheck={false}
-          placeholder='{"schemaVersion":1,"id":"my-mcp","name":"My MCP","version":"1.0.0","apiVersion":"1","permissions":["mcp:stdio"],"mcpServers":{"main":{"transport":"stdio","command":"/usr/bin/node","args":["server.mjs"]}},"userConfig":{}}'
-          value={manifestText}
-          onChange={(e) => setManifestText(e.target.value)}
-        />
+        <summary>Install or update a reviewed MCP definition</summary>
+        <p className="mcp-hint">Only an existing, approved stdio executable or Streamable HTTP MCP endpoint in this sandbox works here. Validation never runs the server. An arbitrary REST API is not an MCP server.</p>
+        <label className="mcp-field">Inline plugin manifest (JSON)
+          <textarea className="mcp-json" rows={7} spellCheck={false} value={manifestText} onChange={(event) => setManifestText(event.target.value)} placeholder='{"schemaVersion":1,"id":"reviewed-tools","name":"Reviewed Tools","version":"1.0.0","apiVersion":"1","permissions":["mcp:stdio"],"mcpServers":{"tools":{"transport":"stdio","command":"node","args":["/home/user/workspace/reviewed/server.mjs"]}}}' />
+        </label>
         <div className="mcp-row">
-          <button
-            type="button"
-            disabled={!!busy || !manifestText.trim()}
-            onClick={() =>
-              void run('validate', async () => {
-                await call('validate', { manifest: JSON.parse(manifestText) });
-              })
-            }
-          >
-            {busy === 'validate' ? 'Validating…' : 'Validate (no install)'}
-          </button>
-          <button
-            type="button"
-            disabled={!!busy || !manifestText.trim()}
-            onClick={() =>
-              void run('install', async () => {
-                const data = await call('install', {
-                  manifest: JSON.parse(manifestText),
-                  requestId: crypto.randomUUID(),
-                });
-                setManifestText('');
-                load();
-                void data;
-              })
-            }
-          >
-            {busy === 'install' ? 'Installing disabled…' : 'Install disabled'}
-          </button>
+          <button type="button" className="mcp-button" disabled={!!busy || !manifestText.trim()} onClick={() => { void run('validate', async () => {
+            const result = await call('validate', { manifest: jsonObject(manifestText) });
+            if (result.valid !== true) throw new Error('The definition was not validated.');
+            setNotice('Static validation passed; no plugin code was run.');
+          }); }}>Validate</button>
+          <button type="button" className="mcp-button" disabled={!!busy || !manifestText.trim()} onClick={() => { void run('install', async () => {
+            const result = await call('install', { manifest: jsonObject(manifestText), requestId: crypto.randomUUID() });
+            if (result.plugin?.id) setPluginId(result.plugin.id);
+            setManifestText('');
+            setNotice('Installed disabled and untrusted. Review and approve before enabling.');
+          }); }}>Install disabled</button>
+          <button type="button" className="mcp-button" disabled={!!busy || !selectedPlugin || !manifestText.trim()} onClick={() => { void run('update', async () => {
+            await changePlugin({ action: 'update', source: { type: 'inline', manifest: jsonObject(manifestText) } });
+            setManifestText('');
+            setTrustConsent(false);
+            setNotice('New release installed. Review changed permissions before enabling.');
+          }); }}>Update selected</button>
         </div>
-        <p className="mcp-hint">Installs disabled and untrusted. Configure, trust, and enable it below before applying.</p>
       </details>
 
       <div className="mcp-section">
-        <label className="mcp-field">
-          <span>Conversation to apply to</span>
-          <input
-            value={conversationId}
-            onChange={(e) => setConversationId(e.target.value.trim())}
-            placeholder="Open a chat with this bot, then paste its session id"
-            spellCheck={false}
-          />
+        <label className="mcp-field">Installed plugin
+          <select value={selectedPlugin?.id ?? ''} disabled={!!busy || !plugins.length} onChange={(event) => { setPluginId(event.target.value); setServerId(''); setTrustConsent(false); }}>
+            {!plugins.length && <option value="">No plugins installed</option>}
+            {plugins.map((plugin) => <option key={plugin.id} value={plugin.id}>{plugin.manifest.name} ({plugin.id})</option>)}
+          </select>
         </label>
-        <div className="mcp-row">
-          <button
-            type="button"
-            disabled={!!busy || !conversationId || !binding?.configured}
-            onClick={() =>
-              void run('apply', async () => {
-                const data = await call('apply', { sessionId: conversationId, expectedRevision: binding?.revision ?? null });
-                setBinding(data.binding ?? binding);
-              })
-            }
-          >
-            {busy === 'apply' ? 'Applying…' : 'Apply to conversation'}
-          </button>
-          {binding?.configured && binding.revision != null ? (
-            <button
-              type="button"
-              className="mcp-danger"
-              disabled={!!busy}
-              onClick={() =>
-                void run('remove', async () => {
-                  const data = await call('remove', { sessionId: conversationId || binding.agentSessionId || '', expectedRevision: binding.revision! });
-                  setBinding(data.binding ?? null);
-                })
-              }
-            >
-              {busy === 'remove' ? 'Removing…' : 'Remove'}
-            </button>
-          ) : null}
-        </div>
-        {binding?.status === 'applied' && binding.tools?.length ? (
-          <div className="mcp-verify">
-            <label className="mcp-field">
-              <span>Verification call (one real, consented tool call)</span>
-              <select value={verifyTool || binding.tools[0]!.name} onChange={(e) => setVerifyTool(e.target.value)}>
-                {binding.tools.map((tool) => (
-                  <option key={tool.name} value={tool.name}>{tool.description ? `${tool.name} — ${tool.description}` : tool.name}</option>
-                ))}
+        {selectedPlugin && <>
+          <p className="mcp-hint">Version {selectedPlugin.manifest.version} · digest {selectedPlugin.activeDigest.slice(0, 16)}… · permissions: {selectedPlugin.manifest.permissions.join(', ') || 'none'} · {selectedPlugin.trusted ? 'trusted' : 'needs approval'} · {selectedPlugin.enabled ? 'enabled' : 'disabled'}</p>
+          <label className="mcp-field">Write-only configuration values (JSON object)
+            <textarea ref={configRef} className="mcp-json" rows={3} spellCheck={false} defaultValue="{}" autoComplete="off" aria-label="Plugin configuration values" />
+          </label>
+          <p className="mcp-hint">Declared fields: {Object.keys(selectedPlugin.manifest.userConfig).join(', ') || 'none'}. Configured keys: {selectedPlugin.configuredKeys.join(', ') || 'none'}. Secret values are never read back.</p>
+          <div className="mcp-row">
+            <button type="button" className="mcp-button" disabled={!!busy} onClick={() => { void run('configure', async () => {
+              const values = jsonObject(configRef.current?.value ?? '{}');
+              if (Object.entries(values).some(([key, value]) => !Object.hasOwn(selectedPlugin.manifest.userConfig, key) || typeof value !== 'string')) throw new Error('Configuration must contain only declared string fields.');
+              await changePlugin({ action: 'configure', values });
+              if (configRef.current) configRef.current.value = '{}';
+            }); }}>Save configuration</button>
+            <label className="mcp-consent"><input type="checkbox" checked={trustConsent} onChange={(event) => setTrustConsent(event.target.checked)} />I reviewed the permissions above.</label>
+            <button type="button" className="mcp-button" disabled={!!busy || selectedPlugin.trusted || !trustConsent} onClick={() => { void run('trust', async () => {
+              await changePlugin({ action: 'trust', permissions: selectedPlugin.manifest.permissions });
+              setTrustConsent(false);
+            }); }}>Trust reviewed permissions</button>
+            <button type="button" className="mcp-button" disabled={!!busy || selectedPlugin.enabled || !selectedPlugin.trusted} onClick={() => { void run('enable', () => changePlugin({ action: 'enable' })); }}>Enable</button>
+            <button type="button" className="mcp-button" disabled={!!busy || !selectedPlugin.enabled} onClick={() => { void run('disable', () => changePlugin({ action: 'disable' })); }}>Disable</button>
+          </div>
+          {selectedPlugin.releases.length > 1 && <div className="mcp-row">
+            <label className="mcp-field">Rollback release
+              <select value={rollbackDigest} onChange={(event) => setRollbackDigest(event.target.value)}>
+                <option value="">Select an earlier release</option>
+                {selectedPlugin.releases.filter((release) => release.digest !== selectedPlugin.activeDigest).map((release) => <option key={release.digest} value={release.digest}>{release.version} · {release.digest.slice(0, 16)}…</option>)}
               </select>
             </label>
-            <label className="mcp-consent">
-              <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-              <span>I reviewed this tool and consent to one real call.</span>
-            </label>
-            <button
-              type="button"
-              disabled={!!busy || !consent}
-              onClick={() =>
-                void run('verify', async () => {
-                  const data = await call('verify', {
-                    sessionId: binding.agentSessionId ? conversationId : conversationId,
-                    expectedRevision: binding.revision!,
-                    tool: verifyTool || binding.tools![0]!.name,
-                    arguments: {},
-                    consent: true,
-                  });
-                  setBinding(data.binding ?? binding);
-                  setConsent(false);
-                })
-              }
-            >
-              {busy === 'verify' ? 'Verifying…' : 'Run verification call'}
-            </button>
-          </div>
-        ) : null}
-        {binding?.status === 'ready' ? <p className="mcp-hint">Ready: the exact bot conversation discovered the bridge and completed a consented call.</p> : null}
-        {!binding?.configured ? <p className="mcp-hint">Install a definition first; a conversation cannot be applied before that.</p> : null}
+            <button type="button" className="mcp-button" disabled={!!busy || !rollbackDigest} onClick={() => { void run('rollback', async () => {
+              await changePlugin({ action: 'rollback', digest: rollbackDigest });
+              setRollbackDigest('');
+              setTrustConsent(false);
+            }); }}>Rollback</button>
+          </div>}
+        </>}
       </div>
-    </div>
+
+      <div className="mcp-section">
+        <label className="mcp-field">Conversation ID
+          <input value={conversationId} onChange={(event) => setConversationId(event.target.value.trim())} placeholder="Open this bot's conversation and paste its ID" spellCheck={false} />
+        </label>
+        {selectedPlugin && <label className="mcp-field">MCP server
+          <select value={selectedServer ?? ''} onChange={(event) => setServerId(event.target.value)}>
+            {servers.map((server) => <option key={server} value={server}>{server}</option>)}
+          </select>
+        </label>}
+        <div className="mcp-row">
+          <button type="button" className="mcp-button" disabled={!!busy || !conversationId || !selectedPlugin?.enabled || !selectedPlugin.trusted || !selectedServer} onClick={() => { void run('apply', async () => {
+            const result = await call('apply', { sessionId: conversationId, pluginId: selectedPlugin.id, serverId: selectedServer, expectedRevision: binding?.revision ?? null });
+            if (result.binding?.sessionId) setConversationId(result.binding.sessionId);
+          }); }}>{binding ? 'Reapply / rotate bridge' : 'Apply to conversation'}</button>
+          <button type="button" className="mcp-button" disabled={!!busy || !conversationId || !selectionMatches || binding?.status !== 'failed' || binding.revision == null} onClick={() => { void run('retry', async () => {
+            await call('retry', { sessionId: conversationId, expectedRevision: binding!.revision });
+          }); }}>Retry failed apply</button>
+          <button type="button" className="mcp-button mcp-danger" disabled={!!busy || !binding?.configured || !selectionMatches || binding.revision == null || !conversationId} onClick={() => { void run('remove', async () => {
+            await call('remove', { sessionId: conversationId, expectedRevision: binding!.revision });
+          }); }}>Remove conversation bridge</button>
+        </div>
+        {binding?.status === 'applied' && <div className="mcp-verify">
+          {selectedEcho ? <>
+            <p className="mcp-hint">Only a discovered echo fixture is offered for the non-destructive verification call.</p>
+            <label className="mcp-field">Echo fixture
+              <select value={selectedEcho} onChange={(event) => setVerifyTool(event.target.value)}>
+                {echoTools.map((tool) => <option key={tool.name} value={tool.name}>{tool.description ?? tool.name}</option>)}
+              </select>
+            </label>
+            <label className="mcp-field">Echo arguments (JSON object)
+              <textarea ref={argumentsRef} className="mcp-json" rows={2} spellCheck={false} defaultValue='{"text":"managed MCP check"}' />
+            </label>
+            <label className="mcp-consent"><input type="checkbox" checked={verifyConsent} onChange={(event) => setVerifyConsent(event.target.checked)} />I consent to this one real echo call.</label>
+            <button type="button" className="mcp-button" disabled={!!busy || !verifyConsent || !conversationId || !selectionMatches || binding.revision == null} onClick={() => { void run('verify', async () => {
+              await call('verify', { sessionId: conversationId, expectedRevision: binding.revision, tool: selectedEcho, arguments: jsonObject(argumentsRef.current?.value ?? '{}'), consent: true });
+              setVerifyConsent(false);
+            }); }}>Verify discovered echo</button>
+          </> : <p className="mcp-hint">Applied to this session. No echo fixture was discovered, so readiness has not been verified.</p>}
+        </div>}
+        {binding?.status === 'ready' && <p className="mcp-notice">Ready: this conversation discovered and safely called its bridge tool.</p>}
+      </div>
+    </section>
   );
 }

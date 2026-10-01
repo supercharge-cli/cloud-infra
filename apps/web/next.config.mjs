@@ -13,6 +13,7 @@ const config = {
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
   // Keep the app self-contained when Root Directory = apps/web
   outputFileTracingRoot: monorepoRoot,
+  experimental: { cpus: 2 },
 };
 
 export default withMDX(config);
