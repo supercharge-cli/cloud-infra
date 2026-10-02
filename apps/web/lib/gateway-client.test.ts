@@ -117,6 +117,10 @@ test("restart requires inbox health and cannot succeed from a process or complet
   });
   const result = await restartDaemon("test-session", undefined, "supercharge");
   assert.equal(result.ok, false);
+  assert.match(command, /export SUPERAGENT_SESSION_STATE=\/home\/user\/\.supercharge\/state\/sessions\.json/);
+  assert.match(command, /export SUPERAGENT_BOT_STATE=\/home\/user\/\.supercharge\/state\/bots\.json/);
+  assert.match(command, /export SUPERAGENT_PLUGIN_CONTROL=\/opt\/vectra\/plugin-api\/control\.mjs/);
+  assert.ok(command.indexOf('export SUPERAGENT_SESSION_STATE=') < command.indexOf('nohup supercharge agent daemon'));
   const readiness = command.split("OK=0")[1].split('if [ "$OK"')[0];
   assert.match(readiness, /\/healthz/);
   assert.doesNotMatch(readiness, /pgrep/);
