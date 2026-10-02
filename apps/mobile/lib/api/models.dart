@@ -187,7 +187,10 @@ class AppChatEvent {
   String get type => '${raw['type'] ?? ''}';
   String get text =>
       '${raw['text'] ?? raw['summary'] ?? raw['detail'] ?? raw['question'] ?? raw['caption'] ?? ''}';
-  String? get ref => raw['ref'] as String? ?? raw['id'] as String?;
+  String? get ref {
+    final value = raw['ref'] ?? raw['id'];
+    return value == null ? null : '$value';
+  }
   String? get fileId => raw['fileId'] as String?;
   String? get name => raw['name'] as String?;
   String? get kind => raw['kind'] as String?;

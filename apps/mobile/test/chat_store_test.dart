@@ -40,6 +40,16 @@ void main() {
     documents.deleteSync(recursive: true);
   });
 
+  test('numeric server event IDs are safe to reference in chat', () {
+    final event = AppChatEvent({'type': 'text', 'id': 42, 'text': 'ready'});
+    expect(event.id, '42');
+    expect(event.ref, '42');
+    expect(
+      AppChatEvent({'type': 'ask', 'id': 42, 'ref': 'question-1'}).ref,
+      'question-1',
+    );
+  });
+
   test(
     'overlapping saves from one store preserve the latest complete snapshot',
     () async {
