@@ -108,7 +108,7 @@ export async function ensureInbox(inst: Instance): Promise<void> {
       inst.sandboxId,
       inst.id,
       inst.runtime || "xibecode",
-    ).catch(() => undefined);
+    );
     const wake = await wakeSession(inst.sessionId, {
       sandboxId: inst.sandboxId,
       runtime: inst.runtime || "xibecode",

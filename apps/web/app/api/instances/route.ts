@@ -11,6 +11,7 @@ import {
 import {
   bootstrapAppInbox,
   createGatewaySession,
+  restartDaemon,
   destroyGatewaySession,
   getSandboxState,
 } from "@/lib/gateway-client";
@@ -225,7 +226,11 @@ export async function POST(req: Request) {
       session.sandboxId,
       instance.id,
       runtime,
-    ).catch(() => undefined);
+    );
+    if (runtime === "supercharge") {
+      const restart = await restartDaemon(session.sessionId, session.sandboxId, runtime);
+      if (!restart.ok) throw new Error("New Supercharge sandbox daemon could not adopt its instance identity");
+    }
     const { applySavedPollinationsToNewInstance } =
       await import("@/lib/pollinations-account");
     await applySavedPollinationsToNewInstance({

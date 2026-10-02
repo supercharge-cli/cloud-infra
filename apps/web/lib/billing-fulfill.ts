@@ -3,7 +3,7 @@
  * (client checkout signature OR server webhook).
  */
 import { addBillingPeriod, getPlan, type Plan } from "./billing";
-import { bootstrapAppInbox, createGatewaySession } from "./gateway-client";
+import { bootstrapAppInbox, createGatewaySession, restartDaemon } from "./gateway-client";
 import { getDb } from "./mongodb";
 import { withWorkspaceCreation, WorkspaceLimitError } from './workspace-limit';
 import {
@@ -171,7 +171,11 @@ export async function fulfillPaidOrder(input: {
     session.sandboxId,
     instance.id,
     order.runtime || "xibecode",
-  ).catch(() => undefined);
+  );
+  if (order.runtime === "supercharge") {
+    const restart = await restartDaemon(session.sessionId, session.sandboxId, "supercharge");
+    if (!restart.ok) throw new Error("New Supercharge sandbox daemon could not adopt its instance identity");
+  }
   const { applySavedPollinationsToNewInstance } =
     await import("@/lib/pollinations-account");
   await applySavedPollinationsToNewInstance({

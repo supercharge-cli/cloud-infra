@@ -2210,7 +2210,13 @@ export async function bootstrapAppInbox(
   runtime: AgentRuntime = "xibecode",
 ): Promise<void> {
   const secret = appInboxSecret();
-  if (!secret) return;
+  if (runtime === "supercharge" && (!instanceId || !/^[A-Za-z0-9_-]{1,128}$/.test(instanceId))) {
+    throw new Error("Supercharge instance identity is unavailable");
+  }
+  if (!secret) {
+    if (runtime === "supercharge") throw new Error("Sandbox inbox authentication is unavailable");
+    return;
+  }
   const site = (
     process.env.PUBLIC_BASE_URL?.trim() ||
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
@@ -2266,18 +2272,34 @@ import pathlib
 keys = ${JSON.stringify(keys)}
 path = pathlib.Path(${JSON.stringify(`${runtimeHome}/daemon.env`)})
 path.parent.mkdir(parents=True, exist_ok=True)
+if path.is_symlink() or (path.exists() and not path.is_file()):
+  raise SystemExit("Sandbox daemon configuration path is invalid")
 text = path.read_text() if path.exists() else ""
 lines = [ln for ln in text.splitlines() if ln.strip() and ln.split("=", 1)[0] not in keys]
 for k, v in keys.items():
   lines.append(f"{k}={v}")
+if ${runtime === "supercharge" ? "True" : "False"}:
+  import os
+  identity = pathlib.Path("/home/user/.superagent/plugin-instance.id")
+  if identity.is_symlink() or (identity.exists() and identity.read_text().strip() != keys["SUPERAGENT_INSTANCE_ID"]):
+    raise SystemExit("Plugin controller instance identity mismatch")
+  if not identity.exists():
+    fd = os.open(identity, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as handle:
+      handle.write(keys["SUPERAGENT_INSTANCE_ID"] + "\\n")
+  identity.chmod(0o600)
 path.write_text("\\n".join(lines) + "\\n")
+path.chmod(0o600)
 print("ok")
 `.trim();
-  await execInSession(sessionId, `python3 - <<'PY'\n${py}\nPY`, {
+  const result = await execInSession(sessionId, `python3 - <<'PY'\n${py}\nPY`, {
     timeout: 30,
     sandboxId,
     runtime,
-  }).catch(() => undefined);
+  });
+  if (result.exitCode !== 0 || result.success === false || !String(result.stdout || "").includes("ok")) {
+    throw new Error("Sandbox instance bootstrap failed; daemon configuration was not confirmed");
+  }
 }
 
 export function sandboxPublicBase(sandboxId: string, port: number): string {
