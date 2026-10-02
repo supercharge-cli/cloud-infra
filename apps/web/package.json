@@ -6,7 +6,8 @@
   "license": "UNLICENSED",
   "scripts": {
     "build:index": "node scripts/build-index.mjs",
-    "build": "npm run build:index && NODE_ENV=production next build && node scripts/vercel-align-next.mjs",
+    "catalog:check": "node scripts/validate-managed-mcp-catalog.mjs",
+    "build": "npm run catalog:check && npm run build:index && NODE_ENV=production next build && node scripts/vercel-align-next.mjs",
     "dev": "next dev --port 3001",
     "start": "next start --port 3001",
     "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireChatInstance } from '@/lib/app-chat';
 import { botsEnabled, syncBots, validBot } from '@/lib/bot-service';
 import { proxyInbox } from '@/lib/app-chat';
+import { resolveCatalogEntry } from '@/lib/managed-mcp/catalog';
 
 type Ctx = { params: Promise<{ id: string; botId: string }> };
 
@@ -9,6 +10,7 @@ const MANAGED_MCP_ACTIONS = new Set([
   'status',
   'validate',
   'install',
+  'installCatalog',
   'pluginAction',
   'apply',
   'retry',
@@ -40,9 +42,17 @@ export async function POST(req: Request, ctx: Ctx) {
   const bot = await validBot(gate.inst, botId);
   if (!bot) return NextResponse.json({ error: 'Bot not found' }, { status: 404 });
 
+  const declaredLength = Number(req.headers.get('content-length') || 0);
+  if (declaredLength > 512 * 1024) {
+    return NextResponse.json({ error: 'Managed MCP request exceeds 512 KiB' }, { status: 413 });
+  }
   let body: unknown;
   try {
-    body = await req.json();
+    const text = await req.text();
+    if (Buffer.byteLength(text, 'utf8') > 512 * 1024) {
+      return NextResponse.json({ error: 'Managed MCP request exceeds 512 KiB' }, { status: 413 });
+    }
+    body = JSON.parse(text);
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
@@ -52,6 +62,16 @@ export async function POST(req: Request, ctx: Ctx) {
   const action = (body as { action?: unknown }).action;
   if (typeof action !== 'string' || !MANAGED_MCP_ACTIONS.has(action)) {
     return NextResponse.json({ error: 'Unsupported managed MCP action' }, { status: 400 });
+  }
+  const payload = body as Record<string, unknown>;
+  if (action === 'installCatalog' || (action === 'pluginAction' && (payload.pluginAction as { action?: unknown } | null)?.action === 'update')) {
+    const catalogId = payload.catalogId;
+    const catalogSha256 = payload.catalogSha256;
+    if (typeof catalogId !== 'string' || typeof catalogSha256 !== 'string' ||
+        !resolveCatalogEntry(catalogId, catalogSha256) ||
+        (action === 'pluginAction' && payload.pluginId !== catalogId)) {
+      return NextResponse.json({ error: 'Catalog release is unavailable' }, { status: 400 });
+    }
   }
 
   try {

@@ -342,6 +342,9 @@ class VectraClient {
     Map<String, dynamic> input,
   ) => _json('POST', '/api/instances/$id/bots', body: input, timeout: _slow);
 
+  Future<Map<String, dynamic>> managedMcpCatalog() =>
+      _json('GET', '/api/managed-mcp/catalog', timeout: _fast);
+
   /// Managed MCP (isolated Plugin API) action for one owned bot.
   /// The body is a bounded action object (`action`, plus action-specific
   /// fields); credentials and target identity never travel through the app.

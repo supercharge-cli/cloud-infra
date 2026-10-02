@@ -30,6 +30,16 @@ type Plugin = {
     userConfig: Record<string, { required?: boolean; sensitive?: boolean }>;
   };
 };
+type CatalogEntry = {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  source: { type: 'archive'; url: string; sha256: string };
+  manifest: { permissions: string[]; mcpServers: Record<string, unknown>; userConfig: Record<string, { required?: boolean; sensitive?: boolean }> };
+};
+type Conversation = { sessionId: string; title: string; botId: string; source: string };
+
 type Result = {
   binding?: Binding;
   bindings?: Record<string, Binding>;
@@ -51,6 +61,9 @@ export function ManagedMcpCard({ instanceId }: { instanceId: string }) {
   const [botId, setBotId] = useState('main');
   const [bindings, setBindings] = useState<Record<string, Binding>>({});
   const [plugins, setPlugins] = useState<Plugin[]>([]);
+  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+  const [catalogId, setCatalogId] = useState('');
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [pluginId, setPluginId] = useState('');
   const [serverId, setServerId] = useState('');
   const [conversationId, setConversationId] = useState('');
@@ -97,14 +110,20 @@ export function ManagedMcpCard({ instanceId }: { instanceId: string }) {
   const load = useCallback(async () => {
     const sequence = ++statusSequence.current;
     try {
-      const data = await call('status');
+      const [data, listing, threads] = await Promise.all([
+        call('status'),
+        fetch('/api/managed-mcp/catalog').then((response) => response.ok ? response.json() : { plugins: [] }),
+        fetch(`/api/instances/${encodeURIComponent(instanceId)}/chat/conversations?botId=${encodeURIComponent(botId)}`).then((response) => response.ok ? response.json() : { conversations: [] }),
+      ]);
       if (sequence !== statusSequence.current) return;
+      setCatalog(Array.isArray(listing.plugins) ? listing.plugins : []);
+      setConversations(Array.isArray(threads.conversations) ? threads.conversations.filter((thread: Conversation) => thread.botId === botId && thread.source !== 'group') : []);
       setBindings(data.bindings ?? {});
       setPlugins(data.inventory?.plugins ?? []);
     } catch (failure) {
       if (sequence === statusSequence.current) setError((failure as Error).message);
     }
-  }, [call]);
+  }, [call, instanceId, botId]);
 
   useEffect(() => {
     const sequence = statusSequence;
@@ -113,7 +132,9 @@ export function ManagedMcpCard({ instanceId }: { instanceId: string }) {
   }, [load]);
 
   const binding = bindings[conversationId] ?? (!conversationId ? Object.values(bindings)[0] : undefined);
-  const selectedPlugin = plugins.find((plugin) => plugin.id === pluginId) ?? plugins[0];
+  const selectedCatalog = catalog.find((entry) => entry.id === catalogId) ?? catalog[0];
+  const catalogInstalled = selectedCatalog ? plugins.find((plugin) => plugin.id === selectedCatalog.id) : undefined;
+  const selectedPlugin = plugins.find((plugin) => plugin.id === pluginId) ?? catalogInstalled ?? plugins[0];
   const servers = Object.keys(selectedPlugin?.manifest.mcpServers ?? {});
   const selectedServer = servers.includes(serverId) ? serverId : servers[0];
   const echoTools = (binding?.tools ?? []).filter((tool) => tool.description?.includes('/echo:'));
@@ -176,6 +197,25 @@ export function ManagedMcpCard({ instanceId }: { instanceId: string }) {
       {notice && <p className="mcp-notice" role="status">{notice}</p>}
       <button type="button" className="mcp-button" disabled={!!busy} onClick={() => { void load(); }}>Refresh target status</button>
 
+      <div className="mcp-section">
+        <h3>Shared reviewed catalog</h3>
+        <p className="mcp-hint">The same catalog appears in Supercharge desktop and Vectra. Connecting installs this pinned release only into the selected bot VM; it does not copy desktop plugins or credentials.</p>
+        <label className="mcp-field">Catalog plugin
+          <select value={selectedCatalog?.id ?? ''} onChange={(event) => { setCatalogId(event.target.value); setPluginId(event.target.value); setTrustConsent(false); }}>
+            {!catalog.length && <option value="">No reviewed releases available</option>}
+            {catalog.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · {entry.version}</option>)}
+          </select>
+        </label>
+        {selectedCatalog && <>
+          <p className="mcp-hint">{selectedCatalog.description} · permissions: {selectedCatalog.manifest.permissions.join(', ') || 'none'} · SHA-256 {selectedCatalog.source.sha256.slice(0, 16)}… · {catalogInstalled ? (catalogInstalled.enabled && catalogInstalled.trusted ? 'enabled' : 'installed; needs review') : 'not installed in this VM'}</p>
+          <button type="button" className="mcp-button" disabled={!!busy || !!catalogInstalled} onClick={() => { void run('installCatalog', async () => {
+            const result = await call('installCatalog', { catalogId: selectedCatalog.id, catalogSha256: selectedCatalog.source.sha256, requestId: crypto.randomUUID() });
+            if (result.plugin?.id) setPluginId(result.plugin.id);
+            setNotice('Installed disabled and untrusted in this bot VM. Review configuration and permissions below before attaching to a conversation.');
+          }); }}>Connect: install in this VM</button>
+        </>}
+      </div>
+
       <details className="mcp-section">
         <summary>Install or update a reviewed MCP definition</summary>
         <p className="mcp-hint">Only an existing, approved stdio executable or Streamable HTTP MCP endpoint in this sandbox works here. Validation never runs the server. An arbitrary REST API is not an MCP server.</p>
@@ -194,12 +234,12 @@ export function ManagedMcpCard({ instanceId }: { instanceId: string }) {
             setManifestText('');
             setNotice('Installed disabled and untrusted. Review and approve before enabling.');
           }); }}>Install disabled</button>
-          <button type="button" className="mcp-button" disabled={!!busy || !selectedPlugin || !manifestText.trim()} onClick={() => { void run('update', async () => {
-            await changePlugin({ action: 'update', source: { type: 'inline', manifest: jsonObject(manifestText) } });
-            setManifestText('');
+          <button type="button" className="mcp-button" disabled={!!busy || !selectedCatalog || !catalogInstalled || catalogInstalled.manifest.version === selectedCatalog.version} onClick={() => { void run('update', async () => {
+            if (!selectedCatalog || !catalogInstalled) return;
+            await call('pluginAction', { pluginId: selectedCatalog.id, catalogId: selectedCatalog.id, catalogSha256: selectedCatalog.source.sha256, pluginAction: { action: 'update', expectedRevision: catalogInstalled.revision }, requestId: crypto.randomUUID() });
             setTrustConsent(false);
-            setNotice('New release installed. Review changed permissions before enabling.');
-          }); }}>Update selected</button>
+            setNotice('Pinned release installed. Review changed permissions before enabling.');
+          }); }}>Update from catalog</button>
         </div>
       </details>
 
@@ -248,8 +288,11 @@ export function ManagedMcpCard({ instanceId }: { instanceId: string }) {
       </div>
 
       <div className="mcp-section">
-        <label className="mcp-field">Conversation ID
-          <input value={conversationId} onChange={(event) => setConversationId(event.target.value.trim())} placeholder="Open this bot's conversation and paste its ID" spellCheck={false} />
+        <label className="mcp-field">Conversation
+          <select value={conversations.some((thread) => thread.sessionId === conversationId) ? conversationId : ''} onChange={(event) => setConversationId(event.target.value)}>
+            <option value="">Select an existing conversation</option>
+            {conversations.map((thread) => <option key={thread.sessionId} value={thread.sessionId}>{thread.title || thread.sessionId} · {thread.sessionId.slice(0, 12)}…</option>)}
+          </select>
         </label>
         {selectedPlugin && <label className="mcp-field">MCP server
           <select value={selectedServer ?? ''} onChange={(event) => setServerId(event.target.value)}>

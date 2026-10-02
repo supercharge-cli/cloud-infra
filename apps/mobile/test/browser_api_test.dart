@@ -82,6 +82,28 @@ void main() {
     });
   }
 
+  test('Managed MCP catalog is read-only and install targets an owned bot route', () async {
+    final requests = <http.Request>[];
+    await http.runWithClient(() async {
+      final catalog = await api.managedMcpCatalog();
+      expect(catalog['plugins'], isA<List>());
+      await api.botManagedMcp('instance-1', 'main', {
+        'action': 'installCatalog',
+        'catalogId': 'vectra-echo',
+        'catalogSha256': 'a' * 64,
+        'requestId': 'test-request-1234',
+      });
+    }, () => MockClient((request) async {
+      requests.add(request);
+      return http.Response(jsonEncode(request.method == 'GET' ? {'plugins': []} : {'plugin': {'id': 'vectra-echo'}}), 200);
+    }));
+    expect(requests.map((request) => request.method), ['GET', 'POST']);
+    expect(requests.first.url.path, '/api/managed-mcp/catalog');
+    expect(requests.last.url.path, '/api/instances/instance-1/bots/main/plugin-api');
+    expect(requests.last.headers['authorization'], 'Bearer test-token');
+    expect(jsonDecode(requests.last.body)['action'], 'installCatalog');
+  });
+
   test('computer status uses the authenticated read-only endpoint', () async {
     final result = await http.runWithClient(
       () => api.computerStatus('instance-1'),
