@@ -333,6 +333,12 @@ class _VectraSidePanelState extends State<VectraSidePanel> {
               onTap: () => _go('/'),
             ),
             _item(
+              icon: Icons.storefront_outlined,
+              label: 'Marketplace',
+              selected: GoRouterState.of(context).uri.path == '/marketplace',
+              onTap: () => _go('/marketplace'),
+            ),
+            _item(
               icon: Icons.payments_outlined,
               label: 'Billing',
               selected: GoRouterState.of(context).uri.path == '/billing',
@@ -481,6 +487,8 @@ class _VectraSidePanelState extends State<VectraSidePanel> {
         const Divider(height: 1),
         _item(icon: Icons.tune, label: 'Workspace settings', selected: uri.path == '/instance/${workspace.id}', onTap: () => _go('/instance/${workspace.id}', extra: workspace)),
         _item(icon: Icons.folder_open_outlined, label: 'Files', onTap: () => _go('/instance/${workspace.id}/files', extra: workspace)),
+        _item(icon: Icons.storefront_outlined, label: 'Marketplace', selected: uri.path == '/marketplace',
+          onTap: () => _go('/marketplace?instance=${Uri.encodeQueryComponent(workspace.id)}${selected == null ? '' : '&bot=${Uri.encodeQueryComponent(selected)}'}')),
         _item(icon: Icons.person_outline, label: 'Account', selected: uri.path == '/account', onTap: () => _go('/account')),
         Padding(padding: const EdgeInsets.fromLTRB(18, 6, 6, 10), child: Row(children: [
           Expanded(child: Text(email, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Vc.muted, fontSize: 11))),
@@ -523,6 +531,12 @@ class _VectraSidePanelState extends State<VectraSidePanel> {
               label: 'Workspaces',
               selected: path == '/',
               onTap: () => _go('/'),
+            ),
+            _item(
+              icon: Icons.storefront_outlined,
+              label: 'Marketplace',
+              selected: path == '/marketplace',
+              onTap: () => _go('/marketplace'),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 22, 8, 6),

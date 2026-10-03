@@ -16,6 +16,7 @@ import 'screens/billing.dart';
 import 'screens/chat.dart';
 import 'screens/chat_home.dart';
 import 'screens/instance_settings.dart';
+import 'screens/marketplace.dart';
 import 'screens/workspace.dart';
 import 'screens/instances.dart';
 import 'screens/login.dart';
@@ -119,6 +120,14 @@ class _VectraAppState extends State<VectraApp> with WidgetsBindingObserver {
               isDesktop ? DesktopShell(child: child) : child,
           routes: [
             GoRoute(path: '/', builder: (c, st) => const ChatHomeScreen()),
+            GoRoute(
+              path: '/marketplace',
+              builder: (c, st) => MarketplaceScreen(
+                key: ValueKey('marketplace-${st.uri.query}'),
+                initialInstanceId: st.uri.queryParameters['instance'],
+                initialBotId: st.uri.queryParameters['bot'],
+              ),
+            ),
             GoRoute(
               path: '/workspaces',
               builder: (c, st) => const InstancesScreen(),

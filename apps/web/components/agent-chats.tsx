@@ -1,7 +1,8 @@
 "use client";
 
+import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUp, AtSign, CheckCheck, CircleUserRound, ExternalLink, LoaderCircle, MessageSquare, Plus, RefreshCw, Search, Settings2, Users } from 'lucide-react';
+import { ArrowLeft, ArrowUp, AtSign, CheckCheck, CircleUserRound, ExternalLink, LoaderCircle, MessageSquare, Plug, Plus, RefreshCw, Search, Settings2, Users } from 'lucide-react';
 import { SandboxWorkspace } from './sandbox-workspace';
 import './agent-chats.css';
 
@@ -18,11 +19,10 @@ async function json(path: string, init?: RequestInit) {
 }
 
 function Avatar({ bot, instance }: { bot: Bot; instance: string }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [bot.icon]);
+  const [failedSrc, setFailedSrc] = useState<string>();
   const version = /^avatar:([0-9a-f-]{36})$/.exec(bot.icon)?.[1];
   const src = version ? `/api/instances/${instance}/bots/${encodeURIComponent(bot.id)}/avatar?v=${version}` : bot.icon.startsWith('data:image/') ? bot.icon : undefined;
-  return <span className="agent-avatar">{src && !failed ? <img src={src} alt="" onError={() => setFailed(true)} /> : <CircleUserRound size={25} aria-hidden="true" />}</span>;
+  return <span className="agent-avatar">{src && failedSrc !== src ? <img src={src} alt="" onError={() => setFailedSrc(src)} /> : <CircleUserRound size={25} aria-hidden="true" />}</span>;
 }
 
 export function AgentChats({ workspace, onSettings }: { workspace: Workspace; onSettings: () => void }) {
@@ -55,13 +55,15 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
   const refreshBots = useCallback(async () => {
     try { setBots((await json(`${base}/bots`)).bots || []); } catch (error) { setError((error as Error).message); }
   }, [base]);
-  useEffect(() => { void refreshBots(); }, [refreshBots]);
+  useEffect(() => { const timer = setTimeout(() => { void refreshBots(); }, 0); return () => clearTimeout(timer); }, [refreshBots]);
 
   useEffect(() => {
     const selection = ++generation.current;
     let stopped = false;
     let pending = false;
-    setMessages([]); setThread(null); setLoading(true); setSending(false); setError(''); setMentions([]); setRetry(null);
+    const resetTimer = setTimeout(() => {
+      setMessages([]); setThread(null); setLoading(true); setSending(false); setError(''); setMentions([]); setRetry(null);
+    }, 0);
     async function refresh() {
       if (pending || stopped || document.hidden) return;
       pending = true;
@@ -99,7 +101,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
     const timer = setInterval(() => void refresh(), 2500);
     const foreground = () => { if (!document.hidden) { void refresh(); void refreshBots(); } };
     document.addEventListener('visibilitychange', foreground);
-    return () => { stopped = true; clearInterval(timer); document.removeEventListener('visibilitychange', foreground); };
+    return () => { stopped = true; clearTimeout(resetTimer); clearInterval(timer); document.removeEventListener('visibilitychange', foreground); };
   }, [base, selected, threadSelection, refreshBots]);
 
   useEffect(() => {
@@ -162,7 +164,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
       <button type="button" className={`agent-contact ${group ? 'selected' : ''}`} onClick={() => select('group')}><span className="agent-avatar group"><Users size={23} /></span><span><strong>Agent group</strong><small>{bots.length} agents · @ to mention</small></span></button>
       <h2>Direct messages</h2>
       <div className="agent-list">{bots.filter((bot) => bot.name.toLowerCase().includes(search.toLowerCase())).map((bot) => <button type="button" key={bot.id} className={`agent-contact ${selected === bot.id ? 'selected' : ''}`} onClick={() => select(bot.id)}><Avatar bot={bot} instance={workspace.id} /><span><strong>{bot.name}</strong><small>{activity.some((item) => item.botId === bot.id && item.state === 'working') ? 'Working…' : bot.id === 'main' ? 'Your main assistant' : 'Direct message'}</small></span></button>)}</div>
-      <footer><button type="button" onClick={onSettings}><Settings2 size={17} />Workspace settings</button></footer>
+      <footer><Link href={`/dashboard/marketplace?instance=${encodeURIComponent(workspace.id)}`}><Plug size={17} />Plugin Marketplace</Link><button type="button" onClick={onSettings}><Settings2 size={17} />Workspace settings</button></footer>
     </aside>
     <div className="agent-thread">
       <header><button type="button" className="agent-back" aria-label="Back to chats" onClick={() => setMobileThread(false)}><ArrowLeft size={20} /></button>{group ? <span className="agent-avatar group"><Users size={22} /></span> : current ? <Avatar bot={current} instance={workspace.id} /> : null}<div><h2>{group ? 'Agent group' : current?.name ?? 'Agent'}</h2><p>{group ? 'Everyone can read · Main replies unless tagged' : 'Direct conversation · separate from the group'}</p></div><button type="button" aria-label="Refresh agents" onClick={() => void refreshBots()}><RefreshCw size={18} /></button></header>

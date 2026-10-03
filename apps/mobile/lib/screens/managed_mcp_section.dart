@@ -40,15 +40,20 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
   bool busy = false;
   Timer? poll;
   int requestGeneration = 0;
+  int targetGeneration = 0;
 
   @override
   void initState() {
     super.initState();
     if (widget.superchargeRuntime) {
-      unawaited(_loadBots());
+      unawaited(
+        _loadBots().then((_) {
+          if (!mounted) return;
+          unawaited(_loadConversations());
+          unawaited(_status());
+        }),
+      );
       unawaited(_loadCatalog());
-      unawaited(_loadConversations());
-      unawaited(_status());
     }
   }
 
@@ -106,12 +111,15 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
 
   Future<void> _loadConversations() async {
     final selectedBot = botId;
+    final generation = targetGeneration;
     try {
       final response = await widget.api.listConversations(
         widget.instanceId,
         botId: selectedBot,
       );
-      if (!mounted || selectedBot != botId) return;
+      if (!mounted || generation != targetGeneration || selectedBot != botId) {
+        return;
+      }
       final entries = response['conversations'];
       setState(
         () => conversations = entries is List
@@ -127,7 +135,9 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
             : [],
       );
     } catch (failure) {
-      if (mounted && selectedBot == botId) setState(() => error = '$failure');
+      if (mounted && generation == targetGeneration && selectedBot == botId) {
+        setState(() => error = '$failure');
+      }
     }
   }
 
@@ -273,12 +283,21 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
               : (value) {
                   if (value == null || value == botId) return;
                   requestGeneration++;
+                  targetGeneration++;
+                  poll?.cancel();
+                  poll = null;
                   setState(() {
                     botId = value;
                     pluginId = null;
                     serverId = null;
                     bindings = {};
                     plugins = [];
+                    conversations = [];
+                    sessionController.clear();
+                    configurationController.clear();
+                    permissionsApproved = false;
+                    notice = null;
+                    error = null;
                   });
                   unawaited(_status());
                   unawaited(_loadConversations());
@@ -332,6 +351,7 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
                 : (value) => setState(() {
                     catalogId = value;
                     pluginId = value;
+                    configurationController.clear();
                     permissionsApproved = false;
                   }),
           ),
@@ -378,6 +398,7 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
                 : (value) => setState(() {
                     pluginId = value;
                     serverId = null;
+                    configurationController.clear();
                     permissionsApproved = false;
                   }),
           ),
@@ -488,7 +509,9 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
               DropdownMenuItem(
                 value: '${thread['sessionId']}',
                 child: Text(
-                  '${thread['title'] ?? 'Conversation'} · ${thread['sessionId'].toString().substring(0, 12)}…',
+                  '${thread['title'] ?? 'Conversation'} · ${thread['sessionId']}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
           ],
@@ -553,7 +576,7 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'Review, configure, trust, enable, and attach here. Run a separately consented non-destructive verification in the web dashboard before claiming readiness. This device never receives Plugin API management tokens.',
+          'Review, configure, approve, enable, and attach here. Verify the supported Echo tool only with separate consent in Marketplace; readiness comes from the VM. This device never receives Plugin API management tokens.',
           style: TextStyle(color: Vc.muted, fontSize: 11),
         ),
       ],

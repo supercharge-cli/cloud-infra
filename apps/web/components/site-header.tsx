@@ -46,6 +46,12 @@ export function SiteHeader() {
                 Dashboard
               </Link>
               <Link
+                href="/dashboard/marketplace"
+                className="rounded-md px-3 py-2 text-zinc-400 transition hover:bg-zinc-900 hover:text-white"
+              >
+                Marketplace
+              </Link>
+              <Link
                 href="/pollinations"
                 className="rounded-md px-3 py-2 text-zinc-400 transition hover:bg-zinc-900 hover:text-white"
               >

@@ -350,7 +350,7 @@ class VectraClient {
         .get(
           Uri.parse(
             'https://raw.githubusercontent.com/iotserver24/supercharge-app/'
-            'de50dfa59e9b7b7d2ee77b3e1f732242ac84e012'
+            '70fd462b2025c0cf625fcfb5c0676060f9c69b50'
             '/public/managed-mcp/catalog.json',
           ),
           headers: {'accept': 'application/json'},

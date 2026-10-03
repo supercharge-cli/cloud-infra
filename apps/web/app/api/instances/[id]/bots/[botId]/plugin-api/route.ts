@@ -67,8 +67,9 @@ export async function POST(req: Request, ctx: Ctx) {
   if (action === 'installCatalog' || (action === 'pluginAction' && (payload.pluginAction as { action?: unknown } | null)?.action === 'update')) {
     const catalogId = payload.catalogId;
     const catalogSha256 = payload.catalogSha256;
-    if (typeof catalogId !== 'string' || typeof catalogSha256 !== 'string' ||
-        !resolveCatalogEntry(catalogId, catalogSha256) ||
+    const release = typeof catalogId === 'string' && typeof catalogSha256 === 'string'
+      ? resolveCatalogEntry(catalogId, catalogSha256) : null;
+    if (!release || (release.targets && !release.targets.includes('supercharge-e2b')) ||
         (action === 'pluginAction' && payload.pluginId !== catalogId)) {
       return NextResponse.json({ error: 'Catalog release is unavailable' }, { status: 400 });
     }
