@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { BRAND } from '@/lib/brand';
 
@@ -27,8 +28,9 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-zinc-800/80 bg-black/80 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4">
-        <Link href="/" className="font-bold tracking-tight text-white">
-          Vectra<span className="text-orange-500">Cloud</span>
+        <Link href="/" className="flex shrink-0 items-center gap-2 font-bold tracking-tight text-white" aria-label="Vectra Cloud home">
+          <Image src="/logo.png" alt="" width={36} height={36} className="h-9 w-9 rounded-lg object-cover" priority />
+          <span className="hidden sm:inline">Vectra<span className="text-orange-500">Cloud</span></span>
         </Link>
         <nav className="flex flex-wrap items-center gap-1 text-sm">
           <Link

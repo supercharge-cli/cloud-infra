@@ -105,9 +105,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               color: Vc.green.withValues(alpha: 0.4),
                             ),
                           ),
-                          child: const Icon(
-                            Icons.cloud_outlined,
-                            color: Vc.green,
+                          clipBehavior: Clip.antiAlias,
+                          child: Image.asset(
+                            'assets/brand/logo.png',
+                            fit: BoxFit.cover,
                           ),
                         ),
                       ),

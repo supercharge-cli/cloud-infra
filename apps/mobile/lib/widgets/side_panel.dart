@@ -506,13 +506,21 @@ class _VectraSidePanelState extends State<VectraSidePanel> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(18, 22, 18, 20),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 22, 18, 20),
               child: Row(
                 children: [
-                  Icon(Icons.cloud_outlined, color: Vc.greenSoft, size: 23),
-                  SizedBox(width: 10),
-                  Expanded(
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(5),
+                    child: Image.asset(
+                      'assets/brand/logo.png',
+                      width: 28,
+                      height: 28,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
                     child: Text(
                       'Vectra Cloud',
                       maxLines: 1,

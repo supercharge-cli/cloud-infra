@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { BRAND } from '@/lib/brand';
 
 export function Footer() {
@@ -7,8 +8,9 @@ export function Footer() {
       <div className="mx-auto max-w-7xl">
         <div className="mb-8 grid grid-cols-2 gap-8 md:grid-cols-4">
           <div className="col-span-2 md:col-span-1">
-            <h3 className="mb-3 text-lg font-bold text-white">
-              Vectra<span className="text-orange-500">Cloud</span>
+            <h3 className="mb-3 flex items-center gap-2 text-lg font-bold text-white">
+              <Image src="/logo.png" alt="" width={36} height={36} className="h-9 w-9 rounded-lg object-cover" />
+              <span>Vectra<span className="text-orange-500">Cloud</span></span>
             </h3>
             <p className="text-sm leading-relaxed text-zinc-400">{BRAND.tagline}</p>
             <p className="mt-2 text-xs text-zinc-600">Proprietary · closed source</p>

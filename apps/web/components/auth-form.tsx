@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import {
@@ -156,8 +157,9 @@ export function AuthForm({
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-500/60 to-transparent" />
 
             <div className="mb-7">
-              <Link href="/" className="mb-5 inline-block text-lg font-bold tracking-tight">
-                Vectra<span className="text-orange-500">Cloud</span>
+              <Link href="/" className="mb-5 inline-flex items-center gap-2 text-lg font-bold tracking-tight" aria-label="Vectra Cloud home">
+                <Image src="/logo.png" alt="" width={36} height={36} className="h-9 w-9 rounded-lg object-cover" />
+                <span>Vectra<span className="text-orange-500">Cloud</span></span>
               </Link>
               <h1 className="text-2xl font-bold text-white sm:text-3xl">
                 {isSignup ? 'Create your account' : 'Sign in'}

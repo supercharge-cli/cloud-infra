@@ -23,7 +23,8 @@ class InstancesScreen extends StatefulWidget {
 
 class _InstancesScreenState extends State<InstancesScreen> {
   WorkspaceCatalog? _catalog;
-  WorkspaceCatalog get catalog => _catalog ?? context.read<SessionController>().workspaces;
+  WorkspaceCatalog get catalog =>
+      _catalog ?? context.read<SessionController>().workspaces;
   List<CloudInstance> get items => catalog.items;
   FreeQuota get quota => catalog.quota;
   PlanInfo? get plan => catalog.plan;
@@ -167,7 +168,9 @@ class _InstancesScreenState extends State<InstancesScreen> {
     return AppScaffold(
       isRoot: true,
       commands: {
-        DesktopCommand.newWorkspace: overlay == null && items.isEmpty ? _create : null,
+        DesktopCommand.newWorkspace: overlay == null && items.isEmpty
+            ? _create
+            : null,
         DesktopCommand.refresh: overlay == null ? _reload : null,
         DesktopCommand.search: _searchFocus.requestFocus,
       },
@@ -180,34 +183,49 @@ class _InstancesScreenState extends State<InstancesScreen> {
                   icon: const Icon(Icons.refresh, size: 20),
                 ),
                 const SizedBox(width: 8),
-                if (items.isEmpty) Center(
-                  child: FilledButton.icon(
-                    onPressed: overlay == null ? _create : null,
-                    icon: const Icon(Icons.add, size: 17),
-                    label: const Text('New workspace'),
+                if (items.isEmpty)
+                  Center(
+                    child: FilledButton.icon(
+                      onPressed: overlay == null ? _create : null,
+                      icon: const Icon(Icons.add, size: 17),
+                      label: const Text('New workspace'),
+                    ),
                   ),
-                ),
                 const SizedBox(width: 8),
               ]
             : null,
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        title: Row(
           children: [
-            Text(
-              'Vectra Cloud',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.4,
+            ClipRRect(
+              borderRadius: BorderRadius.circular(5),
+              child: Image.asset(
+                'assets/brand/logo.png',
+                width: 32,
+                height: 32,
+                fit: BoxFit.cover,
               ),
             ),
-            Text(
-              'Your sandboxes',
-              style: TextStyle(
-                fontSize: 12,
-                color: Vc.muted,
-                fontWeight: FontWeight.w400,
-              ),
+            const SizedBox(width: 10),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Vectra Cloud',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+                Text(
+                  'Your sandboxes',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Vc.muted,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ],
             ),
           ],
         ),

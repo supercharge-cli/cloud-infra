@@ -10,6 +10,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://infra.xibeai.in'),
   title: {
     default: `${BRAND.name} — ${BRAND.tagline}`,
     template: `%s | ${BRAND.name}`,
@@ -19,6 +20,7 @@ export const metadata: Metadata = {
     title: BRAND.name,
     description: BRAND.description,
     siteName: BRAND.name,
+    images: ['/logo.png'],
     type: 'website',
   },
 };

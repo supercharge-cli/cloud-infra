@@ -585,6 +585,13 @@ void main() {
     await _app(tester, client);
     expect(find.byKey(const ValueKey('desktop-sidebar')), findsOneWidget);
     expect(find.byType(MenuBar), findsOneWidget);
+    expect(
+      find.byWidgetPredicate((widget) =>
+          widget is Image &&
+          widget.image is AssetImage &&
+          (widget.image as AssetImage).assetName == 'assets/brand/logo.png'),
+      findsWidgets,
+    );
     expect(tester.takeException(), isNull);
     await _capture(tester, 'workspaces-desktop');
     await _shortcut(tester, LogicalKeyboardKey.keyF);
@@ -766,6 +773,13 @@ void main() {
     await _size(tester, const Size(390, 844));
     await _app(tester, _Client(), path: '/login');
     expect(find.byType(MenuBar), findsNothing);
+    expect(
+      find.byWidgetPredicate((widget) =>
+          widget is Image &&
+          widget.image is AssetImage &&
+          (widget.image as AssetImage).assetName == 'assets/brand/logo.png'),
+      findsWidgets,
+    );
     expect(tester.takeException(), isNull);
     await _capture(tester, 'login-mobile');
     debugDefaultTargetPlatformOverride = null;
