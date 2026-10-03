@@ -82,41 +82,51 @@ void main() {
     });
   }
 
-  test('Managed MCP catalog is read-only from the public source and install targets an owned bot route', () async {
-    final requests = <http.Request>[];
-    await http.runWithClient(() async {
-      final catalog = await api.managedMcpCatalog();
-      expect(catalog['plugins'], isA<List>());
-      await api.botManagedMcp('instance-1', 'main', {
-        'action': 'installCatalog',
-        'catalogId': 'vectra-echo',
-        'catalogSha256': 'a' * 64,
-        'requestId': 'test-request-1234',
-      });
-    }, () => MockClient((request) async {
-      requests.add(request);
-      if (request.method == 'GET') {
-        return http.Response(
-          jsonEncode({'schemaVersion': 1, 'plugins': []}),
-          200,
-        );
-      }
-      return http.Response(jsonEncode({'plugin': {'id': 'vectra-echo'}}), 200);
-    }));
-    expect(requests.map((request) => request.method), ['GET', 'POST']);
-    expect(
-      requests.first.url.toString(),
-      startsWith(
-        'https://raw.githubusercontent.com/iotserver24/supercharge-app/',
-      ),
-    );
-    expect(requests.first.url.path, endsWith('/public/managed-mcp/catalog.json'));
-    expect(requests.first.headers.containsKey('authorization'), isFalse);
-    expect(requests.last.url.path, '/api/instances/instance-1/bots/main/plugin-api');
-    expect(requests.last.headers['authorization'], 'Bearer test-token');
-    expect(jsonDecode(requests.last.body)['action'], 'installCatalog');
-  });
-
+  test(
+    'Managed MCP catalog uses the reviewed web API and install targets an owned bot route',
+    () async {
+      final requests = <http.Request>[];
+      await http.runWithClient(
+        () async {
+          final catalog = await api.managedMcpCatalog();
+          expect(catalog['plugins'], isA<List>());
+          await api.botManagedMcp('instance-1', 'main', {
+            'action': 'installCatalog',
+            'catalogId': 'vectra-echo',
+            'catalogSha256': 'a' * 64,
+            'requestId': 'test-request-1234',
+          });
+        },
+        () => MockClient((request) async {
+          requests.add(request);
+          if (request.method == 'GET') {
+            return http.Response(
+              jsonEncode({'schemaVersion': 1, 'plugins': []}),
+              200,
+            );
+          }
+          return http.Response(
+            jsonEncode({
+              'plugin': {'id': 'vectra-echo'},
+            }),
+            200,
+          );
+        }),
+      );
+      expect(requests.map((request) => request.method), ['GET', 'POST']);
+      expect(
+        requests.first.url.toString(),
+        'https://example.test/api/managed-mcp/catalog',
+      );
+      expect(requests.first.headers['authorization'], 'Bearer test-token');
+      expect(
+        requests.last.url.path,
+        '/api/instances/instance-1/bots/main/plugin-api',
+      );
+      expect(requests.last.headers['authorization'], 'Bearer test-token');
+      expect(jsonDecode(requests.last.body)['action'], 'installCatalog');
+    },
+  );
 
   test(
     'discovery reads the authenticated web API separately from the immutable catalog',

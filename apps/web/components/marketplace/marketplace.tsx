@@ -70,15 +70,16 @@ function TargetMarketplace({ instanceId, botId, catalog, skillMd, onSkillMdSearc
   const entry = catalog.find((item) => item.id === pluginId);
   const backHref = `/dashboard/marketplace?instance=${encodeURIComponent(instanceId)}&bot=${encodeURIComponent(botId)}`;
   const installed = market.plugins.find((item) => item.id === pluginId);
-  const [runtime, setRuntime] = useState<{ ready: boolean } | null>(null);
+  const [runtime, setRuntime] = useState<{ ready: boolean; supported?: boolean } | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const checkRuntime = useCallback(async () => {
     try {
-      setRuntime(await marketJson<{ ready: boolean }>(`/api/instances/${encodeURIComponent(instanceId)}/plugin-runtime`));
+      setRuntime(await marketJson<{ ready: boolean; supported?: boolean }>(`/api/instances/${encodeURIComponent(instanceId)}/plugin-runtime`));
       setRuntimeError(null);
     } catch { setRuntimeError('Plugin support status could not be confirmed. Refresh VM status or retry.'); }
   }, [instanceId]);
+  useEffect(() => { const timer = setTimeout(() => { void checkRuntime(); }, 0); return () => clearTimeout(timer); }, [checkRuntime]);
   const updateRuntime = async () => {
     if (!window.confirm('Update plugin support in this existing VM? Its sandbox ID, chats, workspace, and plugin data will be preserved.')) return;
     setUpdating(true); setRuntimeError(null);
@@ -92,7 +93,8 @@ function TargetMarketplace({ instanceId, botId, catalog, skillMd, onSkillMdSearc
     finally { setUpdating(false); }
   };
   return <>
-    {!market.loading && (runtime?.ready === false || (!market.allowedMcpOrigins.includes('https://api.githubcopilot.com') && !runtime?.ready)) && <div className="market-error" role="status"><p>This VM needs updated plugin support before GitHub MCP can be installed. This is an opt-in in-place update, not a new VM.</p><button className="market-button" disabled={updating} onClick={() => void updateRuntime()}>{updating ? 'Updating plugin support…' : 'Update plugin support in this VM'}</button></div>}
+    {runtime?.supported === false && <div className="market-error" role="status">This VM image has no Plugin API runtime. An in-place plugin update is not available for this image; your VM and workspace have not been changed.</div>}
+    {!market.loading && runtime !== null && runtime.supported !== false && (runtime.ready === false || (!market.allowedMcpOrigins.includes('https://api.githubcopilot.com') && !runtime?.ready)) && <div className="market-error" role="status"><p>This VM needs updated plugin support before GitHub MCP can be installed. This is an opt-in in-place update, not a new VM.</p><button className="market-button" disabled={updating} onClick={() => void updateRuntime()}>{updating ? 'Updating plugin support…' : 'Update plugin support in this VM'}</button></div>}
     {runtimeError && <div className="market-error" role="alert">{runtimeError} <button className="market-button" onClick={() => void checkRuntime()}>Retry status</button></div>}
     <div className="market-inventory-status"><span role="status">{market.busy ? `${market.busy}…` : market.loading ? 'Reading this bot’s installed plugins…' : `${market.plugins.length} installed in this bot`}</span><button className="market-button" disabled={!!market.busy || market.loading} onClick={() => void market.refresh()}><RefreshCw size={15} />Refresh VM status</button></div>
     {market.error && <div className="market-error" role="alert">{market.error}</div>}

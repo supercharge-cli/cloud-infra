@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../api/client.dart';
 import '../theme.dart';
@@ -54,6 +55,7 @@ class _BotAvatarState extends State<BotAvatar> {
     _cache.clear();
     _pending.clear();
   }
+
   Uint8List? bytes;
   String? requested;
 
@@ -67,7 +69,8 @@ class _BotAvatarState extends State<BotAvatar> {
   void didUpdateWidget(BotAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.instanceId != widget.instanceId ||
-        oldWidget.bot.id != widget.bot.id || oldWidget.bot.icon != widget.bot.icon ||
+        oldWidget.bot.id != widget.bot.id ||
+        oldWidget.bot.icon != widget.bot.icon ||
         oldWidget.client != widget.client) {
       _load();
     }
@@ -90,21 +93,29 @@ class _BotAvatarState extends State<BotAvatar> {
       requested = null;
       return;
     }
-    final key = '${widget.client.baseUrl}:${widget.instanceId}:${widget.bot.id}:$version';
+    final key =
+        '${widget.client.baseUrl}:${widget.instanceId}:${widget.bot.id}:$version';
     requested = key;
     bytes = _cache[key];
     if (bytes != null) return;
     final epoch = _epoch;
-    final request = _pending.putIfAbsent(key, () =>
-        widget.client.botAvatar(widget.instanceId, widget.bot.id, version));
-    request.then((image) {
-      if (epoch != _epoch || image.length > 1024 * 1024 || image.isEmpty) return;
-      if (_cache.length >= 24) _cache.remove(_cache.keys.first);
-      _cache[key] = image;
-      if (mounted && requested == key) setState(() => bytes = image);
-    }).catchError((Object _) {}).whenComplete(() {
-      if (_pending[key] == request) _pending.remove(key);
-    });
+    final request = _pending.putIfAbsent(
+      key,
+      () => widget.client.botAvatar(widget.instanceId, widget.bot.id, version),
+    );
+    request
+        .then((image) {
+          if (epoch != _epoch || image.length > 1024 * 1024 || image.isEmpty) {
+            return;
+          }
+          if (_cache.length >= 24) _cache.remove(_cache.keys.first);
+          _cache[key] = image;
+          if (mounted && requested == key) setState(() => bytes = image);
+        })
+        .catchError((Object _) {})
+        .whenComplete(() {
+          if (_pending[key] == request) _pending.remove(key);
+        });
   }
 
   @override
@@ -114,8 +125,21 @@ class _BotAvatarState extends State<BotAvatar> {
       radius: widget.radius,
       backgroundColor: Vc.green.withValues(alpha: 0.12),
       child: image == null
-          ? Icon(botPresetIcon(widget.bot.icon), color: Vc.greenSoft,
-              size: widget.radius * 1.05)
+          ? widget.bot.icon == 'github'
+                ? SvgPicture.asset(
+                    'assets/icons/github.svg',
+                    width: widget.radius * 1.05,
+                    height: widget.radius * 1.05,
+                    colorFilter: const ColorFilter.mode(
+                      Vc.greenSoft,
+                      BlendMode.srcIn,
+                    ),
+                  )
+                : Icon(
+                    botPresetIcon(widget.bot.icon),
+                    color: Vc.greenSoft,
+                    size: widget.radius * 1.05,
+                  )
           : ClipOval(
               child: Image.memory(
                 image,

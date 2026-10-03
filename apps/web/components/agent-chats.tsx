@@ -2,12 +2,14 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUp, AtSign, CheckCheck, CircleUserRound, ExternalLink, LoaderCircle, MessageSquare, Plug, Plus, RefreshCw, Search, Settings2, Users } from 'lucide-react';
+import { ArrowLeft, ArrowUp, AtSign, CheckCheck, CircleUserRound, ExternalLink, Github, LoaderCircle, MessageSquare, Plug, Plus, RefreshCw, Search, Settings2, Users } from 'lucide-react';
 import { SandboxWorkspace } from './sandbox-workspace';
+import { GitHubCliAuth } from './github-cli-auth';
+import { GitHubTokenReveal } from './github-token-reveal';
 import './agent-chats.css';
 
 type Bot = { id: string; name: string; icon: string; instructions?: string; defaultFolder?: string };
-type Message = { id: string; text: string; senderBotId?: string | null; sessionId?: string; createdAt: number; pending?: boolean; failed?: boolean };
+type Message = { id: string; text: string; senderBotId?: string | null; sessionId?: string; createdAt: number; pending?: boolean; failed?: boolean; sensitive?: boolean };
 type Activity = { botId: string; sessionId: string; state: string };
 type Workspace = { id: string; name: string; sandboxId?: string; status: string };
 
@@ -22,7 +24,7 @@ function Avatar({ bot, instance }: { bot: Bot; instance: string }) {
   const [failedSrc, setFailedSrc] = useState<string>();
   const version = /^avatar:([0-9a-f-]{36})$/.exec(bot.icon)?.[1];
   const src = version ? `/api/instances/${instance}/bots/${encodeURIComponent(bot.id)}/avatar?v=${version}` : bot.icon.startsWith('data:image/') ? bot.icon : undefined;
-  return <span className="agent-avatar">{src && failedSrc !== src ? <img src={src} alt="" onError={() => setFailedSrc(src)} /> : <CircleUserRound size={25} aria-hidden="true" />}</span>;
+  return <span className="agent-avatar">{src && failedSrc !== src ? <img src={src} alt="" onError={() => setFailedSrc(src)} /> : bot.icon === 'github' ? <Github size={25} aria-hidden="true" /> : <CircleUserRound size={25} aria-hidden="true" />}</span>;
 }
 
 export function AgentChats({ workspace, onSettings }: { workspace: Workspace; onSettings: () => void }) {
@@ -30,6 +32,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
   const [bots, setBots] = useState<Bot[]>([]);
   const [selected, setSelected] = useState<string>('group');
   const [thread, setThread] = useState<string | null>(null);
+  const [directThread, setDirectThread] = useState(false);
   const [threadSelection, setThreadSelection] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
@@ -62,7 +65,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
     let stopped = false;
     let pending = false;
     const resetTimer = setTimeout(() => {
-      setMessages([]); setThread(null); setLoading(true); setSending(false); setError(''); setMentions([]); setRetry(null);
+      setMessages([]); setThread(null); setDirectThread(false); setLoading(true); setSending(false); setError(''); setMentions([]); setRetry(null);
     }, 0);
     async function refresh() {
       if (pending || stopped || document.hidden) return;
@@ -89,7 +92,8 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
           ]);
           if (stopped || generation.current !== selection) return;
           setThread(id);
-          setMessages((data.messages || []).map((row: { id: string; role: string; content: string }) => ({ id: row.id, text: row.content, senderBotId: row.role === 'user' ? null : selected, sessionId: id, createdAt: 0 })));
+          setDirectThread(conversation.conversations?.some((row: { sessionId: string; source?: string }) => row.sessionId === id && row.source === 'direct') === true);
+          setMessages((data.messages || []).map((row: { id: string; role: string; content: string; sensitive?: boolean }) => ({ id: row.id, text: row.content, senderBotId: row.role === 'user' ? null : selected, sessionId: id, createdAt: 0, sensitive: row.sensitive === true })));
           setActivity((status.conversations || []).filter((row: { busy?: boolean; queued?: boolean }) => row.busy || row.queued).map((row: { botId: string; sessionId: string; busy: boolean }) => ({ botId: row.botId, sessionId: row.sessionId, state: row.busy ? 'working' : 'queued' })));
         }
         setLoading(false);
@@ -110,7 +114,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
   }, [messages, sending]);
 
   function select(id: string, session?: string) {
-    if (id !== selected || (session ?? null) !== threadSelection) { generation.current++; setMessages([]); setThread(null); setLoading(true); setSending(false); }
+    if (id !== selected || (session ?? null) !== threadSelection) { generation.current++; setMessages([]); setThread(null); setDirectThread(false); setLoading(true); setSending(false); }
     if (session) { const url = new URL(window.location.href); url.searchParams.set('thread', session); history.replaceState(null, '', url); }
     else { const url = new URL(window.location.href); url.searchParams.delete('thread'); history.replaceState(null, '', url); }
     setThreadSelection(session ?? null); setSelected(id); setMobileThread(true);
@@ -167,10 +171,18 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
       <footer><Link href={`/dashboard/marketplace?instance=${encodeURIComponent(workspace.id)}`}><Plug size={17} />Plugin Marketplace</Link><button type="button" onClick={onSettings}><Settings2 size={17} />Workspace settings</button></footer>
     </aside>
     <div className="agent-thread">
-      <header><button type="button" className="agent-back" aria-label="Back to chats" onClick={() => setMobileThread(false)}><ArrowLeft size={20} /></button>{group ? <span className="agent-avatar group"><Users size={22} /></span> : current ? <Avatar bot={current} instance={workspace.id} /> : null}<div><h2>{group ? 'Agent group' : current?.name ?? 'Agent'}</h2><p>{group ? 'Everyone can read · Main replies unless tagged' : 'Direct conversation · separate from the group'}</p></div><button type="button" aria-label="Refresh agents" onClick={() => void refreshBots()}><RefreshCw size={18} /></button></header>
+      <header><button type="button" className="agent-back" aria-label="Back to chats" onClick={() => setMobileThread(false)}><ArrowLeft size={20} /></button>{group ? <span className="agent-avatar group"><Users size={22} /></span> : current ? <Avatar bot={current} instance={workspace.id} /> : null}<div><h2>{group ? 'Agent group' : current?.name ?? 'Agent'}</h2><p>{group ? 'Everyone can read · Chief replies unless tagged' : 'Direct conversation · separate from the group'}</p></div><button type="button" aria-label="Refresh agents" onClick={() => void refreshBots()}><RefreshCw size={18} /></button></header>
+      {!group && selected === 'github' && directThread && <GitHubCliAuth base={base} conversationId={thread} />}
+      {!group && selected === 'github' && directThread && thread && <GitHubTokenReveal instanceId={workspace.id} chatId={thread} onReveal={() => {
+        const selection = generation.current;
+        void json(`${base}/chat/conversations/${encodeURIComponent(thread)}?botId=github`).then((data) => {
+          if (generation.current !== selection) return;
+          setMessages((data.messages || []).map((row: { id: string; role: string; content: string; sensitive?: boolean }) => ({ id: row.id, text: row.content, senderBotId: row.role === 'user' ? null : 'github', sessionId: thread, createdAt: 0, sensitive: row.sensitive === true })));
+        }).catch(() => undefined);
+      }} />}
       {error && <div className="agent-error" role="alert">{error}{retry && <button type="button" onClick={() => void send(true)}>Retry message</button>}</div>}
       {!!activity.length && <div className="agent-activity">{activity.map((item, index) => <button type="button" key={`${item.sessionId}-${index}`} onClick={() => select(item.botId, item.sessionId)}>{item.state === 'working' && <LoaderCircle size={13} className="agent-working" />}{bots.find((bot) => bot.id === item.botId)?.name ?? item.botId} · {item.state}<ExternalLink size={12} /></button>)}</div>}
-      <div className="agent-messages" ref={scroller} aria-live="polite">{loading ? <p className="agent-empty">Opening {group ? 'group chat' : current?.name ?? 'agent'}…</p> : !messages.length ? <div className="agent-empty"><MessageSquare size={42} /><h3>Your agents, together</h3><p>Ask a question or tag an agent with @. Group messages are shared; direct chats stay separate.</p></div> : messages.map((message) => { const bot = bots.find((bot) => bot.id === message.senderBotId); return <article key={message.id} className={`agent-message ${!message.senderBotId ? 'mine' : ''}`}>{message.senderBotId && <button type="button" className="agent-author" onClick={() => select(message.senderBotId!, message.sessionId)}>{bot?.name ?? message.senderBotId}<ExternalLink size={11} /></button>}<div>{message.text}</div><small>{message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}{!message.senderBotId && <CheckCheck size={13} />}</small></article>; })}</div>
+      <div className="agent-messages" ref={scroller} aria-live="polite">{loading ? <p className="agent-empty">Opening {group ? 'group chat' : current?.name ?? 'agent'}…</p> : !messages.length ? <div className="agent-empty"><MessageSquare size={42} /><h3>Your agents, together</h3><p>Ask a question or tag an agent with @. Group messages are shared; direct chats stay separate.</p></div> : messages.map((message) => { const bot = bots.find((bot) => bot.id === message.senderBotId); return <article key={message.id} className={`agent-message ${!message.senderBotId ? 'mine' : ''}`}>{message.senderBotId && <button type="button" className="agent-author" onClick={() => select(message.senderBotId!, message.sessionId)}>{bot?.name ?? message.senderBotId}<ExternalLink size={11} /></button>}<div>{message.sensitive && <strong className="agent-sensitive-label">Sensitive credential · saved in this private chat</strong>}{message.text}</div><small>{message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}{!message.senderBotId && <CheckCheck size={13} />}</small></article>; })}</div>
       {mentionOpen && <div className="agent-mentions">{bots.map((bot) => <button type="button" key={bot.id} onClick={() => { setDrafts((all) => ({ ...all, [selected]: `${draft.replace(/@[^@\n]*$/, '')}@${bot.name} ` })); setMentions((ids) => [...new Set([...ids, bot.id])]); setMentionOpen(false); }}><Avatar bot={bot} instance={workspace.id} />{bot.name}</button>)}</div>}
       <form className="agent-composer" onSubmit={(e) => { e.preventDefault(); void send(); }}>{group && <button type="button" aria-label="Mention an agent" onClick={() => setMentionOpen(!mentionOpen)}><AtSign size={20} /></button>}<textarea aria-label={group ? 'Message the group' : `Message ${current?.name ?? 'agent'}`} placeholder={group ? 'Message the group · @ to mention' : 'Write a message…'} value={draft} rows={1} onChange={(e) => { setDrafts((all) => ({ ...all, [selected]: e.target.value })); if (group) setMentionOpen(/@[^@\n ]*$/.test(e.target.value)); }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} /><button className="agent-send" type="submit" aria-label="Send message" disabled={!draft.trim() || loading || sending}>{sending ? <LoaderCircle size={20} /> : <ArrowUp size={20} />}</button></form>
     </div>

@@ -12,6 +12,8 @@ import { relayBrowserVnc } from "./browser-vnc.js";
 import { runtimeHasWork } from "./runtime-activity.js";
 import { cycleRequired, cycleThreshold, sandboxRunStartedAt, runContinuousCycle } from "./continuous-run.js";
 import { LifecycleStore, type LifecycleRecord } from "./lifecycle-store.js";
+import { pluginRuntimeCommand } from "./plugin-runtime-update.js";
+import { githubMcpTokenCommand } from "./github-token-read.js";
 
 type SandboxLike = {
   sandboxId?: string;
@@ -1464,6 +1466,28 @@ async function closeSession(session: SessionRecord): Promise<void> {
   }
 }
 
+const pluginRuntimeLocks = new Set<string>();
+
+async function pinnedPluginRuntime(session: SessionRecord, mode: "status" | "update" | "rollback" | "confirm"): Promise<Record<string, unknown>> {
+  if (!session.sandbox.commands?.run) throw new Error("E2B command control is unavailable");
+  if (mode === "status" || mode === "update") {
+    const preflight = await session.sandbox.commands.run("test -d /opt/vectra/plugin-api", { user: "root", cwd: "/", timeoutMs: 10_000 });
+    if (preflight.exitCode !== 0) {
+      if (mode === "status") return { ready: false, supported: false };
+      throw new Error("This VM image has no Plugin API runtime; in-place update is unavailable for this image");
+    }
+  }
+  const result = await session.sandbox.commands.run(pluginRuntimeCommand(mode), {
+    user: "root",
+    cwd: "/opt/vectra/plugin-api",
+    timeoutMs: mode === "update" ? 120_000 : 30_000,
+  });
+  if (result.exitCode !== 0) throw new Error(`Pinned runtime ${mode} failed; no unverified update was confirmed`);
+  const data = JSON.parse(String(result.stdout || "")) as Record<string, unknown>;
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid E2B runtime response");
+  return data;
+}
+
 const server = createServer(async (req, res) => {
   try {
     const method = req.method || "GET";
@@ -1501,6 +1525,96 @@ const server = createServer(async (req, res) => {
         error: true,
         message: "Unauthorized",
       });
+      return;
+    }
+
+    const githubTokenMatch = url.pathname.match(/^\/sessions\/([^/]+)\/github-mcp-token$/);
+    if (method === "POST" && githubTokenMatch) {
+      if (!authToken) { sendJson(res, 503, { error: "Authenticated gateway token required" }); return; }
+      const session = sessions.get(decodeURIComponent(githubTokenMatch[1] || ""));
+      if (!session || session.runtime !== "supercharge") { sendJson(res, 404, { error: "Supercharge session not found" }); return; }
+      const body = await readJson<{ sandboxId?: unknown; botId?: unknown }>(req);
+      if (!body || Object.keys(body).some((key) => key !== "sandboxId" && key !== "botId") ||
+          body.sandboxId !== session.sandboxId || body.botId !== "github") {
+        sendJson(res, 400, { error: "Current VM and GitHub bot are required" }); return;
+      }
+      try {
+        await touchSession(session);
+        if (!session.sandbox.commands?.run) throw new Error('E2B command control unavailable');
+        const result = await session.sandbox.commands.run(githubMcpTokenCommand(), {
+          user: "root", cwd: "/opt/vectra/plugin-api", timeoutMs: 15_000,
+        });
+        if (result.exitCode !== 0) { sendJson(res, 404, { error: "GitHub MCP credential unavailable" }); return; }
+        const output = JSON.parse(String(result.stdout || "")) as { token?: unknown };
+        if (typeof output.token !== "string" || !output.token || output.token.length > 8192) throw new Error("Invalid credential result");
+        sendJson(res, 200, { token: output.token, sandboxId: session.sandboxId });
+      } catch {
+        sendJson(res, 502, { error: "GitHub MCP credential could not be retrieved" });
+      }
+      return;
+    }
+
+    const pluginRuntimeMatch = url.pathname.match(/^\/sessions\/([^/]+)\/plugin-runtime$/);
+    if (pluginRuntimeMatch && (method === "GET" || method === "POST")) {
+      if (!authToken) {
+        sendJson(res, 503, { error: "Authenticated gateway token required" });
+        return;
+      }
+      const session = sessions.get(decodeURIComponent(pluginRuntimeMatch[1] || ""));
+      if (!session || session.runtime !== "supercharge") {
+        sendJson(res, 404, { error: "Supercharge session not found" });
+        return;
+      }
+      let botId = "";
+      if (method === "POST") {
+        if (Number(req.headers["content-length"] || 0) > 256) {
+          sendJson(res, 413, { error: "Plugin runtime request too large" });
+          return;
+        }
+        const body = await readJson<{ sandboxId?: unknown; botId?: unknown }>(req);
+        if (!body || Object.keys(body).some((key) => key !== "sandboxId" && key !== "botId") ||
+            body.sandboxId !== session.sandboxId || typeof body.botId !== "string" ||
+            !/^[A-Za-z0-9_-]{1,128}$/.test(body.botId)) {
+          sendJson(res, 400, { error: "Sandbox generation and bot are required" });
+          return;
+        }
+        botId = body.botId;
+      }
+      if (pluginRuntimeLocks.has(session.sandboxId)) {
+        sendJson(res, 409, { error: "Plugin runtime update is already in progress" });
+        return;
+      }
+      pluginRuntimeLocks.add(session.sandboxId);
+      try {
+        await touchSession(session);
+        const before = session.sandboxId;
+        const result = await pinnedPluginRuntime(session, method === "GET" ? "status" : "update");
+        if (method === "POST" && result.updated === true) {
+          try {
+            const health = await superchargeDaemonFetch(session, "/health", { signal: AbortSignal.timeout(10_000) });
+            if (!health.ok) throw new Error("Daemon health check failed");
+            const status = await superchargeDaemonFetch(session, `/v1/app/bots/${encodeURIComponent(botId)}/plugin-api`, {
+              method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({ action: "status" }), signal: AbortSignal.timeout(30_000),
+            });
+            const data = await status.json() as { service?: { allowedMcpOrigins?: string[] }; inventory?: { plugins?: unknown[] } };
+            if (!status.ok || !Array.isArray(data.inventory?.plugins) ||
+                !data.service?.allowedMcpOrigins?.includes("https://api.githubcopilot.com")) {
+              throw new Error("Plugin API health or GitHub allowlist check failed");
+            }
+            await pinnedPluginRuntime(session, "confirm");
+          } catch {
+            await pinnedPluginRuntime(session, "rollback");
+            throw new Error("Plugin API health check failed; previous controller and catalog restored");
+          }
+        }
+        if (session.sandboxId !== before) throw new Error("Sandbox identity changed unexpectedly");
+        sendJson(res, 200, { success: true, sandboxId: before, ...result });
+      } catch (error) {
+        sendJson(res, 502, { error: (error as Error).message.slice(0, 240) });
+      } finally {
+        pluginRuntimeLocks.delete(session.sandboxId);
+      }
       return;
     }
 

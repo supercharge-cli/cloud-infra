@@ -37,6 +37,8 @@ class MarketplaceController extends ChangeNotifier {
   bool loadingInventory = false;
   bool loadingConversations = false;
   bool inventoryKnown = false;
+  bool? pluginRuntimeReady;
+  bool? pluginRuntimeSupported;
   bool busy = false;
   String? workspaceError;
   String? catalogError;
@@ -208,6 +210,8 @@ class MarketplaceController extends ChangeNotifier {
     bindings = {};
     conversations = [];
     inventoryKnown = false;
+    pluginRuntimeReady = null;
+    pluginRuntimeSupported = null;
     loadingInventory = false;
     loadingConversations = false;
     targetError = null;
@@ -262,6 +266,49 @@ class MarketplaceController extends ChangeNotifier {
     _emit();
     if (botId != null) {
       await Future.wait([refreshInventory(), loadConversations()]);
+    }
+  }
+
+  Future<void> refreshPluginRuntime() async {
+    if (!supported || instanceId == null) return;
+    final epoch = _targetEpoch;
+    try {
+      final status = await api.pluginRuntimeStatus(instanceId!);
+      if (!_current(epoch)) return;
+      pluginRuntimeReady = status['ready'] == true;
+      pluginRuntimeSupported = status['supported'] != false;
+      _emit();
+    } catch (_) {
+      if (!_current(epoch)) return;
+      pluginRuntimeReady = null;
+      pluginRuntimeSupported = null;
+      _emit();
+    }
+  }
+
+  Future<void> updatePluginRuntime() async {
+    if (!supported || instanceId == null || botId == null || busy) return;
+    final epoch = _targetEpoch;
+    busy = true;
+    actionError = null;
+    notice = null;
+    _emit();
+    try {
+      await api.updatePluginRuntime(instanceId!, botId!);
+      if (!_current(epoch)) return;
+      await Future.wait([refreshPluginRuntime(), refreshInventory()]);
+      notice =
+          'Plugin support updated in this same VM. Review permissions before enabling or attaching a plugin.';
+    } catch (_) {
+      if (!_current(epoch)) return;
+      actionError =
+          'Update could not be confirmed. No VM was recreated. Refresh VM status before retrying.';
+      await refreshPluginRuntime();
+    } finally {
+      if (_current(epoch)) {
+        busy = false;
+        _emit();
+      }
     }
   }
 

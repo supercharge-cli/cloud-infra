@@ -150,6 +150,46 @@ class MarketplaceTarget extends StatelessWidget {
             ),
           if (c.targetError != null)
             MarketplaceMessage(c.targetError!, error: true),
+          if (c.pluginRuntimeSupported == false)
+            const MarketplaceMessage(
+              'This VM image has no Plugin API runtime. An in-place plugin update is not available for this image; the VM and workspace were not changed.',
+            ),
+          if (c.botId != null &&
+              c.pluginRuntimeSupported == true &&
+              (c.pluginRuntimeReady == false ||
+                  (c.inventoryKnown &&
+                      !c.allowedMcpOrigins.contains(
+                        'https://api.githubcopilot.com',
+                      )) ||
+                  (!c.inventoryKnown && c.targetError != null)))
+            MarketplaceMessage(
+              'This existing VM may need updated plugin support for GitHub MCP. The update preserves its sandbox ID, chats, workspace and plugin data.',
+              action: c.busy ? null : 'Update plugin support in this VM',
+              onAction: c.busy
+                  ? null
+                  : () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Update plugin support?'),
+                          content: const Text(
+                            'Update the controller and reviewed catalog in this same VM? This will not recreate your VM.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Update'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed == true) await c.updatePluginRuntime();
+                    },
+            ),
           TextButton.icon(
             onPressed: c.busy || c.loadingBots || c.loadingInventory
                 ? null

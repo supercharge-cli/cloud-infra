@@ -1,5 +1,9 @@
 import 'dart:io';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:vectra_cloud/api/client.dart';
+import 'package:vectra_cloud/chat/bot_avatar.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:vectra_cloud/api/models.dart';
 import 'package:vectra_cloud/chat/chat_store.dart';
@@ -40,13 +44,46 @@ void main() {
     expect(ConversationMeta.fromJson({'sessionId': 'old'}).botId, 'main');
   });
 
+  testWidgets('GitHub bot avatar uses a bundled recognizable SVG', (
+    tester,
+  ) async {
+    final github = BotProfile.fromJson({
+      'id': 'github',
+      'name': 'GitHub',
+      'icon': 'github',
+      'instructions': '',
+      'defaultFolder': '/home/user/workspace/bots/github',
+      'revision': 1,
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: BotAvatar(
+            bot: github,
+            instanceId: 'instance',
+            client: VectraClient(baseUrl: 'https://example.com'),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(SvgPicture), findsOneWidget);
+    expect(find.byIcon(Icons.smart_toy_outlined), findsNothing);
+  });
+
   test('profile picture reference cannot become an arbitrary avatar URL', () {
     BotProfile profile(String icon) => BotProfile.fromJson({
-      'id': 'a', 'name': 'A', 'icon': icon, 'instructions': '',
-      'defaultFolder': '/home/user/workspace/bots/a', 'revision': 1,
+      'id': 'a',
+      'name': 'A',
+      'icon': icon,
+      'instructions': '',
+      'defaultFolder': '/home/user/workspace/bots/a',
+      'revision': 1,
     });
-    expect(profile('avatar:12345678-1234-4123-8123-123456789abc').avatarVersion,
-        '12345678-1234-4123-8123-123456789abc');
+    expect(
+      profile('avatar:12345678-1234-4123-8123-123456789abc').avatarVersion,
+      '12345678-1234-4123-8123-123456789abc',
+    );
     expect(profile('avatar:../../instance').avatarVersion, isNull);
     expect(profile('🤖').isImage, false);
   });

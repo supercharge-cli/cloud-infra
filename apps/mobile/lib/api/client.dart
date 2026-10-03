@@ -307,6 +307,66 @@ class VectraClient {
     timeout: const Duration(seconds: 280),
   );
 
+  Future<Map<String, dynamic>> githubAuthStatus(String id) =>
+      _json('GET', '/api/instances/$id/github-auth', timeout: _slow);
+
+  Future<Map<String, dynamic>> githubAuthStart(
+    String id,
+    String conversationId,
+    String requestId,
+  ) => _json(
+    'POST',
+    '/api/instances/$id/github-auth',
+    body: {
+      'action': 'start',
+      'conversationId': conversationId,
+      'requestId': requestId,
+    },
+    timeout: _slow,
+  );
+
+  Future<Map<String, dynamic>> githubAuthDone(String id) => _json(
+    'POST',
+    '/api/instances/$id/github-auth',
+    body: {'action': 'done'},
+    timeout: _slow,
+  );
+
+  Future<Map<String, dynamic>> githubAuthCancel(String id) =>
+      _json('DELETE', '/api/instances/$id/github-auth', timeout: _slow);
+
+  Future<String> githubToken(
+    String id,
+    String chatId,
+    String source,
+    String requestId,
+  ) async {
+    final data = await _json(
+      'POST',
+      '/api/instances/$id/github-token',
+      body: {
+        'botId': 'github',
+        'chatId': chatId,
+        'source': source,
+        'confirmation': 'Send token to this chat',
+        'requestId': requestId,
+      },
+      timeout: _slow,
+    );
+    final token = data['token'];
+    if (token is! String ||
+        token.isEmpty ||
+        data['chatId'] != chatId ||
+        data['botId'] != 'github' ||
+        data['source'] != source) {
+      throw ApiException(
+        502,
+        'The GitHub token response could not be verified.',
+      );
+    }
+    return token;
+  }
+
   Future<void> sendChat(
     String id,
     String text, {
@@ -342,29 +402,9 @@ class VectraClient {
     Map<String, dynamic> input,
   ) => _json('POST', '/api/instances/$id/bots', body: input, timeout: _slow);
 
-  /// Shared reviewed Managed MCP catalog. Read from the same public immutable
-  /// source as the desktop app; it carries no credentials and install still
-  /// goes through the owner-checked bot route.
-  Future<Map<String, dynamic>> managedMcpCatalog() async {
-    final res = await http
-        .get(
-          Uri.parse(
-            'https://raw.githubusercontent.com/iotserver24/supercharge-app/'
-            '1192b392b1bc7e96ea620d19f11356f9fba6d9d9'
-            '/public/managed-mcp/catalog.json',
-          ),
-          headers: {'accept': 'application/json'},
-        )
-        .timeout(_fast);
-    if (res.statusCode >= 400) {
-      throw ApiException(res.statusCode, 'Shared catalog is unavailable.');
-    }
-    final decoded = jsonDecode(res.body);
-    if (decoded is! Map<String, dynamic>) {
-      throw ApiException(502, 'Shared catalog is invalid.');
-    }
-    return decoded;
-  }
+  /// Web, mobile and VM use the same reviewed release inventory.
+  Future<Map<String, dynamic>> managedMcpCatalog() =>
+      _json('GET', '/api/managed-mcp/catalog', timeout: _fast);
 
   Future<Map<String, dynamic>> managedMcpDiscovery() =>
       _json('GET', '/api/managed-mcp/catalog', timeout: _fast);
@@ -382,6 +422,17 @@ class VectraClient {
     body: action,
     timeout: _slow,
   );
+
+  Future<Map<String, dynamic>> pluginRuntimeStatus(String id) =>
+      _json('GET', '/api/instances/$id/plugin-runtime', timeout: _fast);
+
+  Future<Map<String, dynamic>> updatePluginRuntime(String id, String botId) =>
+      _json(
+        'POST',
+        '/api/instances/$id/plugin-runtime',
+        body: {'botId': botId, 'confirm': true},
+        timeout: const Duration(seconds: 160),
+      );
 
   Future<Map<String, dynamic>> updateBot(
     String id,

@@ -12,7 +12,7 @@ function fixture() {
   const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
   const deliveries: any[] = [];
   const api = new Function('getDb', 'getBot', 'nanoid', 'proxyInbox', `${js};return {createBotJob, deliverBotJob};`)(
-    async () => ({ collection: () => collection }), async (_: unknown, id: string) => ['main', 'alpha', 'beta'].includes(id) ? { id } : null,
+    async () => ({ collection: () => collection }), async (_: unknown, id: string) => ['main', 'github', 'alpha', 'beta'].includes(id) ? { id } : null,
     () => `job-${++seq}`, async (_: unknown, __: unknown, init: any) => { deliveries.push(JSON.parse(init.body)); return { ok: true }; },
   );
   return { api, jobs, deliveries };
@@ -26,6 +26,18 @@ test('delegation records exact sender conversation and sends callback identity',
   assert.equal(job.senderSessionId, 'private-original');
   assert.equal(deliveries[0].senderBotId, 'main');
   assert.equal(deliveries[0].senderSessionId, 'private-original');
+});
+
+test('Chief delegates to GitHub with a durable return to the originating conversation', async () => {
+  const { api, deliveries } = fixture();
+  const { job } = await api.createBotJob(instance, 'github', 'Review issue 12', 'chief-github-1',
+    { botId: 'main', sessionId: 'chief-direct-chat' });
+  await api.deliverBotJob(instance, job);
+  assert.equal(job.recipientBotId,'github');
+  assert.equal(job.senderSessionId,'chief-direct-chat');
+  assert.equal(deliveries[0].botId,'github');
+  assert.equal(deliveries[0].senderSessionId,'chief-direct-chat');
+  assert.match(deliveries[0].text,/Review issue 12/);
 });
 
 test('specialist may delegate to Main and duplicate IDs cannot cross origins', async () => {

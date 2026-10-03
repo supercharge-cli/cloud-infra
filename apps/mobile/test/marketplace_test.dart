@@ -588,7 +588,8 @@ void main() {
       await tester.pump();
       await scrollTo(tester, find.text('No plugins match your search.'), 250);
       expect(find.text('No plugins match your search.'), findsOneWidget);
-      await scrollTo(tester, find.byType(TextField).first, -250);
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, 500));
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'vectra');
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
