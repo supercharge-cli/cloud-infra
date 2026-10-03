@@ -15,11 +15,14 @@ class MarketplaceController extends ChangeNotifier {
   int _statusEpoch = 0;
   int _workspaceEpoch = 0;
   int _catalogEpoch = 0;
+  int _discoveryEpoch = 0;
   int _conversationEpoch = 0;
   Timer? _poll;
 
   List<CloudInstance> workspaces = [];
   List<Map<String, dynamic>> catalog = [];
+  List<DiscoveryPlugin> discovery = [];
+  Map<String, dynamic> discoverySource = {};
   List<Map<String, dynamic>> bots = [];
   List<Map<String, dynamic>> inventory = [];
   List<Map<String, dynamic>> conversations = [];
@@ -28,6 +31,7 @@ class MarketplaceController extends ChangeNotifier {
   String? botId;
   bool loadingWorkspaces = true;
   bool loadingCatalog = true;
+  bool loadingDiscovery = true;
   bool loadingBots = false;
   bool loadingInventory = false;
   bool loadingConversations = false;
@@ -35,6 +39,7 @@ class MarketplaceController extends ChangeNotifier {
   bool busy = false;
   String? workspaceError;
   String? catalogError;
+  String? discoveryError;
   String? targetError;
   String? conversationError;
   String? actionError;
@@ -81,6 +86,7 @@ class MarketplaceController extends ChangeNotifier {
   Future<void> load({String? initialInstanceId, String? initialBotId}) async {
     await Future.wait([
       loadCatalog(),
+      loadDiscovery(),
       loadWorkspaces(
         preferredId: initialInstanceId,
         preferredBot: initialBotId,
@@ -107,6 +113,39 @@ class MarketplaceController extends ChangeNotifier {
     } finally {
       if (!_disposed && epoch == _catalogEpoch) {
         loadingCatalog = false;
+        _emit();
+      }
+    }
+  }
+
+  Future<void> loadDiscovery() async {
+    final epoch = ++_discoveryEpoch;
+    loadingDiscovery = true;
+    discoveryError = null;
+    _emit();
+    try {
+      final response = await api.managedMcpDiscovery();
+      if (_disposed || epoch != _discoveryEpoch) return;
+      final data = marketplaceMap(response['discovery']);
+      final source = marketplaceMap(data['source']);
+      if (data['plugins'] is! List ||
+          source['repository'] != 'openai/plugins' ||
+          source['commit'] is! String ||
+          !RegExp(r'^[a-fA-F0-9]{40}$').hasMatch(source['commit'] as String)) {
+        throw const FormatException('Invalid discovery');
+      }
+      discovery = marketplaceRows(
+        data['plugins'],
+      ).map(DiscoveryPlugin.parse).whereType<DiscoveryPlugin>().toList();
+      discoverySource = source;
+    } catch (_) {
+      if (_disposed || epoch != _discoveryEpoch) return;
+      discovery = [];
+      discoverySource = {};
+      discoveryError = 'Browse-only discovery unavailable. Retry discovery.';
+    } finally {
+      if (!_disposed && epoch == _discoveryEpoch) {
+        loadingDiscovery = false;
         _emit();
       }
     }

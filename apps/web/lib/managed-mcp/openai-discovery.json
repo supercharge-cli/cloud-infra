@@ -1,0 +1,593 @@
+{
+  "source": {
+    "repository": "openai/plugins",
+    "commit": "5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f"
+  },
+  "plugins": [
+    {
+      "id": "openai-linear",
+      "name": "Linear",
+      "description": "Plan and build products",
+      "publisher": "Linear Orbit, Inc",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/linear"
+    },
+    {
+      "id": "openai-atlassian-rovo",
+      "name": "Atlassian Rovo",
+      "description": "Manage Jira and Confluence",
+      "publisher": "Atlassian",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/atlassian-rovo"
+    },
+    {
+      "id": "openai-google-calendar",
+      "name": "Google Calendar",
+      "description": "Manage Google Calendar events",
+      "publisher": "OpenAI",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/google-calendar"
+    },
+    {
+      "id": "openai-gmail",
+      "name": "Gmail",
+      "description": "Read and manage Gmail",
+      "publisher": "OpenAI",
+      "category": "Communication",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/gmail"
+    },
+    {
+      "id": "openai-slack",
+      "name": "Slack",
+      "description": "Read and manage Slack",
+      "publisher": "Slack",
+      "category": "Communication",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/slack"
+    },
+    {
+      "id": "openai-teams",
+      "name": "Teams",
+      "description": "Summarize Teams and follow up",
+      "publisher": "OpenAI",
+      "category": "Communication",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/teams"
+    },
+    {
+      "id": "openai-sharepoint",
+      "name": "SharePoint",
+      "description": "Summarize SharePoint content",
+      "publisher": "OpenAI",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/sharepoint"
+    },
+    {
+      "id": "openai-outlook-email",
+      "name": "Outlook Email",
+      "description": "Triage Outlook inboxes",
+      "publisher": "OpenAI",
+      "category": "Communication",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/outlook-email"
+    },
+    {
+      "id": "openai-outlook-calendar",
+      "name": "Outlook Calendar",
+      "description": "Manage Outlook schedules",
+      "publisher": "OpenAI",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/outlook-calendar"
+    },
+    {
+      "id": "openai-canva",
+      "name": "Canva",
+      "description": "Create, review, edit designs",
+      "publisher": "Canva Pty Ltd.",
+      "category": "Creativity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/canva"
+    },
+    {
+      "id": "openai-figma",
+      "name": "Figma",
+      "description": "Figma design-to-code workflows",
+      "publisher": "Figma",
+      "category": "Creativity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/figma"
+    },
+    {
+      "id": "openai-stripe",
+      "name": "Stripe",
+      "description": "Accept payments. Grow revenue.",
+      "publisher": "Stripe",
+      "category": "Finance",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/stripe"
+    },
+    {
+      "id": "openai-vercel",
+      "name": "Vercel",
+      "description": "Build and deploy web apps and agents",
+      "publisher": "Vercel Labs",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/vercel"
+    },
+    {
+      "id": "openai-game-studio",
+      "name": "Game Studio",
+      "description": "Design, prototype, and ship browser games",
+      "publisher": "OpenAI",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/game-studio"
+    },
+    {
+      "id": "openai-superpowers",
+      "name": "Superpowers",
+      "description": "Plan, develop, and debug code",
+      "publisher": "Jesse Vincent",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/superpowers"
+    },
+    {
+      "id": "openai-github",
+      "name": "GitHub",
+      "description": "Triage PRs, issues, CI, and publish flows",
+      "publisher": "OpenAI",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/github"
+    },
+    {
+      "id": "openai-circleci",
+      "name": "CircleCI",
+      "description": "Build, test, and deploy any application",
+      "publisher": "CircleCI",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/circleci"
+    },
+    {
+      "id": "openai-google-drive",
+      "name": "Google Drive",
+      "description": "Drive, Docs, Sheets or Slides",
+      "publisher": "OpenAI",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/google-drive"
+    },
+    {
+      "id": "openai-notion",
+      "name": "Notion",
+      "description": "Notion workflows for specs, research, meetings, and knowledge capture",
+      "publisher": "Notion",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/notion"
+    },
+    {
+      "id": "openai-cloudflare",
+      "name": "Cloudflare",
+      "description": "Cloudflare platform guidance with official MCP",
+      "publisher": "Cloudflare",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/cloudflare"
+    },
+    {
+      "id": "openai-sentry",
+      "name": "Sentry",
+      "description": "Inspect recent Sentry issues and events",
+      "publisher": "OpenAI",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/sentry"
+    },
+    {
+      "id": "openai-build-ios-apps",
+      "name": "Build iOS Apps",
+      "description": "Build, refine, and debug iOS apps with App Intents, SwiftUI, and Xcode workflows",
+      "publisher": "OpenAI",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/build-ios-apps"
+    },
+    {
+      "id": "openai-build-macos-apps",
+      "name": "Build macOS Apps",
+      "description": "Build, debug, instrument, and implement macOS apps with SwiftUI and AppKit guidance",
+      "publisher": "OpenAI",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/build-macos-apps"
+    },
+    {
+      "id": "openai-build-web-apps",
+      "name": "Build Web Apps",
+      "description": "Build frontend-focused web apps with generated assets, browser testing, payments, and databases",
+      "publisher": "OpenAI",
+      "category": "Developer Tools",
+      "auth": "ON_USE",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/build-web-apps"
+    },
+    {
+      "id": "openai-build-web-data-visualization",
+      "name": "Build Web Data Visualization",
+      "description": "Design, build, test, and export web data visualizations",
+      "publisher": "OpenAI",
+      "category": "Developer Tools",
+      "auth": "ON_USE",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/build-web-data-visualization"
+    },
+    {
+      "id": "openai-test-android-apps",
+      "name": "Test Android Apps",
+      "description": "Reproduce issues, inspect UI, and capture performance evidence from Android emulators",
+      "publisher": "OpenAI",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/test-android-apps"
+    },
+    {
+      "id": "openai-life-science-research",
+      "name": "Life Science Research",
+      "description": "General life-sciences research with routing, evidence synthesis, and optional parallel subagent analysis",
+      "publisher": "OpenAI",
+      "category": "Education & Research",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/life-science-research"
+    },
+    {
+      "id": "openai-zotero",
+      "name": "Zotero",
+      "description": "Find papers and add citations from Zotero",
+      "publisher": "OpenAI",
+      "category": "Education & Research",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/zotero"
+    },
+    {
+      "id": "openai-expo",
+      "name": "Expo",
+      "description": "Build, deploy, upgrade, and debug Expo and React Native apps",
+      "publisher": "Expo",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/expo"
+    },
+    {
+      "id": "openai-coderabbit",
+      "name": "CodeRabbit",
+      "description": "Run AI-powered code review for your current changes",
+      "publisher": "CodeRabbit",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/coderabbit"
+    },
+    {
+      "id": "openai-remotion",
+      "name": "Remotion",
+      "description": "Make videos agentically",
+      "publisher": "Remotion",
+      "category": "Creativity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/remotion"
+    },
+    {
+      "id": "openai-plugin-eval",
+      "name": "Plugin Eval",
+      "description": "Start from chat, then evaluate or benchmark locally",
+      "publisher": "OpenAI",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/plugin-eval"
+    },
+    {
+      "id": "openai-granola",
+      "name": "Granola",
+      "description": "Add your meeting context",
+      "publisher": "Granola",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/granola"
+    },
+    {
+      "id": "openai-monday-com",
+      "name": "monday.com",
+      "description": "Manage projects, tasks & CRM",
+      "publisher": "monday.com",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/monday-com"
+    },
+    {
+      "id": "openai-temporal",
+      "name": "Temporal",
+      "description": "Develop with Temporal",
+      "publisher": "Temporal",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/temporal"
+    },
+    {
+      "id": "openai-hyperframes",
+      "name": "HyperFrames by HeyGen",
+      "description": "Write HTML, render video",
+      "publisher": "HeyGen",
+      "category": "Creativity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/hyperframes"
+    },
+    {
+      "id": "openai-supabase",
+      "name": "Supabase",
+      "description": "Manage and query databases",
+      "publisher": "Supabase",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/supabase"
+    },
+    {
+      "id": "openai-codex-security",
+      "name": "Codex Security",
+      "description": "Security scanning for your codebase",
+      "publisher": "OpenAI",
+      "category": "Security",
+      "auth": "ON_USE",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/codex-security"
+    },
+    {
+      "id": "openai-twilio-developer-kit",
+      "name": "Twilio Developer Kit",
+      "description": "Twilio Skills for building, debugging, and shipping on Twilio",
+      "publisher": "Twilio",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/twilio-developer-kit"
+    },
+    {
+      "id": "openai-openai-developers",
+      "name": "OpenAI Developers",
+      "description": "Develop AI apps, agents, and ChatGPT Apps with OpenAI best practices",
+      "publisher": "OpenAI",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/openai-developers"
+    },
+    {
+      "id": "openai-datadog",
+      "name": "Datadog (Preview)",
+      "description": "Search and act on your data",
+      "publisher": "Datadog",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/datadog"
+    },
+    {
+      "id": "openai-zoom",
+      "name": "Zoom",
+      "description": "Smart meeting insights from Zoom",
+      "publisher": "Zoom",
+      "category": "Communication",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/zoom"
+    },
+    {
+      "id": "openai-mixpanel-headless",
+      "name": "Mixpanel Headless",
+      "description": "Analyze Mixpanel data with Python",
+      "publisher": "Mixpanel",
+      "category": "Data & Analytics",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/mixpanel-headless"
+    },
+    {
+      "id": "openai-airtable",
+      "name": "Airtable",
+      "description": "Add structured data to ChatGPT",
+      "publisher": "Airtable",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/airtable"
+    },
+    {
+      "id": "openai-nvidia",
+      "name": "NVIDIA",
+      "description": "Guided help for NVIDIA AI, GPU, robotics, simulation, and 3D workflows.",
+      "publisher": "NVIDIA",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/nvidia"
+    },
+    {
+      "id": "openai-posthog",
+      "name": "PostHog",
+      "description": "Analyze your product data",
+      "publisher": "PostHog Inc.",
+      "category": "Data & Analytics",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/posthog"
+    },
+    {
+      "id": "openai-ngs-analysis",
+      "name": "Life Sciences NGS Analysis",
+      "description": "Guided NGS routing and local execution for sequencing analysis",
+      "publisher": "OpenAI",
+      "category": "Education & Research",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/ngs-analysis"
+    },
+    {
+      "id": "openai-shopify",
+      "name": "Shopify",
+      "description": "Build and manage your store",
+      "publisher": "Shopify",
+      "category": "Business & Operations",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/shopify"
+    },
+    {
+      "id": "openai-magicpath",
+      "name": "MagicPath",
+      "description": "Find, install, and author MagicPath UI components from Codex",
+      "publisher": "MagicPathAI",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/magicpath"
+    },
+    {
+      "id": "openai-openai-ads-conversions",
+      "name": "OpenAI Ads Conversions",
+      "description": "Set up OpenAI Ads Pixel and CAPI tracking",
+      "publisher": "OpenAI",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/openai-ads-conversions"
+    },
+    {
+      "id": "openai-boltz-api-cli",
+      "name": "Boltz",
+      "description": "Predict structures, screen molecules and proteins, and design binders",
+      "publisher": "Boltz",
+      "category": "Scientific Research",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/boltz-api-cli"
+    },
+    {
+      "id": "openai-dropbox",
+      "name": "Dropbox",
+      "description": "Access, save and share files",
+      "publisher": "Dropbox",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/dropbox"
+    },
+    {
+      "id": "openai-product-design",
+      "name": "Product Design",
+      "description": "Explore and prototype ideas",
+      "publisher": "OpenAI",
+      "category": "Creativity",
+      "auth": "ON_USE",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/product-design"
+    },
+    {
+      "id": "openai-data-analytics",
+      "name": "Data Analytics",
+      "description": "Answer product and business questions with data",
+      "publisher": "OpenAI",
+      "category": "Data & Analytics",
+      "auth": "ON_USE",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/data-analytics"
+    },
+    {
+      "id": "openai-creative-production",
+      "name": "Creative Production",
+      "description": "Create marketing visuals from a brief or product image.",
+      "publisher": "OpenAI",
+      "category": "Creativity",
+      "auth": "ON_USE",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/creative-production"
+    },
+    {
+      "id": "openai-public-equity-investing",
+      "name": "Public Equity Investing",
+      "description": "Public equity PM research, long/short, earnings, ETF/index diligence, and memos",
+      "publisher": "OpenAI",
+      "category": "Finance",
+      "auth": "ON_USE",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/public-equity-investing"
+    },
+    {
+      "id": "openai-adobe",
+      "name": "Adobe",
+      "description": "Design, combine, and edit",
+      "publisher": "Adobe Inc",
+      "category": "Creativity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/adobe"
+    },
+    {
+      "id": "openai-lovable",
+      "name": "Lovable",
+      "description": "Build apps and websites",
+      "publisher": "Lovable Labs",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/lovable"
+    },
+    {
+      "id": "openai-clickup",
+      "name": "ClickUp",
+      "description": "Turn Codex into your ClickUp command center.",
+      "publisher": "ClickUp",
+      "category": "Productivity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/clickup"
+    },
+    {
+      "id": "openai-consensus",
+      "name": "Consensus",
+      "description": "Explore scientific research",
+      "publisher": "Consensus",
+      "category": "Education & Research",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/consensus"
+    },
+    {
+      "id": "openai-chatcut",
+      "name": "ChatCut",
+      "description": "Install and connect ChatCut",
+      "publisher": "ChatCut",
+      "category": "Creativity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/chatcut"
+    },
+    {
+      "id": "openai-higgsfield",
+      "name": "Higgsfield",
+      "description": "Every image and video model",
+      "publisher": "Higgsfield AI, Inc.",
+      "category": "Creativity",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/tree/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/plugins/higgsfield"
+    },
+    {
+      "id": "openai-crowdstrike-falcon-foundry",
+      "name": "CrowdStrike Falcon Foundry",
+      "description": "Plugin listed by OpenAI for Developer Tools.",
+      "publisher": "OpenAI plugin listing",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/blob/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/.agents/plugins/marketplace.json"
+    },
+    {
+      "id": "openai-crowdstrike-falcon-fusion",
+      "name": "CrowdStrike Falcon Fusion",
+      "description": "Plugin listed by OpenAI for Developer Tools.",
+      "publisher": "OpenAI plugin listing",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/blob/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/.agents/plugins/marketplace.json"
+    },
+    {
+      "id": "openai-qodo",
+      "name": "Qodo",
+      "description": "Plugin listed by OpenAI for Developer Tools.",
+      "publisher": "OpenAI plugin listing",
+      "category": "Developer Tools",
+      "auth": "ON_INSTALL",
+      "url": "https://github.com/openai/plugins/blob/5fd93af4cd0c623e020d0cc7e9ce178b4ac1f70f/.agents/plugins/marketplace.json"
+    }
+  ]
+}

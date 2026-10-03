@@ -366,6 +366,9 @@ class VectraClient {
     return decoded;
   }
 
+  Future<Map<String, dynamic>> managedMcpDiscovery() =>
+      _json('GET', '/api/managed-mcp/catalog', timeout: _fast);
+
   /// Managed MCP (isolated Plugin API) action for one owned bot.
   /// The body is a bounded action object (`action`, plus action-specific
   /// fields); credentials and target identity never travel through the app.

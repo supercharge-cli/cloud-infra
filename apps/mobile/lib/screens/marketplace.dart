@@ -82,8 +82,13 @@ class _MarketplaceBrowserState extends State<MarketplaceBrowser> {
                 (!installedOnly || plugin.installed != null),
           )
           .toList();
-      final categories =
-          plugins.map((plugin) => plugin.category).toSet().toList()..sort();
+      final discovered = installedOnly
+          ? <DiscoveryPlugin>[]
+          : c.discovery.where((plugin) => plugin.matches(query)).toList();
+      final categories = {
+        ...plugins.map((plugin) => plugin.category),
+        ...discovered.map((plugin) => plugin.category),
+      }.toList()..sort();
       return ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
         children: [
@@ -97,7 +102,7 @@ class _MarketplaceBrowserState extends State<MarketplaceBrowser> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Browse reviewed plugins. Choose what runs in your VM and what it can access.',
+            'Browse reviewed VM plugins and browse-only community discoveries. Only reviewed releases can be installed.',
             style: TextStyle(color: Vc.muted, height: 1.45),
           ),
           const SizedBox(height: 24),
@@ -132,6 +137,17 @@ class _MarketplaceBrowserState extends State<MarketplaceBrowser> {
             const LinearProgressIndicator(
               semanticsLabel: 'Loading marketplace catalog',
             ),
+          if (!installedOnly && c.loadingDiscovery)
+            const LinearProgressIndicator(
+              semanticsLabel: 'Loading browse-only discovery',
+            ),
+          if (!installedOnly && c.discoveryError != null)
+            MarketplaceMessage(
+              c.discoveryError!,
+              error: true,
+              action: 'Retry discovery',
+              onAction: c.loadingDiscovery ? null : () => c.loadDiscovery(),
+            ),
           if (c.catalogError != null)
             MarketplaceMessage(
               c.catalogError!,
@@ -149,7 +165,9 @@ class _MarketplaceBrowserState extends State<MarketplaceBrowser> {
               'Choose a supported VM and load its inventory to see installed plugins.',
             ),
           if (plugins.isEmpty &&
+              discovered.isEmpty &&
               !c.loadingCatalog &&
+              (installedOnly || !c.loadingDiscovery) &&
               (!installedOnly || c.inventoryKnown))
             MarketplaceMessage(
               query.trim().isNotEmpty
@@ -173,6 +191,10 @@ class _MarketplaceBrowserState extends State<MarketplaceBrowser> {
               (plugin) => plugin.category == category,
             ))
               _pluginRow(context, c, plugin),
+            for (final plugin in discovered.where(
+              (plugin) => plugin.category == category,
+            ))
+              _discoveryRow(context, c, plugin),
             const SizedBox(height: 20),
           ],
           const Divider(),
@@ -198,6 +220,41 @@ class _MarketplaceBrowserState extends State<MarketplaceBrowser> {
       ),
     );
   }
+
+  Widget _discoveryRow(
+    BuildContext context,
+    MarketplaceController c,
+    DiscoveryPlugin plugin,
+  ) => Column(
+    children: [
+      ListTile(
+        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+        leading: const Icon(Icons.explore_outlined, color: Vc.greenSoft),
+        title: Text(plugin.name),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(plugin.publisher),
+            Text(
+              plugin.description,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const Text('Browse only — not supported in VM'),
+          ],
+        ),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => MarketplaceDiscoveryDetail(
+              plugin: plugin,
+              source: c.discoverySource,
+            ),
+          ),
+        ),
+      ),
+      const Divider(),
+    ],
+  );
 
   Widget _pluginRow(
     BuildContext context,

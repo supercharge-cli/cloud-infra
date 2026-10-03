@@ -13,6 +13,43 @@ List<Map<String, dynamic>> marketplaceRows(Object? value) => value is List
 List<String> marketplaceStrings(Object? value) =>
     value is List ? value.whereType<String>().toList() : [];
 
+class DiscoveryPlugin {
+  DiscoveryPlugin(this.data);
+
+  final Map<String, dynamic> data;
+  String get id => data['id'] as String;
+  String get name => data['name'] as String;
+  String get description => data['description'] as String;
+  String get category => data['category'] as String;
+  String get publisher => data['publisher'] as String;
+  String get url => data['url'] as String;
+  String get auth => data['auth'] as String;
+
+  bool matches(String query) => [
+    name,
+    publisher,
+    description,
+    category,
+  ].join(' ').toLowerCase().contains(query.trim().toLowerCase());
+
+  static DiscoveryPlugin? parse(Map<String, dynamic> row) {
+    if ([
+      'id',
+      'name',
+      'description',
+      'category',
+      'publisher',
+      'url',
+      'auth',
+    ].any(
+      (key) => row[key] is! String || (row[key] as String).trim().isEmpty,
+    )) {
+      return null;
+    }
+    return DiscoveryPlugin(row);
+  }
+}
+
 class MarketplacePlugin {
   MarketplacePlugin(this.catalog, {this.installed});
 
@@ -33,7 +70,8 @@ class MarketplacePlugin {
   bool get supportsVm =>
       !catalog.containsKey('targets') ||
       marketplaceStrings(catalog['targets']).contains('supercharge-e2b');
-  bool get reviewedInstallation => installed == null ||
+  bool get reviewedInstallation =>
+      installed == null ||
       (id == 'vectra-echo' &&
           version == '1.0.0' &&
           installed?['activeDigest'] ==

@@ -117,6 +117,33 @@ void main() {
     expect(jsonDecode(requests.last.body)['action'], 'installCatalog');
   });
 
+
+  test(
+    'discovery reads the authenticated web API separately from the immutable catalog',
+    () async {
+      final requests = <http.Request>[];
+      final response = await http.runWithClient(
+        () => api.managedMcpDiscovery(),
+        () => MockClient((request) async {
+          requests.add(request);
+          return http.Response(
+            jsonEncode({
+              'discovery': {'plugins': []},
+            }),
+            200,
+          );
+        }),
+      );
+      expect(response['discovery'], {'plugins': []});
+      expect(requests.single.method, 'GET');
+      expect(
+        requests.single.url.toString(),
+        'https://example.test/api/managed-mcp/catalog',
+      );
+      expect(requests.single.headers['authorization'], 'Bearer test-token');
+    },
+  );
+
   test('computer status uses the authenticated read-only endpoint', () async {
     final result = await http.runWithClient(
       () => api.computerStatus('instance-1'),

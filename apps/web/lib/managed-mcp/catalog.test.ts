@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CATALOG, resolveCatalogEntry } from './catalog';
+import { DISCOVERY } from './discovery';
 
 test('catalog lists pinned reviewed releases without credentials', () => {
   assert.ok(CATALOG.length > 0);
@@ -20,4 +21,18 @@ test('catalog lists pinned reviewed releases without credentials', () => {
     assert.equal(resolveCatalogEntry(entry.id, '0'.repeat(64)), null);
   }
   assert.equal(resolveCatalogEntry('unknown-plugin', '0'.repeat(64)), null);
+});
+
+test('OpenAI discovery is pinned and cannot authorize a VM install', () => {
+  assert.equal(DISCOVERY.source.repository, 'openai/plugins');
+  assert.match(DISCOVERY.source.commit, /^[a-f0-9]{40}$/);
+  assert.equal(DISCOVERY.plugins.length, 65);
+  for (const entry of DISCOVERY.plugins) {
+    assert.match(entry.id, /^openai-[a-z0-9-]+$/);
+    assert.ok(entry.url.startsWith(`https://github.com/openai/plugins/`));
+    assert.ok(entry.url.includes(`/${DISCOVERY.source.commit}/`));
+    assert.equal(resolveCatalogEntry(entry.id, '0'.repeat(64)), null);
+    assert.equal('source' in entry, false);
+    assert.equal(JSON.stringify(entry).includes('apiKey'), false);
+  }
 });

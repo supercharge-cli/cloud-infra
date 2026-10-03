@@ -1,9 +1,62 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api/marketplace.dart';
 import '../state/marketplace.dart';
 import '../theme.dart';
 import '../widgets/marketplace.dart';
+
+class MarketplaceDiscoveryDetail extends StatelessWidget {
+  const MarketplaceDiscoveryDetail({
+    super.key,
+    required this.plugin,
+    required this.source,
+  });
+
+  final DiscoveryPlugin plugin;
+  final Map<String, dynamic> source;
+
+  @override
+  Widget build(BuildContext context) {
+    final uri = Uri.tryParse(plugin.url);
+    final sourceUrl =
+        uri != null &&
+            (uri.scheme == 'https' || uri.scheme == 'http') &&
+            uri.host.isNotEmpty &&
+            uri.userInfo.isEmpty
+        ? uri
+        : null;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Plugin discovery')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        children: [
+          Text(
+            plugin.name,
+            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          Text('${plugin.publisher} · ${plugin.category}'),
+          const SizedBox(height: 20),
+          Text(plugin.description),
+          const SizedBox(height: 20),
+          const MarketplaceMessage(
+            'Browse only — not supported in VM. This community listing is not a reviewed release and cannot be installed, configured, approved, enabled or attached here.',
+          ),
+          Text('Upstream authentication policy: ${plugin.auth} (not connected here)'),
+          Text('Source: ${source['repository']} @ ${source['commit']}'),
+          if (sourceUrl != null)
+            TextButton.icon(
+              onPressed: () =>
+                  launchUrl(sourceUrl, mode: LaunchMode.externalApplication),
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Open source link'),
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 class MarketplaceDetail extends StatelessWidget {
   const MarketplaceDetail({

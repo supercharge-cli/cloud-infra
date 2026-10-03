@@ -23,6 +23,16 @@ Map<String, dynamic> echoCatalog() => {
   'source': {'type': 'archive', 'sha256': 'a' * 64},
 };
 
+Map<String, dynamic> discoveryEntry({String id = 'community-echo'}) => {
+  'id': id,
+  'name': 'Community Echo',
+  'description': 'Browse a community connector.',
+  'category': 'Community tools',
+  'publisher': 'OpenAI',
+  'url': 'https://github.com/openai/plugins',
+  'auth': 'oauth',
+};
+
 Map<String, dynamic> installed({
   int revision = 1,
   bool trusted = false,
@@ -70,6 +80,13 @@ class MarketplaceApi extends VectraClient {
   Map<String, dynamic> binding = {};
   bool failStatus = false;
   bool failCatalog = false;
+  bool failDiscovery = false;
+  Map<String, dynamic> discoveryResponse = {
+    'discovery': {
+      'source': {'repository': 'openai/plugins', 'commit': 'a' * 40},
+      'plugins': <Map<String, dynamic>>[],
+    },
+  };
   bool failAction = false;
   bool failConversations = false;
   List<Map<String, dynamic>>? botRows;
@@ -86,6 +103,12 @@ class MarketplaceApi extends VectraClient {
   Future<Map<String, dynamic>> managedMcpCatalog() async {
     if (failCatalog) throw ApiException(500, 'Catalog failed');
     return {'plugins': entries};
+  }
+
+  @override
+  Future<Map<String, dynamic>> managedMcpDiscovery() async {
+    if (failDiscovery) throw ApiException(503, 'Discovery failed');
+    return discoveryResponse;
   }
 
   @override
@@ -699,6 +722,87 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  test(
+    'discovery is independent of reviewed catalog, inventory and actions',
+    () async {
+      (api.discoveryResponse['discovery'] as Map)['plugins'] = [
+        discoveryEntry(),
+        discoveryEntry(id: 'vectra-echo'),
+        {'id': 'incomplete'},
+      ];
+      api.failCatalog = true;
+      await controller.load();
+      expect(controller.catalogError, isNotNull);
+      expect(controller.discovery, hasLength(2));
+      expect(controller.plugin('community-echo'), isNull);
+      expect(controller.plugin('vectra-echo'), isNull);
+      expect(await controller.install('community-echo'), isFalse);
+      expect(await controller.install('vectra-echo'), isFalse);
+      expect(await controller.approve('community-echo', 'anything'), isFalse);
+      expect(
+        await controller.configure('community-echo', {'token': 'x'}),
+        isFalse,
+      );
+      expect(await controller.setEnabled('community-echo', true), isFalse);
+      expect(
+        await controller.attach('community-echo', 'echo', 'chat-main'),
+        isFalse,
+      );
+      expect(api.requests.where((row) => row['action'] != 'status'), isEmpty);
+
+      api.failCatalog = false;
+      api.failDiscovery = true;
+      await controller.load();
+      expect(controller.discoveryError, isNotNull);
+      expect(controller.discovery, isEmpty);
+      expect(controller.plugin('vectra-echo')!.digest, 'a' * 64);
+      expect(controller.catalogError, isNull);
+      expect(await controller.install('vectra-echo'), isTrue);
+      expect(
+        api.requests
+            .where((row) => row['action'] == 'installCatalog')
+            .single['catalogId'],
+        'vectra-echo',
+      );
+      api.failDiscovery = false;
+      await controller.loadDiscovery();
+      expect(controller.discovery, hasLength(2));
+      expect(controller.discoveryError, isNull);
+    },
+  );
+
+  testWidgets('browse-only discovery searches categories without VM actions', (
+    tester,
+  ) async {
+    (api.discoveryResponse['discovery'] as Map)['plugins'] = [discoveryEntry()];
+    await controller.load();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: Vc.dark(),
+        home: Scaffold(body: MarketplaceBrowser(controller: controller)),
+      ),
+    );
+    await tester.enterText(find.byType(TextField).first, 'community tools');
+    await tester.pump();
+    await scrollTo(tester, find.text('Community Echo'), 250);
+    expect(find.text('Browse only — not supported in VM'), findsOneWidget);
+    await tester.tap(find.text('Community Echo'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('not a reviewed release'), findsOneWidget);
+    expect(find.text('Open source link'), findsOneWidget);
+    expect(find.textContaining('openai/plugins @'), findsOneWidget);
+    expect(find.text('Install in selected bot VM'), findsNothing);
+    expect(find.text('Configure'), findsNothing);
+    expect(find.text('Attach'), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await scrollTo(tester, find.text('Installed'), -250);
+    await tester.tap(find.text('Installed'));
+    await tester.pump();
+    expect(find.text('Community Echo'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('loading, unsupported and empty inventory states are explicit', (
     tester,
