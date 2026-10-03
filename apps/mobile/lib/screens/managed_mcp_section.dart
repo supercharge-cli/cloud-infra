@@ -34,6 +34,7 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
   List<Map<String, dynamic>> catalog = [];
   List<Map<String, dynamic>> conversations = [];
   String? catalogId;
+  String? catalogError;
   String? notice;
   String? error;
   bool busy = false;
@@ -91,12 +92,15 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
                   .map((entry) => Map<String, dynamic>.from(entry))
                   .toList()
             : [];
+        catalogError = null;
         if (!catalog.any((entry) => entry['id'] == catalogId)) {
           catalogId = catalog.isEmpty ? null : '${catalog.first['id']}';
         }
       });
     } catch (failure) {
-      if (mounted) setState(() => error = '$failure');
+      if (mounted) {
+        setState(() => catalogError = 'Catalog unavailable: $failure');
+      }
     }
   }
 
@@ -292,6 +296,11 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
           ),
         if (error != null)
           Text(error!, style: const TextStyle(color: Vc.red, fontSize: 12)),
+        if (catalogError != null)
+          Text(
+            catalogError!,
+            style: const TextStyle(color: Vc.red, fontSize: 12),
+          ),
         if (notice != null)
           Text(notice!, style: const TextStyle(color: Vc.muted, fontSize: 12)),
         TextButton(
