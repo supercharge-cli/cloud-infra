@@ -7,6 +7,17 @@ export type MarketEntry = CatalogEntry & {
   icon?: string; publisher?: string; category?: string;
   auth?: 'none' | 'oauth' | 'secrets'; capabilities?: string[];
 };
+export type SkillMdItem = {
+  id: string; source: 'skillmd'; itemType: 'skill' | 'plugin'; owner: string; name: string;
+  description?: string; category?: string; agents: string[]; verified?: boolean;
+  rawUrl?: string; sourceUrl: string; installable: false; installError: string;
+};
+export async function searchSkillMd(query: string): Promise<SkillMdItem[]> {
+  const response = await fetch(`/api/marketplace/search?q=${encodeURIComponent(query)}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'SkillMD search failed.');
+  return Array.isArray(data.items) ? data.items as SkillMdItem[] : [];
+}
 export type InstalledPlugin = {
   id: string; revision: number; enabled: boolean; trusted: boolean;
   activeDigest: string; configuredKeys: string[];

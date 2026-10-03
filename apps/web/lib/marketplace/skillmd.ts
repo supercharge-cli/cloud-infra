@@ -1,0 +1,91 @@
+const API_BASE = 'https://api.skillmd.com';
+const MAX_RESPONSE_BYTES = 512 * 1024;
+const REQUEST_TIMEOUT_MS = 8_000;
+
+export type SkillMdItem = {
+  id: string;
+  source: 'skillmd';
+  itemType: 'skill' | 'plugin';
+  owner: string;
+  name: string;
+  description?: string;
+  category?: string;
+  agents: string[];
+  verified?: boolean;
+  rawUrl?: string;
+  sourceUrl: string;
+  installable: false;
+  installError: 'SKILLMD_UNSUPPORTED_ARTIFACT';
+};
+
+type ApiItem = {
+  slug?: unknown;
+  type?: unknown;
+  title?: unknown;
+  description?: unknown;
+  category?: unknown;
+  agents?: unknown;
+  verified?: unknown;
+  raw_url?: unknown;
+};
+
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function itemFromApi(value: ApiItem): SkillMdItem | null {
+  const slug = text(value.slug);
+  const [owner, ...nameParts] = slug?.split('/') ?? [];
+  const name = nameParts.join('/');
+  if (!owner || !name) return null;
+  const itemType = value.type === 'single' ? 'skill' : value.type === 'pack' ? 'plugin' : null;
+  if (!itemType) return null;
+  const rawUrl = text(value.raw_url);
+  return {
+    id: `skillmd:${slug}`,
+    source: 'skillmd',
+    itemType,
+    owner,
+    name,
+    description: text(value.description),
+    category: text(value.category),
+    agents: Array.isArray(value.agents) ? value.agents.filter((agent): agent is string => typeof agent === 'string') : text(value.agents)?.split(',').map((agent) => agent.trim()).filter(Boolean) ?? [],
+    verified: typeof value.verified === 'boolean' ? value.verified : undefined,
+    rawUrl,
+    sourceUrl: `https://skillmd.com/skills/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+    installable: false,
+    installError: 'SKILLMD_UNSUPPORTED_ARTIFACT',
+  };
+}
+
+async function getJson(path: string): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${API_BASE}${path}`, { signal: controller.signal, headers: { accept: 'application/json' }, next: { revalidate: 120 } });
+    if (!response.ok) throw new Error(`SKILLMD_SEARCH_FAILED: HTTP ${response.status}`);
+    const length = Number(response.headers.get('content-length') ?? 0);
+    if (length > MAX_RESPONSE_BYTES) throw new Error('SKILLMD_INVALID_RESPONSE: response is too large');
+    const body = await response.text();
+    if (new TextEncoder().encode(body).byteLength > MAX_RESPONSE_BYTES) throw new Error('SKILLMD_INVALID_RESPONSE: response is too large');
+    try { return JSON.parse(body); } catch { throw new Error('SKILLMD_INVALID_RESPONSE: invalid JSON'); }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('SKILLMD_')) throw error;
+    throw new Error('SKILLMD_SEARCH_FAILED: SkillMD is temporarily unavailable');
+  } finally { clearTimeout(timer); }
+}
+
+export async function searchSkillMd(query: string): Promise<SkillMdItem[]> {
+  const normalized = query.trim();
+  if (!normalized) return [];
+  const payload = await getJson(`/v1/search?q=${encodeURIComponent(normalized)}`) as { items?: unknown };
+  if (!Array.isArray(payload.items)) throw new Error('SKILLMD_INVALID_RESPONSE: search items are missing');
+  return payload.items.map((item) => itemFromApi(item as ApiItem)).filter((item): item is SkillMdItem => !!item);
+}
+
+export async function getSkillMdItem(owner: string, name: string): Promise<SkillMdItem> {
+  const payload = await getJson(`/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`) as ApiItem;
+  const item = itemFromApi({ ...payload, slug: `${owner}/${name}` });
+  if (!item) throw new Error('SKILLMD_ITEM_NOT_FOUND: SkillMD item is invalid or unavailable');
+  return item;
+}
