@@ -342,8 +342,29 @@ class VectraClient {
     Map<String, dynamic> input,
   ) => _json('POST', '/api/instances/$id/bots', body: input, timeout: _slow);
 
-  Future<Map<String, dynamic>> managedMcpCatalog() =>
-      _json('GET', '/api/managed-mcp/catalog', timeout: _fast);
+  /// Shared reviewed Managed MCP catalog. Read from the same public immutable
+  /// source as the desktop app; it carries no credentials and install still
+  /// goes through the owner-checked bot route.
+  Future<Map<String, dynamic>> managedMcpCatalog() async {
+    final res = await http
+        .get(
+          Uri.parse(
+            'https://raw.githubusercontent.com/iotserver24/supercharge-app/'
+            'de50dfa59e9b7b7d2ee77b3e1f732242ac84e012'
+            '/public/managed-mcp/catalog.json',
+          ),
+          headers: {'accept': 'application/json'},
+        )
+        .timeout(_fast);
+    if (res.statusCode >= 400) {
+      throw ApiException(res.statusCode, 'Shared catalog is unavailable.');
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw ApiException(502, 'Shared catalog is invalid.');
+    }
+    return decoded;
+  }
 
   /// Managed MCP (isolated Plugin API) action for one owned bot.
   /// The body is a bounded action object (`action`, plus action-specific

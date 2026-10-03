@@ -337,7 +337,7 @@ class _ManagedMcpSectionState extends State<ManagedMcpSection> {
           ),
         if (selectedCatalog != null) ...[
           Text(
-            '${selectedCatalog['description'] ?? ''} · permissions: ${((selectedCatalog['manifest'] as Map?)?['permissions'] as List?)?.join(', ') ?? 'none'} · SHA-256 ${((selectedCatalog['source'] as Map?)?['sha256'] ?? '').toString().substring(0, 16)}…',
+            '${selectedCatalog['description'] ?? ''} · pinned archive · SHA-256 ${((selectedCatalog['source'] as Map?)?['sha256'] ?? '').toString().substring(0, 16)}…',
             style: const TextStyle(color: Vc.muted, fontSize: 12),
           ),
           FilledButton(

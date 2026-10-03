@@ -82,7 +82,7 @@ void main() {
     });
   }
 
-  test('Managed MCP catalog is read-only and install targets an owned bot route', () async {
+  test('Managed MCP catalog is read-only from the public source and install targets an owned bot route', () async {
     final requests = <http.Request>[];
     await http.runWithClient(() async {
       final catalog = await api.managedMcpCatalog();
@@ -95,10 +95,23 @@ void main() {
       });
     }, () => MockClient((request) async {
       requests.add(request);
-      return http.Response(jsonEncode(request.method == 'GET' ? {'plugins': []} : {'plugin': {'id': 'vectra-echo'}}), 200);
+      if (request.method == 'GET') {
+        return http.Response(
+          jsonEncode({'schemaVersion': 1, 'plugins': []}),
+          200,
+        );
+      }
+      return http.Response(jsonEncode({'plugin': {'id': 'vectra-echo'}}), 200);
     }));
     expect(requests.map((request) => request.method), ['GET', 'POST']);
-    expect(requests.first.url.path, '/api/managed-mcp/catalog');
+    expect(
+      requests.first.url.toString(),
+      startsWith(
+        'https://raw.githubusercontent.com/iotserver24/supercharge-app/',
+      ),
+    );
+    expect(requests.first.url.path, endsWith('/public/managed-mcp/catalog.json'));
+    expect(requests.first.headers.containsKey('authorization'), isFalse);
     expect(requests.last.url.path, '/api/instances/instance-1/bots/main/plugin-api');
     expect(requests.last.headers['authorization'], 'Bearer test-token');
     expect(jsonDecode(requests.last.body)['action'], 'installCatalog');
