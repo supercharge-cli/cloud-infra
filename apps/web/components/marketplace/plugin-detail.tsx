@@ -27,6 +27,7 @@ export function PluginDetail({ entry, installed, market, backHref }: {
   const reviewedInstallation = !installed || installed.activeDigest === entry.releaseDigest;
   const disabled = !!busy || loading || !!error || !reviewedInstallation;
   const supportsVm = !entry.targets || entry.targets.includes('supercharge-e2b');
+  const supportsRuntime = entry.id !== 'vectra-github' || market.allowedMcpOrigins.includes('https://api.githubcopilot.com');
   const manifest = installed?.manifest ?? entry.manifest;
   const config = Object.entries(manifest.userConfig);
   const configured = config.every(([key, field]) => !field.required || installed?.configuredKeys.includes(key));
@@ -52,19 +53,21 @@ export function PluginDetail({ entry, installed, market, backHref }: {
     <Link href={backHref} className="market-back"><ArrowLeft size={17} />All plugins</Link>
     <header className="market-detail-heading"><PluginIcon entry={entry} /><div><h2>{entry.name}</h2><p>{entry.publisher || 'Vectra'} · {entry.category || 'Developer Tools'} · {entry.version}</p></div><span className="market-badge">{installed ? (installed.enabled ? 'Enabled in this VM' : 'Installed in this VM') : 'Not installed'}</span></header>
     <p className="market-description">{entry.description}</p>
+    {entry.id === 'vectra-github' && <p>Use a GitHub personal access token with only the repository permissions you want this bot to have. The token is sent to the selected VM as write-only configuration; this is not GitHub OAuth sign-in.</p>}
     {installed && !reviewedInstallation && <p role="alert">A different release uses this catalog plugin ID. Marketplace actions are blocked for it; manage the installation in Managed MCP settings. The archive hash below identifies only the reviewed catalog release.</p>}
     {installed && reviewedInstallation && <p role="status">The VM reports the reviewed release content digest. Review its installed permissions before approving it.</p>}
     <ol className="market-steps" aria-label="Plugin setup progress">{['Install', 'Configure', 'Approve', 'Enable', 'Attach', 'Verify'].map((label, i) => <li key={label} className={steps[i] ? 'complete' : ''}>{steps[i] ? <Check size={15} /> : <span>{i + 1}</span>}{label}</li>)}</ol>
     <div className="market-detail-grid"><div>
       <section className="market-section"><h3>Install to this bot</h3><p>The pinned release stays in this VM’s isolated plugin store. It starts disabled and requires your approval before it can run.</p>
-        <button className="market-button primary" disabled={disabled || !!installed || entry.auth === 'oauth' || !supportsVm} onClick={() => void run('Install plugin', () => call('installCatalog', { catalogId: entry.id, catalogSha256: entry.source.sha256, requestId: crypto.randomUUID() }))}>{busy === 'Install plugin' ? 'Installing…' : installed ? 'Installed' : 'Install plugin'}</button>
+        <button className="market-button primary" disabled={disabled || !!installed || entry.auth === 'oauth' || !supportsVm || !supportsRuntime} onClick={() => void run('Install plugin', () => call('installCatalog', { catalogId: entry.id, catalogSha256: entry.source.sha256, requestId: crypto.randomUUID() }))}>{busy === 'Install plugin' ? 'Installing…' : installed ? 'Installed' : 'Install plugin'}</button>
         {entry.auth === 'oauth' && <p role="status">This plugin requires an OAuth connection. Installation is unavailable until its secure provider connection is supported.</p>}
         {!supportsVm && <p role="status">This release does not support Supercharge VMs.</p>}
+        {!loading && !supportsRuntime && <p role="status">This VM does not allow the GitHub MCP endpoint yet. Recreate the sandbox with the updated template before installing GitHub.</p>}
       </section>
       <section className="market-section"><h3>Authentication & configuration</h3>
         {!config.length ? <p>No account connection or secrets are required for this plugin.</p> : <form ref={configForm} onSubmit={(event) => void saveConfiguration(event)}>
           <p>Values are write-only and saved to this bot’s VM. Saved secrets are never displayed.</p>
-          {config.map(([key, field]) => <label className="market-field" key={key}>{key}{field.required ? ' (required)' : ''}<input name={key} type={field.sensitive ? 'password' : 'text'} autoComplete="off" disabled={disabled || !installed} placeholder={installed?.configuredKeys.includes(key) ? 'Already configured; leave blank to keep' : 'Enter a value'} required={field.required && !installed?.configuredKeys.includes(key)} /></label>)}
+          {config.map(([key, field]) => <label className="market-field" key={key}>{field.description || key}{field.required ? ' (required)' : ''}<input name={key} type={field.sensitive ? 'password' : 'text'} autoComplete="off" disabled={disabled || !installed} placeholder={installed?.configuredKeys.includes(key) ? 'Already configured; leave blank to keep' : 'Enter a value'} required={field.required && !installed?.configuredKeys.includes(key)} /></label>)}
           <button className="market-button" disabled={disabled || !installed}>Save configuration</button>
         </form>}
       </section>
@@ -79,7 +82,7 @@ export function PluginDetail({ entry, installed, market, backHref }: {
         {!loading && !market.conversations.length && <p>Create a direct conversation in <Link href="/dashboard">Chats</Link>, then refresh the VM status.</p>}
         {servers.length > 1 && <label className="market-field">MCP server<select value={serverId} onChange={(event) => { setServer(event.target.value); setVerifyConsent(false); }}>{servers.map((id) => <option key={id}>{id}</option>)}</select></label>}
         {binding?.configured && !ours && <p role="status">This conversation already uses another plugin bridge. Remove it in Managed MCP before attaching this plugin.</p>}
-        <button className="market-button primary" disabled={disabled || !installed?.enabled || !installed.trusted || !selectedConversation || !serverId || (!!binding?.configured && !ours) || !!attached || binding?.status === 'waiting'} onClick={() => void run('Attach plugin', () => call('apply', { pluginId: entry.id, serverId, sessionId: conversation, expectedRevision: binding?.revision ?? null }))}>{attached ? 'Attached' : binding?.status === 'waiting' ? 'Attaching…' : 'Attach plugin'}</button>
+        <button className="market-button primary" disabled={disabled || !supportsRuntime || !installed?.enabled || !installed.trusted || !selectedConversation || !serverId || (!!binding?.configured && !ours) || !!attached || binding?.status === 'waiting'} onClick={() => void run('Attach plugin', () => call('apply', { pluginId: entry.id, serverId, sessionId: conversation, expectedRevision: binding?.revision ?? null }))}>{attached ? 'Attached' : binding?.status === 'waiting' ? 'Attaching…' : 'Attach plugin'}</button>
         {ours && binding.lastError && <p role="alert">{binding.lastError}</p>}
         {ours && binding.status === 'failed' && <button className="market-button" disabled={disabled || binding.revision == null} onClick={() => void run('Retry attachment', () => call('retry', { sessionId: conversation, expectedRevision: binding.revision }))}>Retry attachment</button>}
         {attached && binding.status !== 'ready' && (echo ? <div className="market-verification"><label className="market-consent"><input type="checkbox" checked={verifyConsent} disabled={disabled} onChange={(event) => setVerifyConsent(event.target.checked)} />I consent to one call of the discovered Echo tool. This executes plugin code in the selected VM.</label><button className="market-button" disabled={disabled || !verifyConsent || binding.revision == null} onClick={() => void run('Verify connection', async () => { await call('verify', { sessionId: conversation, expectedRevision: binding.revision, tool: echo.name, arguments: { text: 'Marketplace connection check' }, consent: true }); setVerifyConsent(false); })}>Verify connection</button></div> : <p>Attached. No safe echo test is available; the connection has not been verified.</p>)}

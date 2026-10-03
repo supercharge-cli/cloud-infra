@@ -4,18 +4,28 @@ import { CATALOG, resolveCatalogEntry } from './catalog';
 import { DISCOVERY } from './discovery';
 
 test('catalog lists pinned reviewed releases without credentials', () => {
-  assert.ok(CATALOG.length > 0);
+  assert.deepEqual(CATALOG.map((entry) => entry.id), ['vectra-echo', 'vectra-github']);
   for (const entry of CATALOG) {
     assert.match(entry.source.url, /^https:\/\/raw\.githubusercontent\.com\/iotserver24\/supercharge-app\/[a-f0-9]{40}\/public\/managed-mcp\//);
     assert.match(entry.source.sha256, /^[a-f0-9]{64}$/);
-    assert.equal(entry.releaseDigest, 'e1288de348eab757a0c5f0dd4580a371d02850470abfc0466af067b672f9081a');
-    assert.deepEqual(entry.manifest.permissions, ['mcp:stdio']);
-    assert.equal(entry.icon, '/managed-mcp/icons/vectra-echo.svg');
+    if (entry.id === 'vectra-github') {
+      assert.equal(entry.releaseDigest, 'bef5d2b97bad049ea95e1a05170fc9a91fcabc1585b9b3c5896e86cc2a30b5e9');
+      assert.deepEqual(entry.manifest.permissions, ['mcp:http']);
+      assert.equal(entry.manifest.mcpServers.github.url, 'https://api.githubcopilot.com/mcp/');
+      assert.equal(entry.manifest.mcpServers.github.headers?.Authorization, 'Bearer ${config.github-token}');
+      assert.equal(entry.manifest.userConfig['github-token'].sensitive, true);
+      assert.equal(entry.auth, 'secrets');
+      assert.deepEqual(entry.targets, ['supercharge-e2b']);
+    } else {
+      assert.equal(entry.releaseDigest, 'e1288de348eab757a0c5f0dd4580a371d02850470abfc0466af067b672f9081a');
+      assert.deepEqual(entry.manifest.permissions, ['mcp:stdio']);
+      assert.equal(entry.icon, '/managed-mcp/icons/vectra-echo.svg');
+      assert.equal(entry.auth, 'none');
+      assert.deepEqual(entry.targets, ['supercharge-e2b', 'supercharge-desktop']);
+    }
     assert.equal(entry.publisher, 'Vectra');
     assert.equal(entry.category, 'Developer tools');
-    assert.equal(entry.auth, 'none');
     assert.deepEqual(entry.capabilities, ['mcp']);
-    assert.deepEqual(entry.targets, ['supercharge-e2b', 'supercharge-desktop']);
     assert.equal(JSON.stringify(entry).includes('apiKey'), false);
     assert.equal(resolveCatalogEntry(entry.id, entry.source.sha256)?.id, entry.id);
     assert.equal(resolveCatalogEntry(entry.id, '0'.repeat(64)), null);

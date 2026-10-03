@@ -18,7 +18,7 @@ export type Binding = {
   tools?: Array<{ name: string; description?: string }>;
 };
 export type Conversation = { sessionId: string; title: string; botId: string; source: string };
-type Inventory = { inventory?: { plugins?: InstalledPlugin[] }; bindings?: Record<string, Binding> };
+type Inventory = { inventory?: { plugins?: InstalledPlugin[] }; bindings?: Record<string, Binding>; service?: { allowedMcpOrigins?: string[] } };
 
 export async function marketJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers: { 'content-type': 'application/json', ...init?.headers } });
@@ -30,6 +30,7 @@ export async function marketJson<T>(path: string, init?: RequestInit): Promise<T
 export function useMarketplace(instanceId: string, botId: string) {
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [bindings, setBindings] = useState<Record<string, Binding>>({});
+  const [allowedMcpOrigins, setAllowedMcpOrigins] = useState<string[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +55,7 @@ export function useMarketplace(instanceId: string, botId: string) {
       if (sequence.current !== current) return;
       setPlugins(inventory.inventory?.plugins ?? []);
       setBindings(inventory.bindings ?? {});
+      setAllowedMcpOrigins(inventory.service?.allowedMcpOrigins ?? []);
       setConversations((threads.conversations ?? []).filter((row) => row.botId === botId && row.source !== 'group'));
     } catch (failure) {
       if (sequence.current === current) setError((failure as Error).message);
@@ -92,5 +94,5 @@ export function useMarketplace(instanceId: string, botId: string) {
     pluginId: plugin.id, requestId: crypto.randomUUID(),
     pluginAction: { ...action, expectedRevision: plugin.revision },
   });
-  return { plugins, bindings, conversations, loading, error, busy, refresh, call, run, change };
+  return { plugins, bindings, allowedMcpOrigins, conversations, loading, error, busy, refresh, call, run, change };
 }

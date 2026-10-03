@@ -93,8 +93,12 @@ export async function POST(req: Request, ctx: Ctx) {
     } catch {
       data = { error: text.slice(0, 300) };
     }
-    return NextResponse.json(data, { status: proxied.status });
+    if (action === 'pluginAction' && (payload.pluginAction as { action?: unknown } | null)?.action === 'configure' && !proxied.ok) {
+      return NextResponse.json({ error: 'Configuration could not be confirmed. Refresh the VM status before retrying.' }, { status: proxied.status, headers: { 'cache-control': 'no-store' } });
+    }
+    return NextResponse.json(data, { status: proxied.status, headers: { 'cache-control': 'no-store' } });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 502 });
+    const configuring = action === 'pluginAction' && (payload.pluginAction as { action?: unknown } | null)?.action === 'configure';
+    return NextResponse.json({ error: configuring ? 'Configuration could not be confirmed. Refresh the VM status before retrying.' : (e as Error).message }, { status: 502, headers: { 'cache-control': 'no-store' } });
   }
 }

@@ -72,10 +72,15 @@ class MarketplacePlugin {
       marketplaceStrings(catalog['targets']).contains('supercharge-e2b');
   bool get reviewedInstallation =>
       installed == null ||
-      (id == 'vectra-echo' &&
-          version == '1.0.0' &&
+      (version == '1.0.0' &&
           installed?['activeDigest'] ==
-              'e1288de348eab757a0c5f0dd4580a371d02850470abfc0466af067b672f9081a');
+              switch (id) {
+                'vectra-echo' =>
+                  'e1288de348eab757a0c5f0dd4580a371d02850470abfc0466af067b672f9081a',
+                'vectra-github' =>
+                  'bef5d2b97bad049ea95e1a05170fc9a91fcabc1585b9b3c5896e86cc2a30b5e9',
+                _ => null,
+              });
   bool get authenticationSupported =>
       auth == 'none' ||
       auth == 'unspecified' ||

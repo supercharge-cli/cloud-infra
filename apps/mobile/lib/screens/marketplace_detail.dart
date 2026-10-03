@@ -1,62 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import '../api/marketplace.dart';
 import '../state/marketplace.dart';
 import '../theme.dart';
 import '../widgets/marketplace.dart';
-
-class MarketplaceDiscoveryDetail extends StatelessWidget {
-  const MarketplaceDiscoveryDetail({
-    super.key,
-    required this.plugin,
-    required this.source,
-  });
-
-  final DiscoveryPlugin plugin;
-  final Map<String, dynamic> source;
-
-  @override
-  Widget build(BuildContext context) {
-    final uri = Uri.tryParse(plugin.url);
-    final sourceUrl =
-        uri != null &&
-            (uri.scheme == 'https' || uri.scheme == 'http') &&
-            uri.host.isNotEmpty &&
-            uri.userInfo.isEmpty
-        ? uri
-        : null;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Plugin discovery')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-        children: [
-          Text(
-            plugin.name,
-            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          Text('${plugin.publisher} · ${plugin.category}'),
-          const SizedBox(height: 20),
-          Text(plugin.description),
-          const SizedBox(height: 20),
-          const MarketplaceMessage(
-            'Browse only — not supported in VM. This community listing is not a reviewed release and cannot be installed, configured, approved, enabled or attached here.',
-          ),
-          Text('Upstream authentication policy: ${plugin.auth} (not connected here)'),
-          Text('Source: ${source['repository']} @ ${source['commit']}'),
-          if (sourceUrl != null)
-            TextButton.icon(
-              onPressed: () =>
-                  launchUrl(sourceUrl, mode: LaunchMode.externalApplication),
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Open source link'),
-            ),
-        ],
-      ),
-    );
-  }
-}
 
 class MarketplaceDetail extends StatelessWidget {
   const MarketplaceDetail({
@@ -207,6 +153,9 @@ class _PluginFlowState extends State<_PluginFlow> {
       }
     }
     final canAct = c.canAct && p.reviewedInstallation;
+    final supportsRuntime =
+        p.id != 'vectra-github' ||
+        c.allowedMcpOrigins.contains('https://api.githubcopilot.com');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -219,6 +168,14 @@ class _PluginFlowState extends State<_PluginFlow> {
           if (!p.supportsVm)
             const MarketplaceMessage(
               'This catalog release does not support Supercharge VMs.',
+            ),
+          if (c.inventoryKnown && !supportsRuntime)
+            const MarketplaceMessage(
+              'This VM does not allow the GitHub MCP endpoint yet. Recreate the sandbox with the updated template before installing GitHub.',
+            ),
+          if (p.id == 'vectra-github')
+            const MarketplaceMessage(
+              'GitHub uses a personal access token, not OAuth sign-in. Enter it after installation; it is stored write-only in the selected VM.',
             ),
           if (p.auth == 'oauth')
             const MarketplaceMessage(
@@ -241,7 +198,12 @@ class _PluginFlowState extends State<_PluginFlow> {
             ),
           const SizedBox(height: 14),
           FilledButton.icon(
-            onPressed: canAct && p.digest != null && p.supportsVm && p.auth != 'oauth'
+            onPressed:
+                canAct &&
+                    supportsRuntime &&
+                    p.digest != null &&
+                    p.supportsVm &&
+                    p.auth != 'oauth'
                 ? () => c.install(p.id)
                 : null,
             icon: const Icon(Icons.download_outlined),
@@ -297,7 +259,7 @@ class _PluginFlowState extends State<_PluginFlow> {
                 enableIMEPersonalizedLearning: false,
                 decoration: InputDecoration(
                   labelText:
-                      '${entry.key}${marketplaceMap(entry.value)['required'] == true ? ' (required)' : ''}',
+                      '${marketplaceMap(entry.value)['description'] ?? entry.key}${marketplaceMap(entry.value)['required'] == true ? ' (required)' : ''}',
                   helperText: p.configuredKeys.contains(entry.key)
                       ? 'Configured in VM · leave blank to keep'
                       : 'Not configured',
@@ -533,6 +495,10 @@ class _PluginFlowState extends State<_PluginFlow> {
                 p.trusted &&
                 p.reviewedInstallation &&
                 p.authenticationSupported &&
+                (p.id != 'vectra-github' ||
+                    c.allowedMcpOrigins.contains(
+                      'https://api.githubcopilot.com',
+                    )) &&
                 sessionId != null &&
                 !waiting &&
                 (binding.isEmpty ||

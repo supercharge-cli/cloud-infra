@@ -45,7 +45,7 @@ export function validateCatalogMetadata(entry, manifest) {
   if (entry.capabilities !== undefined && [...entry.capabilities].sort().join(',') !== actual.sort().join(',')) {
     throw new Error('Catalog capabilities and reviewed manifest differ');
   }
-  // No reviewed release currently has an implemented OAuth adapter.
+  // OAuth releases require a separate provider adapter; sensitive fields use write-only configuration.
   const auth = Object.values(manifest.userConfig).some((field) => field.sensitive) ? 'secrets' : 'none';
   if (entry.auth !== undefined && entry.auth !== auth) {
     throw new Error('Catalog auth is unsupported by the reviewed release');
@@ -82,12 +82,24 @@ export async function validateCatalog(root = defaultRoot) {
     if (bytes.length > 16 * 1024 * 1024 || createHash('sha256').update(bytes).digest('hex') !== entry.source.sha256) throw new Error('Catalog archive checksum mismatch');
     const release = join(root, `${entry.id.replace(/^vectra-/, '')}-${entry.version}`);
     const files = (await readdir(release)).sort();
-    if (files.join(',') !== 'mcp.mjs,plugin.json' || !(await stat(join(release, 'mcp.mjs'))).isFile()) throw new Error('Reviewed release has unexpected files');
+    const expectedFiles = entry.id === 'vectra-echo' ? 'mcp.mjs,plugin.json' : 'plugin.json';
+    if (!['vectra-echo', 'vectra-github'].includes(entry.id) || files.join(',') !== expectedFiles ||
+        (entry.id === 'vectra-echo' && !(await stat(join(release, 'mcp.mjs'))).isFile())) {
+      throw new Error('Reviewed release has unexpected files');
+    }
     const manifest = JSON.parse(await readFile(join(release, 'plugin.json'), 'utf8'));
-    if (manifest.id !== entry.id || manifest.name !== entry.name || manifest.version !== entry.version || manifest.description !== entry.description || manifest.schemaVersion !== 1 || manifest.apiVersion !== '1' || manifest.permissions.join(',') !== 'mcp:stdio' || Object.keys(manifest.mcpServers).join(',') !== 'echo' || manifest.mcpServers.echo.command !== 'node' || manifest.mcpServers.echo.args.join(',') !== '${PLUGIN_ROOT}/mcp.mjs' || Object.keys(manifest.mcpServers.echo.env).length || manifest.components.length || manifest.hooks.length || Object.keys(manifest.userConfig).length) throw new Error('Catalog metadata and reviewed manifest differ');
+    if (manifest.id !== entry.id || manifest.name !== entry.name || manifest.version !== entry.version || manifest.description !== entry.description || manifest.schemaVersion !== 1 || manifest.apiVersion !== '1' || manifest.components.length || manifest.hooks.length) {
+      throw new Error('Catalog metadata and reviewed manifest differ');
+    }
+    if (entry.id === 'vectra-echo' && (manifest.permissions.join(',') !== 'mcp:stdio' || Object.keys(manifest.mcpServers).join(',') !== 'echo' || manifest.mcpServers.echo.command !== 'node' || manifest.mcpServers.echo.args.join(',') !== '${PLUGIN_ROOT}/mcp.mjs' || Object.keys(manifest.mcpServers.echo.env).length || Object.keys(manifest.userConfig).length)) {
+      throw new Error('Echo release differs from its reviewed manifest');
+    }
+    if (entry.id === 'vectra-github' && (manifest.permissions.join(',') !== 'mcp:http' || Object.keys(manifest.mcpServers).join(',') !== 'github' || manifest.mcpServers.github.transport !== 'http' || manifest.mcpServers.github.url !== 'https://api.githubcopilot.com/mcp/' || Object.keys(manifest.mcpServers.github.headers).join(',') !== 'Authorization' || manifest.mcpServers.github.headers.Authorization !== 'Bearer ${config.github-token}' || Object.keys(manifest.userConfig).join(',') !== 'github-token' || manifest.userConfig['github-token'].required !== true || manifest.userConfig['github-token'].sensitive !== true)) {
+      throw new Error('GitHub release differs from its reviewed manifest');
+    }
     validateCatalogMetadata(entry, manifest);
     const paths = execFileSync('tar', ['-tzf', path], { encoding: 'utf8' }).trim().split('\n').sort();
-    if (paths.join(',') !== 'mcp.mjs,plugin.json') throw new Error('Catalog archive includes unreviewed files');
+    if (paths.join(',') !== expectedFiles) throw new Error('Catalog archive includes unreviewed files');
     for (const file of files) {
       if (!execFileSync('tar', ['-xOzf', path, file]).equals(await readFile(join(release, file)))) {
         throw new Error('Catalog archive differs from reviewed source');

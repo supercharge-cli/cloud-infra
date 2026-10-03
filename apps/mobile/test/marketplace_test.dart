@@ -23,6 +23,37 @@ Map<String, dynamic> echoCatalog() => {
   'source': {'type': 'archive', 'sha256': 'a' * 64},
 };
 
+Map<String, dynamic> githubCatalog() => {
+  'id': 'vectra-github',
+  'name': 'GitHub MCP',
+  'version': '1.0.0',
+  'description': 'Connect to GitHub with a personal access token.',
+  'auth': 'secrets',
+  'targets': ['supercharge-e2b'],
+  'source': {'type': 'archive', 'sha256': 'b' * 64},
+};
+
+Map<String, dynamic> githubInstalled() => {
+  'id': 'vectra-github',
+  'revision': 1,
+  'trusted': false,
+  'enabled': false,
+  'configuredKeys': <String>[],
+  'activeDigest':
+      'bef5d2b97bad049ea95e1a05170fc9a91fcabc1585b9b3c5896e86cc2a30b5e9',
+  'manifest': {
+    'name': 'GitHub MCP',
+    'version': '1.0.0',
+    'permissions': ['mcp:http'],
+    'mcpServers': {
+      'github': {'transport': 'http'},
+    },
+    'userConfig': {
+      'github-token': {'required': true, 'sensitive': true},
+    },
+  },
+};
+
 Map<String, dynamic> discoveryEntry({String id = 'community-echo'}) => {
   'id': id,
   'name': 'Community Echo',
@@ -43,7 +74,8 @@ Map<String, dynamic> installed({
   'trusted': trusted,
   'enabled': enabled,
   'configuredKeys': <String>[],
-  'activeDigest': 'e1288de348eab757a0c5f0dd4580a371d02850470abfc0466af067b672f9081a',
+  'activeDigest':
+      'e1288de348eab757a0c5f0dd4580a371d02850470abfc0466af067b672f9081a',
   'manifest': {
     'name': 'Echo MCP',
     'version': '1.0.0',
@@ -78,6 +110,7 @@ class MarketplaceApi extends VectraClient {
   };
   final requests = <Map<String, dynamic>>[];
   Map<String, dynamic> binding = {};
+  List<String> allowedMcpOrigins = [];
   bool failStatus = false;
   bool failCatalog = false;
   bool failDiscovery = false;
@@ -138,6 +171,7 @@ class MarketplaceApi extends VectraClient {
 
   Map<String, dynamic> status(String id, String bot) => {
     'inventory': {'plugins': stores['$id/$bot'] ?? []},
+    'service': {'allowedMcpOrigins': allowedMcpOrigins},
     'bindings': binding.isEmpty ? {} : {'chat-$bot': binding},
   };
   @override
@@ -155,7 +189,13 @@ class MarketplaceApi extends VectraClient {
     if (pendingAction != null) return pendingAction!.future;
     if (failAction) throw ApiException(500, 'secret-value-should-not-appear');
     final key = '$id/$botId';
-    if (action['action'] == 'installCatalog') stores[key] = [installed()];
+    if (action['action'] == 'installCatalog') {
+      stores[key] = [
+        action['catalogId'] == 'vectra-github'
+            ? githubInstalled()
+            : installed(),
+      ];
+    }
     if (action['action'] == 'pluginAction') {
       final change = action['pluginAction'] as Map;
       final row = stores[key]!.first;
@@ -174,7 +214,10 @@ class MarketplaceApi extends VectraClient {
         'status': 'applied',
         'revision': 1,
         'tools': [
-          {'name': 'echo-tool', 'description': 'vectra-echo/echo/echo: local echo'},
+          {
+            'name': 'echo-tool',
+            'description': 'vectra-echo/echo/echo: local echo',
+          },
         ],
       };
     }
@@ -238,32 +281,38 @@ void main() {
     },
   );
 
-  test('OAuth-only releases cannot be enabled or attached without a flow', () async {
-    api.entries = [
-      {...echoCatalog(), 'auth': 'oauth'},
-    ];
-    api.stores['vm-a/main'] = [
-      {
-        ...installed(trusted: true, enabled: true),
-        'manifest': {
-          ...installed()['manifest'] as Map<String, dynamic>,
-          'userConfig': {
-            'oauthToken': {'required': false},
+  test(
+    'OAuth-only releases cannot be enabled or attached without a flow',
+    () async {
+      api.entries = [
+        {...echoCatalog(), 'auth': 'oauth'},
+      ];
+      api.stores['vm-a/main'] = [
+        {
+          ...installed(trusted: true, enabled: true),
+          'manifest': {
+            ...installed()['manifest'] as Map<String, dynamic>,
+            'userConfig': {
+              'oauthToken': {'required': false},
+            },
           },
         },
-      },
-    ];
-    await controller.load(initialInstanceId: 'vm-a');
-    final plugin = controller.plugin('vectra-echo')!;
-    expect(plugin.authenticationSupported, isFalse);
-    expect(await controller.setEnabled(plugin.id, true), isFalse);
-    expect(await controller.attach(plugin.id, 'echo', 'chat-main'), isFalse);
-    expect(api.requests.where((row) => row['action'] == 'apply'), isEmpty);
-    api.stores['vm-a/main'] = [];
-    await controller.refreshInventory();
-    expect(await controller.install(plugin.id), isFalse);
-    expect(api.requests.where((row) => row['action'] == 'installCatalog'), isEmpty);
-  });
+      ];
+      await controller.load(initialInstanceId: 'vm-a');
+      final plugin = controller.plugin('vectra-echo')!;
+      expect(plugin.authenticationSupported, isFalse);
+      expect(await controller.setEnabled(plugin.id, true), isFalse);
+      expect(await controller.attach(plugin.id, 'echo', 'chat-main'), isFalse);
+      expect(api.requests.where((row) => row['action'] == 'apply'), isEmpty);
+      api.stores['vm-a/main'] = [];
+      await controller.refreshInventory();
+      expect(await controller.install(plugin.id), isFalse);
+      expect(
+        api.requests.where((row) => row['action'] == 'installCatalog'),
+        isEmpty,
+      );
+    },
+  );
 
   test(
     'install, write-only configuration, exact approval, enable, attach and consented verification use VM actions',
@@ -364,16 +413,22 @@ void main() {
     },
   );
 
-  test('a catalog ID collision cannot approve, enable, attach or verify', () async {
-    api.stores['vm-a/main'] = [
-      {...installed(trusted: true, enabled: true), 'activeDigest': 'b' * 64},
-    ];
-    await controller.load(initialInstanceId: 'vm-a');
-    expect(controller.plugin('vectra-echo')!.reviewedInstallation, isFalse);
-    expect(controller.reviewFingerprint('vectra-echo'), isNull);
-    expect(await controller.setEnabled('vectra-echo', true), isFalse);
-    expect(await controller.attach('vectra-echo', 'echo', 'chat-main'), isFalse);
-  });
+  test(
+    'a catalog ID collision cannot approve, enable, attach or verify',
+    () async {
+      api.stores['vm-a/main'] = [
+        {...installed(trusted: true, enabled: true), 'activeDigest': 'b' * 64},
+      ];
+      await controller.load(initialInstanceId: 'vm-a');
+      expect(controller.plugin('vectra-echo')!.reviewedInstallation, isFalse);
+      expect(controller.reviewFingerprint('vectra-echo'), isNull);
+      expect(await controller.setEnabled('vectra-echo', true), isFalse);
+      expect(
+        await controller.attach('vectra-echo', 'echo', 'chat-main'),
+        isFalse,
+      );
+    },
+  );
 
   test(
     'VM inventory is authoritative, including non-catalog plugins',
@@ -724,6 +779,47 @@ void main() {
   );
 
   test(
+    'GitHub token stays write-only in the VM and its tools require a conversation',
+    () async {
+      api.entries = [githubCatalog()];
+      await controller.load(initialInstanceId: 'vm-a');
+      expect(await controller.install('vectra-github'), isFalse);
+      api.allowedMcpOrigins = ['https://api.githubcopilot.com'];
+      await controller.refreshInventory();
+      expect(await controller.install('vectra-github'), isTrue);
+      expect(controller.plugin('vectra-github')!.reviewedInstallation, isTrue);
+      expect(await controller.setEnabled('vectra-github', true), isFalse);
+      expect(
+        await controller.configure('vectra-github', {
+          'github-token': 'test-secret',
+        }),
+        isTrue,
+      );
+      expect(controller.plugin('vectra-github')!.configuredKeys, [
+        'github-token',
+      ]);
+      expect(
+        controller.plugin('vectra-github')!.installed.toString(),
+        isNot(contains('test-secret')),
+      );
+      final consent = controller.reviewFingerprint('vectra-github')!;
+      expect(await controller.approve('vectra-github', consent), isTrue);
+      expect(await controller.setEnabled('vectra-github', true), isTrue);
+      expect(
+        await controller.attach('vectra-github', 'github', 'chat-main'),
+        isTrue,
+      );
+      expect(
+        api.requests
+            .where((row) => row['action'] == 'apply')
+            .single['pluginId'],
+        'vectra-github',
+      );
+      expect(controller.bindings['chat-main']['pluginId'], 'vectra-github');
+    },
+  );
+
+  test(
     'discovery is independent of reviewed catalog, inventory and actions',
     () async {
       (api.discoveryResponse['discovery'] as Map)['plugins'] = [
@@ -733,6 +829,7 @@ void main() {
       ];
       api.failCatalog = true;
       await controller.load();
+      await controller.loadDiscovery();
       expect(controller.catalogError, isNotNull);
       expect(controller.discovery, hasLength(2));
       expect(controller.plugin('community-echo'), isNull);
@@ -754,6 +851,7 @@ void main() {
       api.failCatalog = false;
       api.failDiscovery = true;
       await controller.load();
+      await controller.loadDiscovery();
       expect(controller.discoveryError, isNotNull);
       expect(controller.discovery, isEmpty);
       expect(controller.plugin('vectra-echo')!.digest, 'a' * 64);
@@ -772,10 +870,11 @@ void main() {
     },
   );
 
-  testWidgets('browse-only discovery searches categories without VM actions', (
+  testWidgets('marketplace only presents installable reviewed entries', (
     tester,
   ) async {
     (api.discoveryResponse['discovery'] as Map)['plugins'] = [discoveryEntry()];
+    api.entries = [echoCatalog(), githubCatalog()];
     await controller.load();
     await tester.pumpWidget(
       MaterialApp(
@@ -785,22 +884,15 @@ void main() {
     );
     await tester.enterText(find.byType(TextField).first, 'community tools');
     await tester.pump();
-    await scrollTo(tester, find.text('Community Echo'), 250);
-    expect(find.text('Browse only — not supported in VM'), findsOneWidget);
-    await tester.tap(find.text('Community Echo'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('not a reviewed release'), findsOneWidget);
-    expect(find.text('Open source link'), findsOneWidget);
-    expect(find.textContaining('openai/plugins @'), findsOneWidget);
-    expect(find.text('Install in selected bot VM'), findsNothing);
-    expect(find.text('Configure'), findsNothing);
-    expect(find.text('Attach'), findsNothing);
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-    await scrollTo(tester, find.text('Installed'), -250);
-    await tester.tap(find.text('Installed'));
-    await tester.pump();
     expect(find.text('Community Echo'), findsNothing);
+    await scrollTo(tester, find.text('No plugins match your search.'), 250);
+    expect(find.text('No plugins match your search.'), findsOneWidget);
+    await tester.drag(find.byType(ListView).first, const Offset(0, 600));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'github');
+    await tester.pump();
+    await scrollTo(tester, find.text('GitHub MCP'), 250);
+    expect(find.text('GitHub MCP'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

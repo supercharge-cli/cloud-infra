@@ -25,6 +25,7 @@ class MarketplaceController extends ChangeNotifier {
   Map<String, dynamic> discoverySource = {};
   List<Map<String, dynamic>> bots = [];
   List<Map<String, dynamic>> inventory = [];
+  List<String> allowedMcpOrigins = [];
   List<Map<String, dynamic>> conversations = [];
   Map<String, dynamic> bindings = {};
   String? instanceId;
@@ -86,7 +87,6 @@ class MarketplaceController extends ChangeNotifier {
   Future<void> load({String? initialInstanceId, String? initialBotId}) async {
     await Future.wait([
       loadCatalog(),
-      loadDiscovery(),
       loadWorkspaces(
         preferredId: initialInstanceId,
         preferredBot: initialBotId,
@@ -204,6 +204,7 @@ class MarketplaceController extends ChangeNotifier {
 
   void _clearInventory() {
     inventory = [];
+    allowedMcpOrigins = [];
     bindings = {};
     conversations = [];
     inventoryKnown = false;
@@ -279,6 +280,9 @@ class MarketplaceController extends ChangeNotifier {
       final rows = marketplaceMap(response['inventory'])['plugins'];
       if (rows is! List) throw const FormatException('Inventory missing');
       inventory = marketplaceRows(rows);
+      allowedMcpOrigins = marketplaceStrings(
+        marketplaceMap(response['service'])['allowedMcpOrigins'],
+      );
       bindings = marketplaceMap(response['bindings']);
       inventoryKnown = true;
       _poll?.cancel();
@@ -389,6 +393,8 @@ class MarketplaceController extends ChangeNotifier {
     if (selected == null ||
         selected.installed != null ||
         !selected.supportsVm ||
+        (id == 'vectra-github' &&
+            !allowedMcpOrigins.contains('https://api.githubcopilot.com')) ||
         selected.auth == 'oauth' ||
         selected.digest == null) {
       return false;
@@ -428,7 +434,10 @@ class MarketplaceController extends ChangeNotifier {
 
   String? reviewFingerprint(String id) {
     final selected = plugin(id);
-    if (selected == null || !inventoryKnown || !selected.reviewable || !selected.reviewedInstallation) {
+    if (selected == null ||
+        !inventoryKnown ||
+        !selected.reviewable ||
+        !selected.reviewedInstallation) {
       return null;
     }
     return jsonEncode([
@@ -471,8 +480,7 @@ class MarketplaceController extends ChangeNotifier {
     final selected = plugin(id);
     if (selected == null ||
         !selected.reviewable ||
-        (enabled &&
-            !selected.reviewedInstallation) ||
+        (enabled && !selected.reviewedInstallation) ||
         (enabled &&
             (!selected.trusted ||
                 !selected.authenticationSupported ||
@@ -496,6 +504,8 @@ class MarketplaceController extends ChangeNotifier {
         !selected.trusted ||
         !selected.reviewedInstallation ||
         !selected.authenticationSupported ||
+        (id == 'vectra-github' &&
+            !allowedMcpOrigins.contains('https://api.githubcopilot.com')) ||
         !selected.servers.contains(server) ||
         !conversations.any((row) => row['sessionId'] == session)) {
       return false;
@@ -529,7 +539,8 @@ class MarketplaceController extends ChangeNotifier {
       return false;
     }
     if (action == 'retry' &&
-        (binding['status'] != 'failed' || plugin(id)?.reviewedInstallation != true)) {
+        (binding['status'] != 'failed' ||
+            plugin(id)?.reviewedInstallation != true)) {
       return false;
     }
     if (action == 'verify') {
