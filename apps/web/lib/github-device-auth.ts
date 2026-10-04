@@ -144,8 +144,10 @@ export async function startDeviceAuth(instance: Instance, conversationId: string
 export async function statusDeviceAuth(instance: Instance) {
   const collection = (await getDb()).collection<Handoff & { _id: string }>('github_device_auth');
   const record = await collection.findOne({ _id: instance.id });
-  if (!record) return { status: 'idle' };
-  if (record.sandboxId !== instance.sandboxId) return { status: 'idle' };
+  if (!record || record.sandboxId !== instance.sandboxId) {
+    const current = await vm(instance, 'verify');
+    return current.username ? { status: 'delivered', username: current.username } : { status: 'idle' };
+  }
   if (record.expiresAt <= Date.now() && ['starting', 'pending'].includes(record.status)) {
     await collection.updateOne({ instanceId: instance.id, id: record.id, status: record.status }, { $set: { status: 'expired' } });
     await vm(instance, 'cancel', record.id).catch(() => undefined);
@@ -158,6 +160,10 @@ export async function statusDeviceAuth(instance: Instance) {
       return { status: state.state };
     }
     return { status: state.code && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(state.code) ? 'pending' : 'starting', code: state.code && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(state.code) ? state.code : undefined, url: DEVICE_URL, expiresAt: record.expiresAt };
+  }
+  if (['idle', 'cancelled', 'expired', 'failed', 'delivered'].includes(record.status)) {
+    const current = await vm(instance, 'verify');
+    return current.username ? { status: 'delivered', username: current.username } : { status: record.status === 'delivered' ? 'idle' : record.status };
   }
   return { status: record.status, username: record.username };
 }

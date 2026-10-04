@@ -5,7 +5,167 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api/client.dart';
+import '../theme.dart';
 import 'github_auth.dart';
+
+class GitHubAuthConnection extends StatefulWidget {
+  const GitHubAuthConnection({
+    super.key,
+    required this.api,
+    required this.instanceId,
+  });
+
+  final VectraClient api;
+  final String instanceId;
+
+  @override
+  State<GitHubAuthConnection> createState() => _GitHubAuthConnectionState();
+}
+
+class _GitHubAuthConnectionState extends State<GitHubAuthConnection>
+    with WidgetsBindingObserver {
+  Timer? _timer;
+  Map<String, dynamic>? _auth;
+  bool _busy = false;
+  bool _failed = false;
+  int _generation = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_refresh());
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) => _refresh());
+  }
+
+  @override
+  void didUpdateWidget(GitHubAuthConnection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.instanceId != widget.instanceId ||
+        oldWidget.api != widget.api) {
+      _generation++;
+      _auth = null;
+      _failed = false;
+      _busy = false;
+      unawaited(_refresh());
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_refresh());
+  }
+
+  Future<void> _refresh() async {
+    if (_busy) return;
+    _busy = true;
+    final generation = ++_generation;
+    final instanceId = widget.instanceId;
+    final api = widget.api;
+    try {
+      final auth = await api.githubAuthStatus(instanceId);
+      if (mounted && generation == _generation) {
+        setState(() {
+          _auth = auth;
+          _failed = false;
+        });
+      }
+    } catch (_) {
+      if (mounted && generation == _generation) {
+        setState(() => _failed = true);
+      }
+    } finally {
+      if (generation == _generation) _busy = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _generation++;
+    _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final connected = _auth?['status'] == 'delivered' && !_failed;
+    final username = _auth?['username'] is String
+        ? _auth!['username'] as String
+        : '';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: connected
+          ? Semantics(
+              label:
+                  'GitHub CLI connected${username.isEmpty ? '' : ' as $username'}',
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Vc.greenSoft),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'GitHub CLI connected',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          username.isEmpty
+                              ? 'Ready on this VM'
+                              : 'Connected as $username',
+                          style: const TextStyle(fontSize: 12, color: Vc.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : _failed || _auth == null
+          ? TextButton.icon(
+              onPressed: _busy ? null : _refresh,
+              icon: const Icon(Icons.refresh),
+              label: Text(
+                _failed
+                    ? 'Check GitHub CLI connection'
+                    : 'Checking GitHub CLI…',
+              ),
+            )
+          : OutlinedButton.icon(
+              key: const ValueKey('workspace-github-login'),
+              onPressed: () async {
+                await showDialog<void>(
+                  context: context,
+                  builder: (_) => GitHubAuthDialog(
+                    api: widget.api,
+                    instanceId: widget.instanceId,
+                  ),
+                );
+                if (mounted) await _refresh();
+              },
+              icon: const Icon(Icons.login, color: Vc.greenSoft),
+              label: const Align(
+                alignment: Alignment.centerLeft,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Connect GitHub CLI',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    Text(
+                      'Sign in on this VM',
+                      style: TextStyle(fontSize: 12, color: Vc.muted),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+}
 
 class GitHubAuthDialog extends StatefulWidget {
   const GitHubAuthDialog({

@@ -49,8 +49,9 @@ class FakeGitHubClient extends VectraClient {
 
   @override
   Future<Map<String, dynamic>> githubAuthDone(String id) async {
-    if (!authorized)
+    if (!authorized) {
       throw ApiException(409, 'Complete authorization on GitHub first.');
+    }
     return state = {'status': 'delivered', 'username': 'fixture-user'};
   }
 
@@ -73,6 +74,58 @@ class FakeGitHubClient extends VectraClient {
 }
 
 void main() {
+  testWidgets(
+    'Connected VM shows status instead of another GitHub login prompt',
+    (tester) async {
+      final api = FakeGitHubClient()
+        ..state = {'status': 'delivered', 'username': 'fixture-user'};
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GitHubAuthConnection(api: api, instanceId: 'vm-1'),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('GitHub CLI connected'), findsOneWidget);
+      expect(find.text('Connected as fixture-user'), findsOneWidget);
+      expect(find.text('Connect GitHub CLI'), findsNothing);
+      expect(api.standaloneStarts, 0);
+
+      api.state = {'status': 'idle'};
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pump();
+      expect(find.text('Connect GitHub CLI'), findsOneWidget);
+    },
+  );
+
+  testWidgets('Completed popup refreshes the workspace connection status', (
+    tester,
+  ) async {
+    final api = FakeGitHubClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: GitHubAuthConnection(api: api, instanceId: 'vm-1'),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('workspace-github-login')));
+    await tester.pumpAndSettle();
+    expect(find.text('ABCD-1234'), findsOneWidget);
+    await tester.tap(find.text('Verify connection'));
+    await tester.pump();
+    expect(find.textContaining('Done! GitHub connected'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(find.text('GitHub CLI connected'), findsOneWidget);
+    expect(find.text('Connect GitHub CLI'), findsNothing);
+    expect(api.standaloneStarts, 1);
+  });
+
   testWidgets(
     'Standalone workspace popup starts without chat and verifies only after VM confirmation',
     (tester) async {

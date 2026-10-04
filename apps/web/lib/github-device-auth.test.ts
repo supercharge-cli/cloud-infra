@@ -143,6 +143,26 @@ test('repeat start, competing attempt, cancel, expiry and sandbox replacement', 
   assert.equal((await f.api.statusDeviceAuth(f.instance())).status, 'idle');
 });
 
+test('status reflects actual GitHub CLI login, including preexisting login and logout', async () => {
+  const f = fixture();
+  assert.deepEqual(await f.api.statusDeviceAuth(f.instance()), { status: 'idle' });
+  f.login('already-connected');
+  assert.deepEqual(await f.api.statusDeviceAuth(f.instance()), { status: 'delivered', username: 'already-connected' });
+  f.login();
+  assert.deepEqual(await f.api.statusDeviceAuth(f.instance()), { status: 'idle' });
+
+  await f.api.startDeviceAuth(f.instance(), null, 'request-home-123');
+  f.vm({ state: 'finished', code: 'ABCD-1234' });
+  f.login('real-user');
+  await f.api.finishDeviceAuth(f.instance());
+  assert.deepEqual(await f.api.statusDeviceAuth(f.instance()), { status: 'delivered', username: 'real-user' });
+  f.login();
+  assert.deepEqual(await f.api.statusDeviceAuth(f.instance()), { status: 'idle' });
+  f.generation('vm-two');
+  f.login('new-vm-user');
+  assert.deepEqual(await f.api.statusDeviceAuth(f.instance()), { status: 'delivered', username: 'new-vm-user' });
+});
+
 test('failed device authorization is reported and never resumes', async () => {
   const f = fixture();
   await f.api.startDeviceAuth(f.instance(), 'github-chat', 'request-123');

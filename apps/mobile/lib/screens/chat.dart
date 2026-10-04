@@ -1982,33 +1982,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
         ),
         if (_botsEnabled && runtime == AgentRuntime.supercharge)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: OutlinedButton.icon(
-              key: const ValueKey('workspace-github-login'),
-              onPressed: () => showDialog<void>(
-                context: context,
-                builder: (_) => GitHubAuthDialog(api: api, instanceId: id),
-              ),
-              icon: const Icon(Icons.login, color: Vc.greenSoft),
-              label: const Align(
-                alignment: Alignment.centerLeft,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Connect GitHub CLI',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    Text(
-                      'Sign in on this VM',
-                      style: TextStyle(fontSize: 12, color: Vc.muted),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+          GitHubAuthConnection(api: api, instanceId: id),
         Expanded(
           child: ListView(
             children: [
