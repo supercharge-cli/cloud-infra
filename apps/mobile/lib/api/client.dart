@@ -38,6 +38,9 @@ class VectraClient {
     if (token != null && token!.isNotEmpty) 'authorization': 'Bearer $token',
   };
 
+  String? _errorCode(Map<String, dynamic> data) =>
+      data['code'] is String ? data['code'] as String : null;
+
   String _friendlyError(
     int status,
     Map<String, dynamic> data,
@@ -106,7 +109,7 @@ class VectraClient {
       throw ApiException(
         res.statusCode,
         _friendlyError(res.statusCode, data, res.reasonPhrase),
-        code: data['code'] as String?,
+        code: _errorCode(data),
       );
     }
     return data;
@@ -874,7 +877,7 @@ class VectraClient {
         throw ApiException(
           res.statusCode,
           _friendlyError(res.statusCode, data, body),
-          code: data['code'] as String?,
+          code: _errorCode(data),
         );
       }
       await for (final event in decodeEventStream(
