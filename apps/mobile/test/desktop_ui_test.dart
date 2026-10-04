@@ -86,6 +86,7 @@ class _Client extends VectraClient {
   @override
   Stream<ComputerFrame> browserFrames(
     String id, {
+    String? botId,
     EventStreamCancellation? cancellation,
   }) => StreamController<ComputerFrame>().stream;
 
@@ -138,6 +139,7 @@ class _Client extends VectraClient {
 class _PreviewClient extends _Client {
   int frameSubscriptions = 0;
   int frameCancellations = 0;
+  final frameTargets = <String?>[];
   int ticketRequests = 0;
   int takeoverRequests = 0;
 
@@ -154,9 +156,11 @@ class _PreviewClient extends _Client {
   @override
   Stream<ComputerFrame> browserFrames(
     String id, {
+    String? botId,
     EventStreamCancellation? cancellation,
   }) {
     frameSubscriptions++;
+    frameTargets.add(botId);
     final controller = StreamController<ComputerFrame>();
     cancellation?.onCancel(() {
       frameCancellations++;
@@ -166,9 +170,10 @@ class _PreviewClient extends _Client {
   }
 
   @override
-  Future<Map<String, dynamic>> computerStatus(String id) async => {
-    'handoff': true,
-  };
+  Future<Map<String, dynamic>> computerStatus(
+    String id, {
+    String? botId,
+  }) async => {'handoff': true};
 
   @override
   Future<DateTime> startBrowserHandoff(
@@ -186,6 +191,7 @@ class _PreviewClient extends _Client {
   Future<String> openAiBrowserVnc(
     String id, {
     required String handoffId,
+    String? botId,
   }) async {
     ticketRequests++;
     return 'wss://example.invalid/vnc';
@@ -194,6 +200,26 @@ class _PreviewClient extends _Client {
 
 class _BotClient extends _Client {
   final subscriptions = <(String?, String?)>[];
+  final frameTargets = <String?>[];
+  final frameStreams = <StreamController<ComputerFrame>>[];
+  int frameCancellations = 0;
+
+  @override
+  Stream<ComputerFrame> browserFrames(
+    String id, {
+    String? botId,
+    EventStreamCancellation? cancellation,
+  }) {
+    frameTargets.add(botId);
+    final controller = StreamController<ComputerFrame>();
+    frameStreams.add(controller);
+    cancellation?.onCancel(() {
+      frameCancellations++;
+      unawaited(controller.close());
+    });
+    return controller.stream;
+  }
+
   final calls = <String>[];
   final sent = <(String?, String?, String)>[];
   final savedBots = <Map<String, dynamic>>[
@@ -586,10 +612,12 @@ void main() {
     expect(find.byKey(const ValueKey('desktop-sidebar')), findsOneWidget);
     expect(find.byType(MenuBar), findsOneWidget);
     expect(
-      find.byWidgetPredicate((widget) =>
-          widget is Image &&
-          widget.image is AssetImage &&
-          (widget.image as AssetImage).assetName == 'assets/brand/logo.png'),
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Image &&
+            widget.image is AssetImage &&
+            (widget.image as AssetImage).assetName == 'assets/brand/logo.png',
+      ),
       findsWidgets,
     );
     expect(tester.takeException(), isNull);
@@ -627,7 +655,8 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     PathProviderPlatform.instance = _Paths();
     await _size(tester, const Size(1440, 900));
-    await _app(tester, _BotClient(), path: '/chat/design?group=1');
+    final client = _BotClient();
+    await _app(tester, client, path: '/chat/design?group=1');
     for (var i = 0; i < 8; i++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 60)),
@@ -637,8 +666,60 @@ void main() {
     expect(find.byKey(const ValueKey('sidebar-group')), findsOneWidget);
     expect(find.byKey(const ValueKey('group-composer')), findsOneWidget);
     expect(find.text('Research · working'), findsOneWidget);
+    for (var i = 0; i < 100 && client.frameTargets.isEmpty; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(client.frameTargets, contains('main'));
     expect(tester.takeException(), isNull);
     await _capture(tester, 'group-desktop');
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Android computer subscribes to the selected bot desktop', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    PathProviderPlatform.instance = _Paths();
+    await _size(tester, const Size(390, 844));
+    final client = _BotClient();
+    await _app(tester, client, path: '/chat/design?bot=research');
+    for (
+      var i = 0;
+      i < 100 &&
+          find
+              .textContaining('Research only reply', findRichText: true)
+              .evaluate()
+              .isEmpty;
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(
+      find.textContaining('Research only reply', findRichText: true),
+      findsWidgets,
+    );
+    await tester.ensureVisible(find.byType(ComputerBar));
+    await tester.tap(find.byType(ComputerBar));
+    await tester.pump();
+    for (var i = 0; i < 100 && client.frameTargets.isEmpty; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(client.frameTargets, contains('research'));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.byType(ComputerPage), findsOneWidget);
+    expect(
+      tester.widget<ComputerPage>(find.byType(ComputerPage)).state,
+      isA<ComputerState>(),
+    );
     debugDefaultTargetPlatformOverride = null;
   });
 
@@ -774,10 +855,12 @@ void main() {
     await _app(tester, _Client(), path: '/login');
     expect(find.byType(MenuBar), findsNothing);
     expect(
-      find.byWidgetPredicate((widget) =>
-          widget is Image &&
-          widget.image is AssetImage &&
-          (widget.image as AssetImage).assetName == 'assets/brand/logo.png'),
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Image &&
+            widget.image is AssetImage &&
+            (widget.image as AssetImage).assetName == 'assets/brand/logo.png',
+      ),
       findsWidgets,
     );
     expect(tester.takeException(), isNull);
@@ -931,6 +1014,20 @@ void main() {
         reason:
             'calls=${client.calls}, subscriptions=${client.subscriptions}, text=${tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).join(' | ')}',
       );
+      final computerState = tester
+          .widget<DesktopChatWorkspace>(find.byType(DesktopChatWorkspace))
+          .computer;
+      expect(client.frameTargets, contains('main'));
+      client.frameStreams.last.add(
+        const ComputerFrame(
+          type: 'status',
+          desktop: true,
+          connected: true,
+          screencasting: true,
+        ),
+      );
+      await tester.pump();
+      expect(computerState.desktopAvailable, true);
       await _capture(tester, 'agents-desktop');
       await tester.tap(find.byTooltip('Bots'));
       await tester.pump(const Duration(milliseconds: 350));
@@ -971,6 +1068,10 @@ void main() {
         findsNothing,
       );
       expect(client.subscriptions.last, ('research', 'chat-research'));
+      expect(client.frameTargets, containsAllInOrder(['main', 'research']));
+      expect(client.frameCancellations, greaterThanOrEqualTo(1));
+      expect(computerState.desktopAvailable, false);
+      expect(computerState.liveJpeg, isNull);
       final composer = find.byWidgetPredicate(
         (widget) =>
             widget is TextField && widget.decoration?.hintText == 'Message',
@@ -986,6 +1087,20 @@ void main() {
       }
       expect(client.sent, isNotEmpty, reason: '${client.calls}');
       expect(client.sent.last, ('research', 'chat-research', 'research this'));
+      await tester.tap(find.byKey(const ValueKey('sidebar-group')));
+      for (
+        var attempt = 0;
+        attempt < 100 && client.frameTargets.last != 'main';
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(client.frameTargets.last, 'main');
+      expect(client.frameCancellations, greaterThanOrEqualTo(2));
+      expect(find.byKey(const ValueKey('group-composer')), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await tester.runAsync(

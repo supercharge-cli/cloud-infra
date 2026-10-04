@@ -1,17 +1,27 @@
 import { proxyInbox, requireChatInstance } from '@/lib/app-chat';
+import { computerBotId, computerBotQuery, matchesComputerBot } from '@/lib/computer-target';
 
 /** Keep well under Vercel’s 300s hard kill so idle SSE does not pile up. */
 export const maxDuration = 55;
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   const gate = await requireChatInstance(id);
   if (!gate.ok) return gate.response;
+  const botId = computerBotId(new URL(req.url).searchParams.get('botId'));
+  if (!botId) return new Response('Invalid botId', { status: 400 });
 
   try {
-    const res = await proxyInbox(gate.inst, '/v1/computer/browser', {
+    if (botId !== 'main') {
+      const status = await proxyInbox(gate.inst, `/v1/computer/status?${computerBotQuery(botId)}`);
+      if (!status.ok) return new Response('Agent desktop unavailable', { status: status.status });
+      if (!matchesComputerBot(await status.json(), botId)) {
+        return new Response('Agent desktop identity unavailable', { status: 409 });
+      }
+    }
+    const res = await proxyInbox(gate.inst, `/v1/computer/browser?${computerBotQuery(botId)}`, {
       headers: { accept: 'text/event-stream' },
     });
     if (!res.body) {

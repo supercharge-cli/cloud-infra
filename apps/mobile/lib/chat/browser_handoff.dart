@@ -136,7 +136,14 @@ class BrowserHandoffController extends ChangeNotifier {
       // Revoke old watch connections before checking or changing remote state.
       await _suspendViewer();
       if (_closeRequested) return;
-      final computer = await _api.computerStatus(_instanceId);
+      final computer = await _api.computerStatus(_instanceId, botId: _botId);
+      if (_botId != null && _botId != 'main') {
+        final desktop = computer['desktop'];
+        final desktopBot = desktop is Map ? desktop['botId'] : null;
+        if (computer['botId'] != _botId && desktopBot != _botId) {
+          throw StateError('This agent desktop is not available yet.');
+        }
+      }
       if (computer['handoff'] != false &&
           (_handoffId == null || computer['handoffId'] != _handoffId)) {
         throw StateError(
@@ -278,7 +285,11 @@ class BrowserHandoffController extends ChangeNotifier {
         _expired = true;
         _mayContinue = false;
       }
-      await _api.stopBrowserHandoff(_instanceId, handoffId: _handoffId!);
+      await _api.stopBrowserHandoff(
+        _instanceId,
+        handoffId: _handoffId!,
+        botId: _botId,
+      );
       final shouldContinue =
           continueTask && _mayContinue && !_expired && !_closeRequested;
       _hasControl = false;

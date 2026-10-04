@@ -24,6 +24,7 @@ type WorkspaceEntry = {
 
 type Props = {
   instanceId: string;
+  botId?: string;
   sandboxId?: string;
   runtime?: 'xibecode' | 'supercharge';
   disabled?: boolean;
@@ -61,7 +62,7 @@ function frameData(event: BrowserEvent): string | null {
   return `data:image/jpeg;base64,${candidate}`;
 }
 
-export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', disabled = false, onContinue }: Props) {
+export function SandboxWorkspace({ instanceId, botId = 'main', sandboxId, runtime = 'xibecode', disabled = false, onContinue }: Props) {
   const [tab, setTab] = useState<'browser' | 'files'>('browser');
   const [directory, setDirectory] = useState('/home/user/workspace');
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
@@ -108,9 +109,9 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
 
   useEffect(() => () => {
     if (ownedHandoff.current) void fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop', handoffId: handoffId.current }), keepalive: true,
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop', handoffId: handoffId.current, botId }), keepalive: true,
     });
-  }, [instanceId]);
+  }, [instanceId, botId]);
 
   const loadDirectory = useCallback(async (path: string) => {
     setLoadingFiles(true);
@@ -162,7 +163,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
       controller = request;
       setBrowserStatus('connecting');
       try {
-        const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/browser`, {
+        const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/browser?botId=${encodeURIComponent(botId)}`, {
           headers: { accept: 'text/event-stream' }, signal: request.signal,
         });
         if (!res.ok || !res.body) throw new Error(`Browser stream unavailable (${res.status})`);
@@ -197,7 +198,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
     };
     void listen(); document.addEventListener('visibilitychange', visibility);
     return () => { disposed = true; clearTimeout(reconnect); controller?.abort(); document.removeEventListener('visibilitychange', visibility); };
-  }, [disabled, instanceId, tab, controlOpen]);
+  }, [disabled, instanceId, botId, tab, controlOpen]);
 
   const parentPath = useMemo(() => {
     if (directory === '/home/user/workspace') return directory;
@@ -277,7 +278,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
       const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/control`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(action),
+        body: JSON.stringify({ ...action, botId }),
       });
       const data = await res.json();
       if (!res.ok || data.ok === false) throw new Error(data.error || data.stderr || 'Browser action failed');
@@ -294,7 +295,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
   }, []);
 
   async function openControlConnection() {
-    const ticket = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/vnc-ticket`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handoffId: handoffId.current }) });
+    const ticket = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/vnc-ticket`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handoffId: handoffId.current, botId }) });
     const data = await ticket.json();
     if (!ticket.ok || !data.wsUrl) throw new Error(data.error || 'Desktop connection unavailable');
     if (mounted.current && ownedHandoff.current) { setHandoffWsUrl(String(data.wsUrl)); setViewerRevision((value) => value + 1); }
@@ -305,22 +306,16 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
     handoffPending.current = true; setHandoffBusy(true); setControlOpen(true); setMessage('');
     continuation.current = onContinue;
     try {
-      const response = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/chat/status`);
-      const status = await response.json();
-      if (!response.ok || typeof status.turn?.busy !== 'boolean') throw new Error('Cannot verify agent state. Retry before taking over.');
-      if (status.turn.busy || status.activeBotChats?.length || status.queuedBotChats?.length || status.backgroundTasks?.length) {
-        throw new Error('An agent is working or queued. Open its chat and stop that task before taking over.');
-      }
       if (!mounted.current) return;
       handoffId.current ||= crypto.randomUUID();
       const handoff = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'start', minutes: 10, handoffId: handoffId.current }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'start', minutes: 10, handoffId: handoffId.current, botId }),
       });
       const data = await handoff.json();
       if (!handoff.ok || data.ok !== true || data.handoff !== true || data.handoffId !== handoffId.current) throw new Error(data.error || 'Takeover could not be confirmed');
       ownedHandoff.current = true;
       if (!mounted.current) {
-        await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop', handoffId: handoffId.current }), keepalive: true });
+        await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop', handoffId: handoffId.current, botId }), keepalive: true });
         return;
       }
       const expiry = Number(data.expiresAt);
@@ -360,7 +355,7 @@ export function SandboxWorkspace({ instanceId, sandboxId, runtime = 'xibecode', 
     handoffPending.current = true; setHandoffBusy(true); setHandoffWsUrl('');
     try {
       const response = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/computer/handoff`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop', handoffId: handoffId.current }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop', handoffId: handoffId.current, botId }),
       });
       const data = await response.json();
       if (!response.ok || data.ok !== true || data.handoff !== false || data.handoffId !== handoffId.current) throw new Error(data.error || 'Return could not be confirmed. Input stays disabled; retry.');

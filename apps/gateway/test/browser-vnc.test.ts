@@ -126,7 +126,7 @@ test("exchanges the authenticated daemon ticket and relays queued RFB bytes in o
   });
   f.releaseUpgrade();
   await echoedBoth;
-  assert.deepEqual(f.requests, [{ path: "/v1/computer/vnc-ticket", authorization: headers.authorization }]);
+  assert.deepEqual(f.requests, [{ path: "/v1/computer/vnc-ticket?botId=main", authorization: headers.authorization }]);
   assert.equal(f.upgrades[0].authorization, headers.authorization);
   const upstream = new URL(f.upgrades[0].path, "http://localhost");
   assert.equal(upstream.pathname, "/v1/computer/browser/vnc");
@@ -177,6 +177,25 @@ for (const body of ["{}", "null", '{"ticket":123}', '{"ticket":" "}', "not json"
     assert.equal(f.errors.length, 1);
   });
 }
+
+test("specialist relay requests the matching bot and rejects an unbound daemon ticket", { timeout: 5000 }, async (t) => {
+  const f = await fixture(t, { relay: { botId: "github", handoffId: "handoff-1234567890" } });
+  const close = await f.closed;
+  assert.equal(close.code, 1011);
+  assert.equal(f.requests[0].path, "/v1/computer/vnc-ticket?handoffId=handoff-1234567890&botId=github");
+  assert.equal(f.upgrades.length, 0);
+});
+
+test("specialist relay accepts only a bot-bound ticket", { timeout: 5000 }, async (t) => {
+  const f = await fixture(t, {
+    relay: { botId: "github", handoffId: "handoff-1234567890" },
+    ticketResponse: (_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ ticket: daemonTicket, botId: "github" })); },
+  });
+  f.client.send(Buffer.from("RFB"));
+  await once(f.client, "message");
+  assert.equal(f.requests[0].path, "/v1/computer/vnc-ticket?handoffId=handoff-1234567890&botId=github");
+  assert.equal(f.upgrades.length, 1);
+});
 
 test("does not use the legacy bearer path unless explicitly allowed", { timeout: 5000 }, async (t) => {
   const f = await fixture(t, {

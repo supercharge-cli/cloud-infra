@@ -896,9 +896,18 @@ class VectraClient {
 
   Stream<ComputerFrame> browserFrames(
     String id, {
+    String? botId,
     EventStreamCancellation? cancellation,
   }) async* {
-    final uri = _u('/api/instances/$id/computer/browser');
+    if (botId != null && botId != 'main') {
+      final status = await computerStatus(id, botId: botId);
+      final desktop = status['desktop'];
+      final desktopBot = desktop is Map ? desktop['botId'] : null;
+      if (status['botId'] != botId && desktopBot != botId) {
+        throw StateError('This agent desktop is not available yet.');
+      }
+    }
+    final uri = _u('/api/instances/$id/computer/browser', {'botId': ?botId});
     final req = http.Request('GET', uri);
     req.headers.addAll({
       'accept': 'text/event-stream',
@@ -966,17 +975,37 @@ class VectraClient {
     }
   }
 
-  Future<Map<String, dynamic>> computerStatus(String id) =>
-      _json('GET', '/api/instances/$id/computer/status', timeout: _fast);
+  Future<Map<String, dynamic>> computerStatus(String id, {String? botId}) =>
+      _json(
+        'GET',
+        '/api/instances/$id/computer/status',
+        query: {'botId': ?botId},
+        timeout: _fast,
+      );
+
+  Future<Map<String, dynamic>> computerControl(
+    String id,
+    Map<String, dynamic> action, {
+    String? botId,
+  }) => _json(
+    'POST',
+    '/api/instances/$id/computer/control',
+    body: {
+      for (final entry in action.entries)
+        if (entry.key != 'botId') entry.key: entry.value,
+      'botId': ?botId,
+    },
+  );
 
   Future<String> openAiBrowserVnc(
     String id, {
     required String handoffId,
+    String? botId,
   }) async {
     final ticket = await _json(
       'POST',
       '/api/instances/$id/computer/vnc-ticket',
-      body: {'handoffId': handoffId},
+      body: {'handoffId': handoffId, 'botId': ?botId},
     );
     final raw = ticket['wsUrl'];
     final wsUrl = raw is String ? raw.trim() : '';
@@ -1043,11 +1072,12 @@ class VectraClient {
   Future<void> stopBrowserHandoff(
     String id, {
     required String handoffId,
+    String? botId,
   }) async {
     final result = await _json(
       'POST',
       '/api/instances/$id/computer/handoff',
-      body: {'action': 'stop', 'handoffId': handoffId},
+      body: {'action': 'stop', 'handoffId': handoffId, 'botId': ?botId},
     );
     if (result['ok'] != true ||
         result['handoff'] != false ||

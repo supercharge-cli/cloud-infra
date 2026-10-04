@@ -4,6 +4,7 @@ export type BrowserVncRelayOptions = {
   resolveDaemonBase: () => Promise<string>;
   headers: Record<string, string>;
   handoffId?: string;
+  botId?: string;
   /** Older daemons without the ticket endpoint accepted the gateway bearer. */
   allowLegacyBearer?: boolean;
   onError?: (message: string) => void;
@@ -83,7 +84,10 @@ export async function relayBrowserVnc(
   try {
     const base = (await options.resolveDaemonBase()).replace(/\/$/, "");
     if (finished) return;
-    const response = await fetch(`${base}/v1/computer/vnc-ticket${options.handoffId ? `?handoffId=${encodeURIComponent(options.handoffId)}` : ''}`, {
+    const ticketUrl = new URL(`${base}/v1/computer/vnc-ticket`);
+    if (options.handoffId) ticketUrl.searchParams.set("handoffId", options.handoffId);
+    ticketUrl.searchParams.set("botId", options.botId || "main");
+    const response = await fetch(ticketUrl, {
       headers: { ...options.headers, accept: "application/json" },
       signal: abort.signal,
       redirect: "error",
@@ -95,8 +99,9 @@ export async function relayBrowserVnc(
 
     let ticket: string | undefined;
     if (response.ok) {
-      const data = (await response.json()) as { ticket?: unknown; ok?: boolean } | null;
-      if (data?.ok === false || typeof data?.ticket !== "string" || !data.ticket.trim()) {
+      const data = (await response.json()) as { ticket?: unknown; botId?: unknown; ok?: boolean } | null;
+      if (data?.ok === false || typeof data?.ticket !== "string" || !data.ticket.trim() ||
+          (data.botId || "main") !== (options.botId || "main")) {
         fail("Browser VNC daemon did not issue a ticket");
         return;
       }
@@ -105,7 +110,7 @@ export async function relayBrowserVnc(
       await response.body?.cancel();
       // Only an explicitly absent endpoint permits the pre-ticket bearer contract.
       // Auth failures, unavailable sidecars, and malformed successes must fail closed.
-      if (!options.allowLegacyBearer || ![404, 405].includes(response.status)) {
+      if (!options.allowLegacyBearer || (options.botId && options.botId !== "main") || ![404, 405].includes(response.status)) {
         fail(`Browser VNC ticket request failed (HTTP ${response.status})`);
         return;
       }

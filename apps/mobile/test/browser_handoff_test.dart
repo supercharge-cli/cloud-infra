@@ -24,12 +24,20 @@ class _Client extends VectraClient {
   Completer<DateTime>? pendingStart;
   Completer<void>? pendingRelease;
   Completer<Map<String, dynamic>>? pendingStatus;
+  final computerTargets = <String?>[];
+  final startTargets = <String?>[];
+  final releaseTargets = <String?>[];
+  final stopTargets = <(String?, String?)>[];
 
   @override
-  Future<Map<String, dynamic>> computerStatus(String id) async {
+  Future<Map<String, dynamic>> computerStatus(
+    String id, {
+    String? botId,
+  }) async {
+    computerTargets.add(botId);
     calls.add('computer');
     if (computerFailure != null) throw computerFailure!;
-    return computer;
+    return {'botId': ?botId, ...computer};
   }
 
   @override
@@ -53,6 +61,7 @@ class _Client extends VectraClient {
 
   @override
   Future<void> stopChat(String id, {String? botId, String? chatId}) async {
+    stopTargets.add((botId, chatId));
     calls.add('stop');
     if (stopFailure != null) throw stopFailure!;
   }
@@ -65,6 +74,7 @@ class _Client extends VectraClient {
     String? sessionId,
     int minutes = 10,
   }) async {
+    startTargets.add(botId);
     calls.add('start');
     if (startFailure != null) throw startFailure!;
     return pendingStart == null ? expiry : pendingStart!.future;
@@ -74,7 +84,9 @@ class _Client extends VectraClient {
   Future<void> stopBrowserHandoff(
     String id, {
     required String handoffId,
+    String? botId,
   }) async {
+    releaseTargets.add(botId);
     calls.add('release');
     if (releaseFailure != null) throw releaseFailure!;
     if (pendingRelease != null) await pendingRelease!.future;
@@ -91,6 +103,8 @@ void main() {
   Object? continueFailure;
 
   BrowserHandoffController create({
+    String? botId,
+    String? chatId,
     Duration pollInterval = Duration.zero,
     Duration pollTimeout = const Duration(seconds: 12),
     DateTime Function()? now,
@@ -98,6 +112,8 @@ void main() {
     return BrowserHandoffController(
       api: api,
       instanceId: 'instance-1',
+      botId: botId,
+      chatId: chatId,
       suspendViewer: () async {
         api.calls.add('suspend');
         if (suspendFailure != null) throw suspendFailure!;
@@ -122,6 +138,28 @@ void main() {
   });
 
   tearDown(() => controller.dispose());
+
+  test('specialist takeover refuses a Main desktop response', () async {
+    controller.dispose();
+    controller = create(botId: 'research', chatId: 'chat-research');
+    api.computer = {'handoff': false, 'botId': 'main'};
+    await controller.takeControl();
+    expect(controller.error, contains('agent desktop is not available'));
+    expect(api.stopTargets, isEmpty);
+    expect(api.startTargets, isEmpty);
+  });
+
+  test('takeover and release remain scoped to the selected bot', () async {
+    controller.dispose();
+    controller = create(botId: 'research', chatId: 'chat-research');
+    await controller.takeControl();
+    expect(controller.canContinue, true);
+    await controller.returnControl(continueTask: false);
+    expect(api.computerTargets, ['research']);
+    expect(api.stopTargets, [('research', 'chat-research')]);
+    expect(api.startTargets, ['research']);
+    expect(api.releaseTargets, ['research']);
+  });
 
   test(
     'watching close suspends the viewer without stopping or releasing AI',

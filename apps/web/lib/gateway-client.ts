@@ -2445,10 +2445,11 @@ export async function setBrowserHandoff(
 export async function createBrowserVncTicket(
   sessionId: string,
   handoffId: string,
+  botId = "main",
 ): Promise<{ ticket: string; expiresInSeconds: number }> {
   const res = await gwFetch(
     `/sessions/${encodeURIComponent(sessionId)}/browser/vnc-ticket`,
-    { method: "POST", body: JSON.stringify({ handoffId }) },
+    { method: "POST", body: JSON.stringify({ handoffId, botId }) },
   );
   const data = (await res.json().catch(() => ({}))) as {
     ticket?: string;

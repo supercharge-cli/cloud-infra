@@ -133,6 +133,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   StreamSubscription<ComputerFrame>? _browserSub;
   EventStreamCancellation? _browserCancellation;
   int _browserGeneration = 0;
+  String? _browserTarget;
   List<BotCommand> commands = defaultBotCommandsFor(AgentRuntime.supercharge);
   CloudInstance? inst;
   Map<String, dynamic>? cli;
@@ -178,6 +179,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String? get _botScope =>
       _botsEnabled && store.activeSessionId != null ? _selectedBotId : null;
   String? get _chatScope => _botsEnabled ? store.activeSessionId : null;
+  String? get _desktopBotTarget =>
+      _botsEnabled ? (_groupOpen ? 'main' : _selectedBotId) : null;
+  String? get _desktopChatTarget => _groupOpen ? null : _chatScope;
   String get _selectedBotName => selectedBot?.name ?? 'Main';
   String _botPreview(BotProfile bot) =>
       _lastBotPreview[bot.id] ??
@@ -246,7 +250,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     pending
       ..clear()
       ..addAll(origin.attachments);
-    computer.clear();
+    _switchBrowserTarget(_desktopBotTarget);
     computer.replay(events);
     _switchingBot = false;
     _contactThreadLoading = false;
@@ -279,10 +283,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         oldWidget.initialSessionId != widget.initialSessionId ||
         oldWidget.showGroup != widget.showGroup) {
       if (widget.showGroup) {
+        _switchBrowserTarget(_botsEnabled ? 'main' : null);
         setState(() {
           _groupOpen = true;
           _phoneContactsOpen = false;
         });
+        _syncBrowserStream();
       } else if (widget.initialBotId != null) {
         final bot = bots
             .where((bot) => bot.id == widget.initialBotId)
@@ -660,10 +666,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  void _switchBrowserTarget(String? target) {
+    if (_browserTarget == target) return;
+    _stopBrowserStream();
+    _browserTarget = target;
+    computer.clear();
+  }
+
   void _syncBrowserStream() {
+    _switchBrowserTarget(_desktopBotTarget);
     final want =
         !disposed &&
         !backgrounded &&
+        !_switchingBot &&
         !_browserViewerOpen &&
         !paymentBlocked &&
         (_computerOpen ||
@@ -702,7 +717,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final cancellation = EventStreamCancellation();
     _browserCancellation = cancellation;
     final generation = ++_browserGeneration;
-    _browserSub = _browserLoop(generation, cancellation).listen(
+    _browserSub = _browserLoop(generation, cancellation, _browserTarget).listen(
       (frame) {
         if (!mounted || generation != _browserGeneration) return;
         setState(() {
@@ -733,6 +748,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Stream<ComputerFrame> _browserLoop(
     int generation,
     EventStreamCancellation cancellation,
+    String? botId,
   ) async* {
     var delay = 1;
     while (!disposed &&
@@ -741,6 +757,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       try {
         await for (final frame in api.browserFrames(
           id,
+          botId: botId,
           cancellation: cancellation,
         )) {
           if (generation != _browserGeneration || cancellation.isCancelled) {
@@ -1351,6 +1368,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final expectedSwitch = switchGeneration ?? ++_switchGeneration;
     final origin = _switchOrigin ?? _captureSwitchOrigin();
     _switchOrigin = origin;
+    _stopBrowserStream();
+    _switchBrowserTarget(
+      _botsEnabled ? (_groupOpen ? 'main' : item.botId) : null,
+    );
     setState(() {
       _switchingBot = true;
       _contactThreadLoading = true;
@@ -1440,6 +1461,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _switchOrigin = null;
       });
       _listen();
+      _syncBrowserStream();
       await _hydrateFromRemote();
       await _pollTurnStatus();
     } catch (failure) {
@@ -1449,6 +1471,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         error = failure.toString();
       });
       _listen();
+      _syncBrowserStream();
     } finally {
       if (mounted && expectedSwitch == _switchGeneration && _switchingBot) {
         setState(() {
@@ -1719,6 +1742,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openAgent(BotProfile bot, String? sessionId) async {
+    _switchBrowserTarget(_botsEnabled ? bot.id : null);
     setState(() {
       _groupOpen = false;
       _phoneContactsOpen = false;
@@ -1743,13 +1767,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _openGroup() {
+    _switchBrowserTarget(_botsEnabled ? 'main' : null);
     setState(() {
       _groupOpen = true;
       _phoneContactsOpen = false;
     });
+    _syncBrowserStream();
   }
 
   Future<void> _selectBot(BotProfile bot) async {
+    _switchBrowserTarget(_botsEnabled ? bot.id : null);
     setState(() {
       _groupOpen = false;
       _phoneContactsOpen = false;
@@ -1761,8 +1788,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (selectedBot?.id == bot.id &&
         !_switchingBot &&
         activeSource != 'group') {
+      _syncBrowserStream();
       return;
     }
+    _stopBrowserStream();
     final selection = ++_switchGeneration;
     final origin = _switchOrigin ?? _captureSwitchOrigin();
     _switchOrigin = origin;
@@ -1826,6 +1855,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         error = failure.toString();
       });
       _listen();
+      _syncBrowserStream();
     }
   }
 
@@ -3683,6 +3713,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _openBrowserHandoff() async {
     if (_browserViewerOpen) return;
+    final targetBot = _desktopBotTarget;
+    final targetChat = _desktopChatTarget;
+    final targetGroup = _groupOpen;
     computer.tab = 'browser';
     _browserViewerOpen = true;
     _syncBrowserStream();
@@ -3694,9 +3727,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               builder: (_) => BrowserHandoffScreen(
                 api: api,
                 instanceId: id,
-                botId: _botScope,
-                chatId: _chatScope,
-                onContinue: _sendBrowserContinuation,
+                botId: targetBot,
+                chatId: targetChat,
+                onContinue: (prompt) => _sendBrowserContinuation(
+                  prompt,
+                  botId: targetBot,
+                  chatId: targetChat,
+                  group: targetGroup,
+                ),
               ),
             ),
           );
@@ -3711,9 +3749,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _sendBrowserContinuation(String prompt) async {
+  Future<void> _sendBrowserContinuation(
+    String prompt, {
+    String? botId,
+    String? chatId,
+    required bool group,
+  }) async {
     final text = prompt.trim();
     if (text.isEmpty) return;
+    if (group ||
+        _groupOpen != group ||
+        _desktopBotTarget != botId ||
+        _desktopChatTarget != chatId) {
+      await api.sendChat(id, text, botId: botId, chatId: chatId);
+      return;
+    }
     if (working || sending || showKickoff) {
       setState(_endTurn);
     }

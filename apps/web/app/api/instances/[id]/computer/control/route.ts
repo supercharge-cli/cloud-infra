@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { proxyInbox, requireChatInstance } from '@/lib/app-chat';
+import { computerBotId, computerBotQuery, matchesComputerBot } from '@/lib/computer-target';
 
 export const maxDuration = 60;
 
@@ -33,12 +34,21 @@ export async function POST(req: Request, ctx: Ctx) {
   if (!ACTIONS.has(action)) {
     return NextResponse.json({ error: 'Unsupported browser action' }, { status: 400 });
   }
+  const botId = computerBotId(body.botId);
+  if (!botId) return NextResponse.json({ error: 'Invalid botId' }, { status: 400 });
 
   try {
+    if (botId !== 'main') {
+      const status = await proxyInbox(gate.inst, `/v1/computer/status?${computerBotQuery(botId)}`);
+      if (!status.ok) return NextResponse.json({ error: 'Agent desktop unavailable' }, { status: status.status });
+      if (!matchesComputerBot(await status.json(), botId)) {
+        return NextResponse.json({ error: 'Agent desktop identity unavailable' }, { status: 409 });
+      }
+    }
     const res = await proxyInbox(gate.inst, '/v1/computer/control', {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ ...body, approved: true }),
+      body: JSON.stringify({ ...body, botId, approved: true }),
     });
     const text = await res.text();
     return new NextResponse(text, {

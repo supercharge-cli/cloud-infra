@@ -99,6 +99,7 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
           requestVncUrl: () => widget.api.openAiBrowserVnc(
             widget.instanceId,
             handoffId: _control.handoffId!,
+            botId: widget.botId,
           ),
           readState: _viewerState,
           onAction: (action, _) async {
@@ -155,6 +156,7 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
       final wsUrl = await widget.api.openAiBrowserVnc(
         widget.instanceId,
         handoffId: _control.handoffId!,
+        botId: widget.botId,
       );
       if (!mounted ||
           _tearingDown ||

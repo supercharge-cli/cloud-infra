@@ -154,6 +154,118 @@ void main() {
     },
   );
 
+  test('browser frames subscribe to the selected bot', () async {
+    final frames = await http.runWithClient(
+      () => api.browserFrames('instance-1', botId: 'research').take(1).toList(),
+      () => MockClient((request) async {
+        expect(request.url.queryParameters['botId'], 'research');
+        expect(request.headers['authorization'], 'Bearer test-token');
+        if (request.url.path.endsWith('/computer/status')) {
+          return http.Response(
+            jsonEncode({
+              'desktop': {'botId': 'research'},
+            }),
+            200,
+          );
+        }
+        expect(request.url.path, '/api/instances/instance-1/computer/browser');
+        return http.Response('data: {"type":"status","desktop":true}\n\n', 200);
+      }),
+    );
+    expect(frames.single.desktop, true);
+  });
+
+  test('specialist frame stream rejects a daemon that ignores botId', () async {
+    var browserRequested = false;
+    await expectLater(
+      http.runWithClient(
+        () =>
+            api.browserFrames('instance-1', botId: 'research').take(1).toList(),
+        () => MockClient((request) async {
+          if (request.url.path.endsWith('/computer/browser')) {
+            browserRequested = true;
+          }
+          return http.Response(
+            jsonEncode({
+              'desktop': {'botId': 'main'},
+            }),
+            200,
+          );
+        }),
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(browserRequested, false);
+  });
+
+  test('selected bot targets status, control, handoff, and VNC', () async {
+    final requests = <http.Request>[];
+    final expiry = DateTime.now()
+        .add(const Duration(minutes: 10))
+        .millisecondsSinceEpoch;
+    await http.runWithClient(
+      () async {
+        await api.computerStatus('instance-1', botId: 'research');
+        await api.computerControl('instance-1', {
+          'action': 'observe',
+          'botId': 'main',
+        }, botId: 'research');
+        await api.startBrowserHandoff(
+          'instance-1',
+          handoffId: 'handoff-123456',
+          botId: 'research',
+        );
+        await api.openAiBrowserVnc(
+          'instance-1',
+          handoffId: 'handoff-123456',
+          botId: 'research',
+        );
+        await api.stopBrowserHandoff(
+          'instance-1',
+          handoffId: 'handoff-123456',
+          botId: 'research',
+        );
+      },
+      () => MockClient((request) async {
+        requests.add(request);
+        if (request.url.path.endsWith('/status')) {
+          return http.Response(jsonEncode({'handoff': false}), 200);
+        }
+        if (request.url.path.endsWith('/control')) {
+          return http.Response(jsonEncode({'ok': true}), 200);
+        }
+        if (request.url.path.endsWith('/vnc-ticket')) {
+          return http.Response(
+            jsonEncode({'wsUrl': 'wss://example.test/vnc'}),
+            200,
+          );
+        }
+        final start = jsonDecode(request.body)['action'] == 'start';
+        return http.Response(
+          jsonEncode({
+            'ok': true,
+            'handoff': start,
+            'handoffId': 'handoff-123456',
+            if (start) 'expiresAt': expiry,
+          }),
+          200,
+        );
+      }),
+    );
+    expect(requests, hasLength(5));
+    expect(requests[0].url.queryParameters['botId'], 'research');
+    expect(jsonDecode(requests[1].body), {
+      'action': 'observe',
+      'botId': 'research',
+    });
+    expect(jsonDecode(requests[2].body)['botId'], 'research');
+    expect(jsonDecode(requests[3].body), {
+      'handoffId': 'handoff-123456',
+      'botId': 'research',
+    });
+    expect(jsonDecode(requests[4].body)['botId'], 'research');
+  });
+
   test('computer status uses the authenticated read-only endpoint', () async {
     final result = await http.runWithClient(
       () => api.computerStatus('instance-1'),
