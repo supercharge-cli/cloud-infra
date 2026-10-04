@@ -9,7 +9,7 @@ export const DEVICE_URL = 'https://github.com/login/device';
 const TTL_MS = 10 * 60_000;
 export type Handoff = {
   instanceId: string; userId: string; sandboxId: string; id: string;
-  botId: 'github'; conversationId: string; requestId: string;
+  botId: 'github'; conversationId: string | null; requestId: string;
   expiresAt: number; status: 'starting' | 'pending' | 'cancelled' | 'expired' | 'failed' | 'verified' | 'delivering' | 'delivered' | 'uncertain';
   username?: string;
 };
@@ -117,10 +117,10 @@ async function conversation(instance: Instance, conversationId: string) {
   }
 }
 
-export async function startDeviceAuth(instance: Instance, conversationId: string, requestId: string) {
+export async function startDeviceAuth(instance: Instance, conversationId: string | null, requestId: string) {
   if (!/^[A-Za-z0-9_-]{8,120}$/.test(requestId)) throw new DeviceAuthError('Invalid request ID');
   if (!instance.sandboxId || instance.runtime !== 'supercharge') throw new DeviceAuthError('GitHub CLI login requires a Supercharge VM', 404);
-  await conversation(instance, conversationId);
+  if (conversationId !== null) await conversation(instance, conversationId);
   const collection = (await getDb()).collection<Handoff & { _id: string }>('github_device_auth');
   const now = Date.now();
   const existing = await collection.findOne({ _id: instance.id });
@@ -185,6 +185,12 @@ export async function finishDeviceAuth(instance: Instance) {
   const verified = await vm(instance, 'verify');
   if (!verified.username) throw new DeviceAuthError('GitHub CLI is not authenticated in this VM yet. Complete authorization on GitHub, then retry Done.', 409);
   await collection.updateOne({ instanceId: instance.id, id: record.id, status: { $in: ['starting', 'pending'] } }, { $set: { status: 'verified', username: verified.username } });
+  if (record.conversationId === null) {
+    const claimed = await collection.findOneAndUpdate({ instanceId: instance.id, id: record.id, status: 'verified', sandboxId: instance.sandboxId }, { $set: { status: 'delivered' } }, { returnDocument: 'after' });
+    if (!claimed) return statusDeviceAuth(instance);
+    await vm(instance, 'cancel', record.id).catch(() => undefined);
+    return { status: 'delivered', username: verified.username };
+  }
   await conversation(instance, record.conversationId);
   const claimed = await collection.findOneAndUpdate({ instanceId: instance.id, id: record.id, status: 'verified', sandboxId: instance.sandboxId }, { $set: { status: 'delivering' } }, { returnDocument: 'after' });
   if (!claimed) return statusDeviceAuth(instance);

@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import ts from 'typescript';
 
-type Row = { [key: string]: unknown; id: string; status: string; conversationId: string; expiresAt: number };
+type Row = { [key: string]: unknown; id: string; status: string; conversationId: string | null; expiresAt: number };
 
 function fixture(conversationSource = 'direct') {
   let row: Row | null = null;
@@ -70,6 +70,22 @@ test('auth route rejects nonowners before reading or changing a VM', async () =>
   assert.equal(touched, false);
 });
 
+test('auth route starts home login without a conversation ID', async () => {
+  const source = readFileSync(new URL('../app/api/instances/[id]/github-auth/route.ts', import.meta.url), 'utf8')
+    .replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+  const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
+  let received: unknown[] = [];
+  const api = new Function('requireChatInstance', 'NextResponse', 'cancelDeviceAuth', 'statusDeviceAuth', 'startDeviceAuth', 'finishDeviceAuth', 'DeviceAuthError', `${js};return {POST};`)(
+    async () => ({ ok: true, inst: { runtime: 'supercharge', sandboxId: 'vm' } }),
+    { json: (body: unknown) => body }, () => {}, () => {}, (...args: unknown[]) => { received = args; return { status: 'starting' }; }, () => {},
+    class extends Error {},
+  );
+  const result = await api.POST({ json: async () => ({ action: 'start', requestId: 'request-home-123' }) }, { params: Promise.resolve({ id: 'one' }) });
+  assert.deepEqual(result, { status: 'starting' });
+  assert.equal(received[1], null);
+  assert.equal(received[2], 'request-home-123');
+});
+
 test('VM runner and detached worker compile without host credentials', () => {
   const { api } = fixture();
   const result = spawnSync('python3', ['-c', 'import ast,sys; ast.parse(sys.stdin.read())'], { input: api.commandScript, encoding: 'utf8' });
@@ -96,6 +112,19 @@ test('device code stays in VM; Done requires gh api user; only one continuation 
   assert.equal(f.messages[0].chatId, 'github-chat');
   assert.equal(f.messages[0].botId, 'github');
   assert.match(f.messages[0].text, /GitHub MCP authentication is separate/);
+});
+
+test('home login verifies GitHub CLI without creating or resuming a conversation', async () => {
+  const f = fixture();
+  const started = await f.api.startDeviceAuth(f.instance(), null, 'request-home-123');
+  assert.equal(started.code, 'ABCD-1234');
+  assert.equal(f.record().conversationId, null);
+  assert.equal(f.messages.length, 0);
+  f.vm({ state: 'finished', code: 'ABCD-1234' }); f.login('real-user');
+  assert.deepEqual(await f.api.finishDeviceAuth(f.instance()), { status: 'delivered', username: 'real-user' });
+  assert.equal((await f.api.finishDeviceAuth(f.instance())).status, 'delivered');
+  assert.equal(f.messages.length, 0);
+  assert.equal(f.calls.filter((action: string) => action === 'verify').length, 1);
 });
 
 test('repeat start, competing attempt, cancel, expiry and sandbox replacement', async () => {

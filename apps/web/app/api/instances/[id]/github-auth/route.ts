@@ -14,8 +14,8 @@ async function handle(req: Request, ctx: Ctx, method: 'GET' | 'POST' | 'DELETE')
     if (method === 'GET') return NextResponse.json(await statusDeviceAuth(gate.inst));
     if (method === 'DELETE') return NextResponse.json(await cancelDeviceAuth(gate.inst));
     const body = await req.json().catch(() => null) as { action?: string; conversationId?: string; requestId?: string } | null;
-    if (body?.action === 'start' && typeof body.conversationId === 'string' && typeof body.requestId === 'string') {
-      return NextResponse.json(await startDeviceAuth(gate.inst, body.conversationId, body.requestId));
+    if (body?.action === 'start' && (body.conversationId === undefined || typeof body.conversationId === 'string') && typeof body.requestId === 'string') {
+      return NextResponse.json(await startDeviceAuth(gate.inst, body.conversationId ?? null, body.requestId));
     }
     if (body?.action === 'done') return NextResponse.json(await finishDeviceAuth(gate.inst));
     return NextResponse.json({ error: 'Invalid GitHub login action' }, { status: 400 });
