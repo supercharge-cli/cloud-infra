@@ -489,7 +489,8 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
                               }
                             },
                           ),
-                          if (item['state'] == 'working')
+                          if (item['groupMessageId'] != null &&
+                              item['state'] == 'working')
                             IconButton(
                               tooltip: 'Steer ${item['botId']}',
                               onPressed: _sending || _input.text.trim().isEmpty
@@ -497,11 +498,14 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
                                   : () => _steerAgent(item),
                               icon: const Icon(Icons.subdirectory_arrow_right),
                             ),
-                          IconButton(
-                            tooltip: 'Stop ${item['botId']}',
-                            onPressed: _sending ? null : () => _stopAgent(item),
-                            icon: const Icon(Icons.stop_circle_outlined),
-                          ),
+                          if (item['groupMessageId'] != null)
+                            IconButton(
+                              tooltip: 'Stop ${item['botId']}',
+                              onPressed: _sending
+                                  ? null
+                                  : () => _stopAgent(item),
+                              icon: const Icon(Icons.stop_circle_outlined),
+                            ),
                         ],
                       ),
                     ),

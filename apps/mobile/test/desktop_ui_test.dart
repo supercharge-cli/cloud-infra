@@ -278,7 +278,12 @@ class _BotClient extends _Client {
       },
     ],
     'activity': [
-      {'botId': 'research', 'sessionId': 'group-research', 'state': 'working'},
+      {
+        'botId': 'research',
+        'sessionId': 'group-research',
+        'state': 'working',
+        'groupMessageId': 'group-question',
+      },
     ],
   };
   @override
@@ -372,6 +377,20 @@ class _BotClient extends _Client {
     };
     savedBots.add(bot);
     return {'bot': bot};
+  }
+}
+
+class _MixedGroupClient extends _BotClient {
+  @override
+  Future<Map<String, dynamic>> groupChat(String id) async {
+    final result = await super.groupChat(id);
+    return {
+      ...result,
+      'activity': [
+        ...(result['activity'] as List),
+        {'botId': 'main', 'sessionId': 'chat-main', 'state': 'working'},
+      ],
+    };
   }
 }
 
@@ -810,7 +829,7 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     PathProviderPlatform.instance = _Paths();
     await _size(tester, const Size(390, 844));
-    final client = _BotClient();
+    final client = _MixedGroupClient();
     await _app(tester, client, path: '/chat/design?group=1');
     for (
       var i = 0;
@@ -834,6 +853,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(find.byTooltip('Stop research'), findsOneWidget);
+    expect(find.byTooltip('Stop main'), findsNothing);
+    expect(find.byTooltip('Steer main'), findsNothing);
     await tester.enterText(
       find.byKey(const ValueKey('group-composer')),
       'Focus on the sources',
