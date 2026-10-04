@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vectra_cloud/api/client.dart';
 import 'package:vectra_cloud/chat/github_auth.dart';
+import 'package:vectra_cloud/chat/github_auth_dialog.dart';
 
 class FakeGitHubClient extends VectraClient {
   FakeGitHubClient() : super(baseUrl: 'https://example.test');
 
   Map<String, dynamic> state = {'status': 'idle'};
   int reveals = 0;
+  int standaloneStarts = 0;
+  bool authorized = true;
   String? source;
 
   @override
@@ -30,8 +33,26 @@ class FakeGitHubClient extends VectraClient {
   }
 
   @override
-  Future<Map<String, dynamic>> githubAuthDone(String id) async =>
-      state = {'status': 'delivered', 'username': 'fixture-user'};
+  Future<Map<String, dynamic>> githubAuthStartStandalone(
+    String id,
+    String requestId,
+  ) async {
+    expect(id, 'vm-1');
+    expect(requestId.length, greaterThanOrEqualTo(8));
+    standaloneStarts++;
+    return state = {
+      'status': 'pending',
+      'code': 'ABCD-1234',
+      'url': 'https://github.com/login/device',
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> githubAuthDone(String id) async {
+    if (!authorized)
+      throw ApiException(409, 'Complete authorization on GitHub first.');
+    return state = {'status': 'delivered', 'username': 'fixture-user'};
+  }
 
   @override
   Future<Map<String, dynamic>> githubAuthCancel(String id) async =>
@@ -52,6 +73,33 @@ class FakeGitHubClient extends VectraClient {
 }
 
 void main() {
+  testWidgets(
+    'Standalone workspace popup starts without chat and verifies only after VM confirmation',
+    (tester) async {
+      final api = FakeGitHubClient()..authorized = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GitHubAuthDialog(api: api, instanceId: 'vm-1'),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(api.standaloneStarts, 1);
+      expect(find.text('ABCD-1234'), findsOneWidget);
+      expect(find.text('Copy link'), findsOneWidget);
+      await tester.tap(find.text('Verify connection'));
+      await tester.pump();
+      expect(find.textContaining('Complete authorization'), findsOneWidget);
+      api.authorized = true;
+      await tester.tap(find.text('Verify connection'));
+      await tester.pump();
+      expect(find.textContaining('Done! GitHub connected'), findsOneWidget);
+      expect(api.reveals, 0);
+    },
+  );
+
   testWidgets(
     'GitHub CLI device code, Done, cancel and confirmed token disclosure',
     (tester) async {

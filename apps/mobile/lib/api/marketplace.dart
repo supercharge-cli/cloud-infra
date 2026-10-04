@@ -13,6 +13,42 @@ List<Map<String, dynamic>> marketplaceRows(Object? value) => value is List
 List<String> marketplaceStrings(Object? value) =>
     value is List ? value.whereType<String>().toList() : [];
 
+class SkillMdItem {
+  SkillMdItem(this.data);
+
+  final Map<String, dynamic> data;
+  String get id => '${data['id'] ?? ''}';
+  String get pluginId => '${data['pluginId'] ?? ''}';
+  String get owner => '${data['owner'] ?? ''}';
+  String get name => '${data['name'] ?? ''}';
+  String get description => '${data['description'] ?? ''}';
+  String get category => '${data['category'] ?? ''}';
+  String get sourceUrl => '${data['sourceUrl'] ?? ''}';
+  bool get verified => data['verified'] == true;
+  bool get installable => data['installable'] == true;
+  bool get bundle => data['itemType'] == 'plugin';
+  List<Map<String, dynamic>> get files => marketplaceRows(data['files']);
+
+  static SkillMdItem? parse(Map<String, dynamic> row) {
+    final owner = row['owner'];
+    final name = row['name'];
+    final id = row['id'];
+    final pluginId = row['pluginId'];
+    if (owner is! String ||
+        name is! String ||
+        id is! String ||
+        pluginId is! String ||
+        owner.isEmpty ||
+        name.isEmpty ||
+        id != 'skillmd:$owner/$name' ||
+        !RegExp(r'^[A-Za-z0-9_.-]{1,80}$').hasMatch(owner) ||
+        !RegExp(r'^[A-Za-z0-9_.-]{1,120}$').hasMatch(name)) {
+      return null;
+    }
+    return SkillMdItem(row);
+  }
+}
+
 class DiscoveryPlugin {
   DiscoveryPlugin(this.data);
 

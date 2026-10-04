@@ -2,22 +2,23 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, BookOpen, MessageSquare, Puzzle, RefreshCw, Search, Server, Settings2 } from 'lucide-react';
-import { marketJson, searchSkillMd, useMarketplace, type MarketEntry, type SkillMdItem } from './use-marketplace';
+import { ArrowLeft, ArrowUpRight, BookOpen, Check, MessageSquare, Puzzle, RefreshCw, Search, Server, ShieldCheck } from 'lucide-react';
+import { marketJson, useMarketplace, useSkillMdCatalog, type MarketEntry } from './use-marketplace';
 import { PluginDetail, PluginIcon } from './plugin-detail';
 import { SkillMdDetail } from './skillmd-detail';
 import './marketplace.css';
 
 type Instance = { id: string; name: string; runtime?: string; status: string };
 type Bot = { id: string; name: string };
+type Skills = ReturnType<typeof useSkillMdCatalog>;
 
 export function Marketplace({ pluginId, initialInstance = '', initialBot = '' }: { pluginId?: string; initialInstance?: string; initialBot?: string }) {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [selected, setSelected] = useState(initialInstance);
   const [catalog, setCatalog] = useState<MarketEntry[]>([]);
-  const [skillMd, setSkillMd] = useState<SkillMdItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const skills = useSkillMdCatalog();
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
@@ -32,22 +33,20 @@ export function Marketplace({ pluginId, initialInstance = '', initialBot = '' }:
   }, []);
   useEffect(() => { const timer = setTimeout(() => { void load(); }, 0); return () => clearTimeout(timer); }, [load]);
   const instance = instances.find((item) => item.id === selected) ?? instances[0];
-  const searchSkillMdItems = async (query: string) => {
-    try { setSkillMd(await searchSkillMd(query)); } catch (failure) { setError((failure as Error).message); }
-  };
 
   return <div className="market-shell">
-    <aside className="market-nav"><Link className="market-brand" href="/dashboard">Vectra<span>Cloud workspace</span></Link><nav aria-label="Workspace navigation"><Link href="/dashboard"><MessageSquare size={18} />Chats</Link><Link href="/dashboard/marketplace" aria-current="page"><Puzzle size={18} />Plugin Marketplace</Link><Link href="/docs"><BookOpen size={18} />Documentation</Link></nav><div className="market-locality"><Server size={19} /><p>Installed on your VM<span>Separate from your desktop plugins.</span></p></div></aside>
-    <main className="market-main"><header className="market-heading"><div><h1>Plugin Marketplace</h1><p>Give your VM new tools. Browse plugins, review access, and connect them to your agents.</p></div><button className="market-button icon" aria-label="Refresh marketplace" disabled={loading} onClick={() => void load()}><RefreshCw size={19} /></button></header>
-      {error && <div className="market-error" role="alert"><p>Could not load the marketplace. {error}</p><button className="market-button" onClick={() => void load()}>Try again</button></div>}
-      {loading ? <p className="market-empty" role="status">Loading marketplace…</p> : !error && <>
-        {instance ? <><div className="market-target"><Server size={19} /><label className="market-field">Install location<select value={instance.id} onChange={(event) => setSelected(event.target.value)}>{instances.map((target) => <option key={target.id} value={target.id}>{target.name} · {target.status}</option>)}</select></label><span>VM only</span></div><BotMarketplace key={instance.id} instance={instance} catalog={catalog} skillMd={skillMd} onSkillMdSearch={searchSkillMdItems} pluginId={pluginId} initialBot={initialBot} /></> : <div className="market-empty"><Server size={30} /><h2>A Supercharge VM is needed</h2><p>Create a Supercharge workspace to install plugins. Desktop installations are managed separately in Supercharge.</p><Link className="market-button primary" href="/dashboard">Open workspaces</Link><CatalogBrowser catalog={catalog} skillMd={skillMd} onSkillMdSearch={searchSkillMdItems} plugins={[]} instanceId="" /></div>}
-      </>}
+    <aside className="market-nav"><Link className="market-brand" href="/dashboard">Vectra<span>Cloud workspace</span></Link><nav aria-label="Workspace navigation"><Link href="/dashboard"><MessageSquare size={18} />Chats</Link><Link href="/dashboard/marketplace" aria-current="page"><Puzzle size={18} />Marketplace</Link><Link href="/docs"><BookOpen size={18} />Documentation</Link></nav><div className="market-locality"><Server size={19} /><p>For your workspace<span>Review before enabling any skill.</span></p></div></aside>
+    <main className="market-main"><header className="market-heading"><div><h1>Skills for your agents</h1><p>Explore skills from SkillMD. Review the full bundle, then install it in your selected VM and bot.</p></div><button className="market-button icon" aria-label="Refresh marketplace" disabled={loading || skills.loading} onClick={() => { void load(); skills.refresh(); }}><RefreshCw size={19} /></button></header>
+      {error && <div className="market-error" role="alert"><p>Workspace details could not load. {error}</p><button className="market-button" onClick={() => void load()}>Retry workspace</button></div>}
+      {loading ? <p className="market-empty" role="status">Loading workspace…</p> : instance ? <>
+        <div className="market-target"><Server size={19} /><label className="market-field">Install location<select value={instance.id} onChange={(event) => setSelected(event.target.value)}>{instances.map((target) => <option key={target.id} value={target.id}>{target.name} · {target.status}</option>)}</select></label><span>Installed on this VM only</span></div>
+        <BotMarketplace key={instance.id} instance={instance} catalog={catalog} skills={skills} pluginId={pluginId} initialBot={initialBot} />
+      </> : <>{!error && <div className="market-no-vm"><Server size={20} /><div><strong>Browse now, install after creating a workspace</strong><p>A Supercharge VM and bot are needed to install and enable skills.</p></div><Link className="market-button" href="/dashboard">Open workspaces</Link></div>}<CatalogBrowser catalog={catalog} skills={skills} plugins={[]} instanceId="" /></>}
     </main>
   </div>;
 }
 
-function BotMarketplace({ instance, catalog, skillMd, onSkillMdSearch, pluginId, initialBot }: { instance: Instance; catalog: MarketEntry[]; skillMd: SkillMdItem[]; onSkillMdSearch: (query: string) => Promise<void>; pluginId?: string; initialBot: string }) {
+function BotMarketplace({ instance, catalog, skills, pluginId, initialBot }: { instance: Instance; catalog: MarketEntry[]; skills: Skills; pluginId?: string; initialBot: string }) {
   const [bots, setBots] = useState<Bot[]>([]);
   const [selected, setSelected] = useState(initialBot);
   const [error, setError] = useState<string | null>(null);
@@ -61,12 +60,12 @@ function BotMarketplace({ instance, catalog, skillMd, onSkillMdSearch, pluginId,
   useEffect(() => { const timer = setTimeout(() => { void load(); }, 0); return () => clearTimeout(timer); }, [load]);
   const bot = bots.find((item) => item.id === selected) ?? bots[0];
   return <>
-    {error && <div className="market-error" role="alert">Could not load bots. {error}<button className="market-button" onClick={() => void load()}>Retry bots</button></div>}
-    {loading ? <p role="status">Loading bots…</p> : bot ? <><label className="market-field market-bot">Bot<select value={bot.id} onChange={(event) => setSelected(event.target.value)}>{bots.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><TargetMarketplace key={`${instance.id}:${bot.id}`} instanceId={instance.id} botId={bot.id} catalog={catalog} skillMd={skillMd} onSkillMdSearch={onSkillMdSearch} pluginId={pluginId} /></> : !error && <p className="market-empty">No bots are available in this workspace. Add an agent in Chats, then refresh.</p>}
+    {error && <div className="market-error" role="alert">Could not load bots. {error} <button className="market-button" onClick={() => void load()}>Retry bots</button></div>}
+    {loading ? <p role="status">Loading bots…</p> : bot ? <><label className="market-field market-bot">Install for bot<select value={bot.id} onChange={(event) => setSelected(event.target.value)}>{bots.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><TargetMarketplace key={`${instance.id}:${bot.id}`} instanceId={instance.id} botId={bot.id} catalog={catalog} skills={skills} pluginId={pluginId} /></> : <><p className="market-empty">Add an agent in Chats to install skills for it.</p><CatalogBrowser catalog={catalog} skills={skills} plugins={[]} instanceId="" /></>}
   </>;
 }
 
-function TargetMarketplace({ instanceId, botId, catalog, skillMd, onSkillMdSearch, pluginId }: { instanceId: string; botId: string; catalog: MarketEntry[]; skillMd: SkillMdItem[]; onSkillMdSearch: (query: string) => Promise<void>; pluginId?: string }) {
+function TargetMarketplace({ instanceId, botId, catalog, skills, pluginId }: { instanceId: string; botId: string; catalog: MarketEntry[]; skills: Skills; pluginId?: string }) {
   const market = useMarketplace(instanceId, botId);
   const entry = catalog.find((item) => item.id === pluginId);
   const skillMatch = /^skillmd:([A-Za-z0-9_.-]{1,80})\/([A-Za-z0-9_.-]{1,120})$/.exec(pluginId ?? '');
@@ -98,29 +97,32 @@ function TargetMarketplace({ instanceId, botId, catalog, skillMd, onSkillMdSearc
     {runtime?.supported === false && <div className="market-error" role="status">This VM image has no Plugin API runtime. An in-place plugin update is not available for this image; your VM and workspace have not been changed.</div>}
     {!market.loading && runtime !== null && runtime.supported !== false && (runtime.ready === false || (!market.allowedMcpOrigins.includes('https://api.githubcopilot.com') && !runtime?.ready)) && <div className="market-error" role="status"><p>This VM needs updated plugin support before GitHub MCP can be installed. This is an opt-in in-place update, not a new VM.</p><button className="market-button" disabled={updating} onClick={() => void updateRuntime()}>{updating ? 'Updating plugin support…' : 'Update plugin support in this VM'}</button></div>}
     {runtimeError && <div className="market-error" role="alert">{runtimeError} <button className="market-button" onClick={() => void checkRuntime()}>Retry status</button></div>}
-    <div className="market-inventory-status"><span role="status">{market.busy ? `${market.busy}…` : market.loading ? 'Reading this bot’s installed plugins…' : `${market.plugins.length} installed in this bot`}</span><button className="market-button" disabled={!!market.busy || market.loading} onClick={() => void market.refresh()}><RefreshCw size={15} />Refresh VM status</button></div>
+    <div className="market-inventory-status"><span role="status">{market.busy ? `${market.busy}…` : market.loading ? 'Reading this bot’s installed plugins…' : `${market.plugins.length} installed for this bot`}</span><button className="market-button" disabled={!!market.busy || market.loading} onClick={() => void market.refresh()}><RefreshCw size={15} />Refresh VM status</button></div>
     {market.error && <div className="market-error" role="alert">{market.error}</div>}
-    {pluginId ? entry ? <PluginDetail key={`${entry.id}:${installed?.activeDigest ?? 'new'}`} entry={entry} installed={installed} market={market} backHref={backHref} /> : skillMatch ? <SkillMdDetail owner={skillMatch[1]} name={skillMatch[2]} market={market} backHref={backHref} /> : <div className="market-empty"><h2>Plugin not found</h2><p>This plugin is not in the installable VM catalog.</p><Link className="market-back" href={backHref}><ArrowLeft size={17} />Back to marketplace</Link></div> : <CatalogBrowser catalog={catalog} skillMd={skillMd} onSkillMdSearch={onSkillMdSearch} plugins={market.plugins} instanceId={instanceId} botId={botId} />}
+    {pluginId ? entry ? <PluginDetail key={`${entry.id}:${installed?.activeDigest ?? 'new'}`} entry={entry} installed={installed} market={market} backHref={backHref} /> : skillMatch ? <SkillMdDetail owner={skillMatch[1]} name={skillMatch[2]} market={market} backHref={backHref} /> : <div className="market-empty"><h2>Plugin not found</h2><p>This plugin is not in the installable VM catalog.</p><Link className="market-back" href={backHref}><ArrowLeft size={17} />Back to marketplace</Link></div> : <CatalogBrowser catalog={catalog} skills={skills} plugins={market.plugins} instanceId={instanceId} botId={botId} />}
   </>;
 }
 
-function CatalogBrowser({ catalog, skillMd, onSkillMdSearch, plugins, instanceId, botId = '' }: { catalog: MarketEntry[]; skillMd: SkillMdItem[]; onSkillMdSearch: (query: string) => Promise<void>; plugins: ReturnType<typeof useMarketplace>['plugins']; instanceId: string; botId?: string }) {
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState('all');
-  const [skillQuery, setSkillQuery] = useState('');
+function CatalogBrowser({ catalog, skills, plugins, instanceId, botId = '' }: { catalog: MarketEntry[]; skills: Skills; plugins: ReturnType<typeof useMarketplace>['plugins']; instanceId: string; botId?: string }) {
+  const [tab, setTab] = useState<'skills' | 'installed' | 'mcp'>('skills');
+  const [draft, setDraft] = useState(skills.query);
+  const [searchHint, setSearchHint] = useState('');
   const link = (id: string) => `/dashboard/marketplace/${encodeURIComponent(id)}${instanceId ? `?instance=${encodeURIComponent(instanceId)}&bot=${encodeURIComponent(botId)}` : ''}`;
-  const skillLink = (plugin: ReturnType<typeof useMarketplace>['plugins'][number]) => plugin.id.startsWith('skillmd-') && /^[A-Za-z0-9_.-]{1,80}\/[A-Za-z0-9_.-]{1,120}$/.test(plugin.manifest.name) ? link(`skillmd:${plugin.manifest.name}`) : '/dashboard';
+  const skillLink = (plugin: ReturnType<typeof useMarketplace>['plugins'][number]) => plugin.id.startsWith('skillmd-') && /^[A-Za-z0-9_.-]{1,80}\/[A-Za-z0-9_.-]{1,120}$/.test(plugin.manifest.name) ? link(`skillmd:${plugin.manifest.name}`) : link(plugin.id);
   const installedIds = new Set(plugins.map((plugin) => plugin.id));
   const reviewedIds = new Set(plugins.filter((plugin) => catalog.some((entry) => entry.id === plugin.id && entry.releaseDigest === plugin.activeDigest)).map((plugin) => plugin.id));
-  const entries = catalog.filter((entry) => `${entry.name} ${entry.description} ${entry.publisher ?? ''} ${entry.category ?? ''}`.toLowerCase().includes(query.toLowerCase()) && (filter !== 'installed' || installedIds.has(entry.id)));
-  const categories = [...new Set(entries.map((entry) => entry.category || 'Developer Tools'))];
-  return <div className="market-browser"><label className="market-search"><Search size={19} /><input aria-label="Search plugins" placeholder="Search plugins" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <button type="button" onClick={() => setQuery('')}>Clear</button>}</label>
-    <section className="market-installed"><div className="market-section-title"><h2>Installed</h2><Link href="/dashboard"><Settings2 size={16} />Open workspace</Link></div>{plugins.length ? <div className="market-installed-strip">{plugins.map((plugin) => <Link key={plugin.id} href={catalog.some((item) => item.id === plugin.id) ? link(plugin.id) : skillLink(plugin)} title={plugin.manifest.name}><PluginIcon entry={plugin} /><span>{plugin.manifest.name}</span><small>{plugin.enabled ? 'Enabled' : 'Disabled'}</small></Link>)}</div> : <p>No plugins installed in this bot yet. Choose a plugin below to get started.</p>}</section>
-    <div className="market-filters" role="group" aria-label="Filter plugins"><button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>Browse plugins</button><button aria-pressed={filter === 'installed'} onClick={() => setFilter('installed')}>My plugins</button></div>
-    {!entries.length && <div className="market-empty"><Puzzle size={28} /><h2>{query ? 'No matching plugins' : filter === 'installed' ? 'Your plugins will appear here' : 'No reviewed plugins available'}</h2><p>{query ? 'Try another name, publisher, or category.' : 'Only reviewed, pinned releases can be installed on your VM.'}</p>{query && <button className="market-button" onClick={() => setQuery('')}>Clear search</button>}</div>}
-    <section className="market-section" aria-labelledby="skillmd-search-title"><h2 id="skillmd-search-title">SkillMD skills and bundles</h2><p>Search community skills and bundles. Open a result to review its complete files and install it to the selected VM and bot.</p><form className="market-search" onSubmit={(event) => { event.preventDefault(); if (skillQuery.trim().length >= 2) void onSkillMdSearch(skillQuery.trim()); }}><Search size={19} /><input aria-label="Search SkillMD" placeholder="Search SkillMD" value={skillQuery} onChange={(event) => setSkillQuery(event.target.value)} /><button className="market-button" type="submit">Search</button></form>{skillMd.length > 0 && <div className="market-grid">{skillMd.map((item) => <article className="market-plugin" key={item.id}><div className="market-plugin-info"><PluginIcon entry={item} /><div><h3>{item.name}</h3><span>{item.owner} · {item.itemType === 'skill' ? 'Skill' : 'Skill bundle'}</span><p>{item.description || 'No description provided.'}</p></div></div><p className="market-catalog-note">{item.itemType === 'skill' ? 'Single skill' : 'Bundle with supporting files'} · review before enabling</p><Link className="market-button" href={link(item.id)}>View and install</Link></article>)}</div>}</section>
-    {!!entries.length && <h2 className="market-group-title">Reviewed for your VM</h2>}
-    {categories.map((category) => <section className="market-category" key={category}><h2>{category}</h2><div className="market-grid">{entries.filter((entry) => (entry.category || 'Developer Tools') === category).map((entry) => <article className="market-plugin" key={entry.id}><Link className="market-plugin-info" href={link(entry.id)}><PluginIcon entry={entry} /><div><h3>{entry.name}</h3><span>{entry.publisher || 'Vectra'} · {entry.version}</span><p>{entry.description}</p></div></Link><Link className="market-button" href={link(entry.id)} aria-label={`${reviewedIds.has(entry.id) ? 'Manage' : installedIds.has(entry.id) ? 'Review conflict for' : 'View'} ${entry.name}`}>{reviewedIds.has(entry.id) ? 'Manage' : installedIds.has(entry.id) ? 'Review conflict' : 'View plugin'}</Link></article>)}</div></section>)}
-    <p className="market-catalog-note">Only reviewed, checksum-pinned releases appear here. Desktop marketplace sources are managed independently.</p>
+  return <div className="market-browser">
+    <div className="market-tabs" role="group" aria-label="Marketplace sections"><button type="button" aria-pressed={tab === 'skills'} onClick={() => setTab('skills')}>Skills</button><button type="button" aria-pressed={tab === 'installed'} onClick={() => setTab('installed')}>Installed{plugins.length ? ` · ${plugins.length}` : ''}</button><button type="button" aria-pressed={tab === 'mcp'} onClick={() => setTab('mcp')}>MCP servers</button></div>
+    {tab === 'skills' && <section className="market-skills" aria-labelledby="skills-title"><div className="market-list-heading"><div><h2 id="skills-title">Browse SkillMD</h2><p>Skills and bundles from SkillMD, loaded directly through the marketplace API. Review instructions and files before enabling.</p></div><span>{skills.loading && !skills.items.length ? 'Loading…' : `${skills.items.length} shown`}</span></div>
+      <form className="market-search" onSubmit={(event) => { event.preventDefault(); const term = draft.trim(); if (term && term.length < 2) { setSearchHint('Enter at least two characters to search.'); return; } setSearchHint(''); skills.search(term); }}><Search size={19} /><input aria-label="Search skills" placeholder="Search SkillMD skills" value={draft} onChange={(event) => setDraft(event.target.value)} /><button type="submit">Search</button>{skills.query && <button type="button" onClick={() => { setDraft(''); setSearchHint(''); skills.search(''); }}>Clear</button>}</form>
+      {searchHint && <p className="market-hint" role="alert">{searchHint}</p>}
+      {skills.query && <p className="market-result-label">Results for “{skills.query}” <span>Search reaches beyond the browse pages; SkillMD returns up to 48 results.</span></p>}
+      {skills.error && <div className="market-error" role="alert"><p>Skills could not load. {skills.error}</p><button className="market-button" onClick={skills.refresh}>Try again</button></div>}
+      {skills.loading && !skills.items.length ? <p className="market-empty" role="status">Loading skills from SkillMD…</p> : !skills.loading && !skills.error && !skills.items.length ? <div className="market-empty"><Search size={26} /><h3>No skills found</h3><p>Try another search, or clear it to browse SkillMD.</p></div> : <div className="market-skills-list">{skills.items.map((item) => <article className="market-skill" key={item.id}><div className="market-skill-icon"><BookOpen size={22} /></div><div className="market-skill-body"><div className="market-skill-title"><h3>{item.name}</h3>{item.verified && <span className="market-verified"><ShieldCheck size={14} />Verified</span>}</div><p className="market-skill-meta">{item.owner} · {item.itemType === 'skill' ? 'Skill' : 'Bundle'}{item.category ? ` · ${item.category}` : ''}</p><p className="market-skill-description">{item.description || 'Open to review this skill and its included files.'}</p></div>{instanceId ? <Link className="market-button market-skill-action" href={link(item.id)}>Review <ArrowUpRight size={16} /></Link> : <a className="market-button market-skill-action" href={item.sourceUrl} target="_blank" rel="noopener noreferrer">View source <ArrowUpRight size={16} /></a>}</article>)}</div>}
+      {skills.nextOffset !== null && !skills.query && <button className="market-button market-load-more" type="button" disabled={skills.loading} onClick={skills.loadMore}>{skills.loading ? 'Loading more…' : 'Load more skills'}</button>}
+      {!skills.nextOffset && !skills.loading && !skills.query && skills.items.length >= 1000 && <p className="market-catalog-note">You’ve reached SkillMD’s browse limit. Search to find other skills.</p>}
+    </section>}
+    {tab === 'installed' && <section className="market-installed"><div className="market-list-heading"><div><h2>Installed for this bot</h2><p>Skills and servers stay scoped to the selected VM and bot.</p></div></div>{plugins.length ? <div className="market-skills-list">{plugins.map((plugin) => <article className="market-skill" key={plugin.id}><PluginIcon entry={plugin} /><div className="market-skill-body"><h3>{plugin.manifest.name}</h3><p className="market-skill-meta">{plugin.enabled ? 'Enabled' : 'Disabled'} · {plugin.trusted ? 'Approved' : 'Awaiting review'}</p><p className="market-skill-description">{plugin.manifest.description || 'Review and manage this installation.'}</p></div><Link className="market-button market-skill-action" href={catalog.some((item) => item.id === plugin.id) ? link(plugin.id) : skillLink(plugin)}>Manage <ArrowUpRight size={16} /></Link></article>)}</div> : <div className="market-empty"><Check size={27} /><h3>Nothing installed yet</h3><p>Browse skills, review a bundle, then install it for this bot.</p><button className="market-button" onClick={() => setTab('skills')}>Browse skills</button></div>}</section>}
+    {tab === 'mcp' && <section className="market-mcp"><div className="market-list-heading"><div><h2>Reviewed MCP servers</h2><p>These releases are reviewed and checksum-pinned. Their permissions and authentication are separate from SkillMD skills.</p></div></div>{catalog.length ? <div className="market-skills-list">{catalog.map((entry) => <article className="market-skill" key={entry.id}><PluginIcon entry={entry} /><div className="market-skill-body"><h3>{entry.name}</h3><p className="market-skill-meta">{entry.publisher || 'Vectra'} · {entry.category || 'Developer Tools'} · {entry.version}</p><p className="market-skill-description">{entry.description}</p></div>{instanceId ? <Link className="market-button market-skill-action" href={link(entry.id)}>{reviewedIds.has(entry.id) ? 'Manage' : installedIds.has(entry.id) ? 'Review conflict' : 'Review'} <ArrowUpRight size={16} /></Link> : <span className="market-skill-unavailable">Select a VM to install</span>}</article>)}</div> : <div className="market-empty"><Puzzle size={26} /><h3>No reviewed servers available</h3></div>}</section>}
   </div>;
 }

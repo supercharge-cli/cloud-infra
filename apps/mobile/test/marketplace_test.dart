@@ -15,6 +15,35 @@ import 'package:vectra_cloud/screens/marketplace_detail.dart';
 import 'package:vectra_cloud/state/marketplace.dart';
 import 'package:vectra_cloud/theme.dart';
 
+Map<String, dynamic> skillRow() => {
+  'id': 'skillmd:anthropic/pdf',
+  'pluginId': 'skillmd-111111111111111111111111',
+  'owner': 'anthropic',
+  'name': 'pdf',
+  'itemType': 'plugin',
+  'description': 'Create PDF files',
+  'category': 'Docs & Writing',
+  'sourceUrl': 'https://skillmd.com/skills/anthropic/pdf',
+  'installable': false,
+};
+
+Map<String, dynamic> skillInstalled({
+  int revision = 1,
+  bool trusted = false,
+  bool enabled = false,
+}) => {
+  'id': 'skillmd-111111111111111111111111',
+  'revision': revision,
+  'trusted': trusted,
+  'enabled': enabled,
+  'manifest': {
+    'name': 'anthropic/pdf',
+    'permissions': <String>[],
+    'mcpServers': <String, dynamic>{},
+    'userConfig': <String, dynamic>{},
+  },
+};
+
 Map<String, dynamic> echoCatalog() => {
   'id': 'vectra-echo',
   'name': 'Echo MCP',
@@ -133,6 +162,29 @@ class MarketplaceApi extends VectraClient {
   Future<DashboardData> dashboard() async =>
       DashboardData(instances: workspaces, quota: FreeQuota());
   @override
+  Future<Map<String, dynamic>> skillMdSkills({
+    int limit = 48,
+    int offset = 0,
+  }) async => {
+    'items': offset == 0 ? [skillRow()] : <Map<String, dynamic>>[],
+    'nextOffset': offset == 0 ? 48 : null,
+  };
+  @override
+  Future<Map<String, dynamic>> searchSkillMd(String query) async => {
+    'items': query == 'pdf' ? [skillRow()] : <Map<String, dynamic>>[],
+  };
+  @override
+  Future<Map<String, dynamic>> skillMdItem(String owner, String name) async => {
+    ...skillRow(),
+    'installable': true,
+    'bundleUrl': 'https://api.skillmd.com/api/skills/$owner/$name/bundle',
+    'files': [
+      {'path': 'SKILL.md'},
+      {'path': 'scripts/run.py', 'isScript': true},
+    ],
+  };
+
+  @override
   Future<Map<String, dynamic>> managedMcpCatalog() async {
     if (failCatalog) throw ApiException(500, 'Catalog failed');
     return {'plugins': entries};
@@ -189,6 +241,9 @@ class MarketplaceApi extends VectraClient {
     if (pendingAction != null) return pendingAction!.future;
     if (failAction) throw ApiException(500, 'secret-value-should-not-appear');
     final key = '$id/$botId';
+    if (action['action'] == 'installSkillMd') {
+      stores[key] = [skillInstalled()];
+    }
     if (action['action'] == 'installCatalog') {
       stores[key] = [
         action['catalogId'] == 'vectra-github'
@@ -243,6 +298,35 @@ void main() {
     controller = MarketplaceController(api);
   });
   tearDown(() => controller.dispose());
+
+  test('SkillMD browse, search, install, approval and VM gating', () async {
+    await controller.load(initialInstanceId: 'vm-a');
+    expect(controller.skills.single.name, 'pdf');
+    expect(controller.nextSkillsOffset, 48);
+    await controller.loadSkills(more: true);
+    expect(controller.nextSkillsOffset, isNull);
+    await controller.loadSkills(query: 'pdf');
+    expect(controller.skillsQuery, 'pdf');
+    final listing = controller.skills.single;
+    expect(await controller.installSkill(listing), isFalse);
+    final detail = SkillMdItem({...skillRow(), 'installable': true});
+    expect(await controller.installSkill(detail), isTrue);
+    expect(
+      api.requests.lastWhere(
+        (row) => row['action'] == 'installSkillMd',
+      )['owner'],
+      'anthropic',
+    );
+    expect(controller.installedSkill(detail)!.trusted, isFalse);
+    expect(await controller.setSkillEnabled(detail, true), isFalse);
+    final fingerprint = controller.skillReviewFingerprint(detail)!;
+    expect(await controller.approveSkill(detail, fingerprint), isTrue);
+    expect(await controller.approveSkill(detail, fingerprint), isFalse);
+    expect(await controller.setSkillEnabled(detail, true), isTrue);
+    await controller.selectWorkspace('vm-b');
+    expect(controller.installedSkill(detail), isNull);
+    expect(await controller.approveSkill(detail, fingerprint), isFalse);
+  });
 
   test(
     'legacy catalog has honest local fallbacks and optional metadata is searchable',
@@ -584,17 +668,23 @@ void main() {
           home: Scaffold(body: MarketplaceBrowser(controller: controller)),
         ),
       );
+      await tester.tap(find.text('MCP servers'));
+      await tester.pump();
       await tester.enterText(find.byType(TextField).first, 'not found');
       await tester.pump();
-      await scrollTo(tester, find.text('No plugins match your search.'), 250);
-      expect(find.text('No plugins match your search.'), findsOneWidget);
+      await scrollTo(
+        tester,
+        find.textContaining('No reviewed servers match.'),
+        250,
+      );
+      expect(find.textContaining('No reviewed servers match.'), findsOneWidget);
       await tester.drag(find.byType(Scrollable).first, const Offset(0, 500));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'vectra');
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
-      await scrollTo(tester, find.text('Installed'), 100);
-      await tester.tap(find.text('Installed'));
+      await scrollTo(tester, find.text('Installed · 1'), -200);
+      await tester.tap(find.text('Installed · 1'));
       await tester.pump();
       await scrollTo(tester, find.text('Echo MCP'), 250);
       expect(find.byType(Image), findsNothing);
@@ -713,7 +803,7 @@ void main() {
       ).uri;
       expect(location.path, '/marketplace');
       expect(location.queryParameters, {'instance': 'vm-a', 'bot': 'other'});
-      expect(find.text('Give your bot new tools'), findsOneWidget);
+      expect(find.text('Skills for your agents'), findsOneWidget);
       expect(api.requests.last['bot'], 'other');
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
@@ -883,11 +973,17 @@ void main() {
         home: Scaffold(body: MarketplaceBrowser(controller: controller)),
       ),
     );
+    await tester.tap(find.text('MCP servers'));
+    await tester.pump();
     await tester.enterText(find.byType(TextField).first, 'community tools');
     await tester.pump();
     expect(find.text('Community Echo'), findsNothing);
-    await scrollTo(tester, find.text('No plugins match your search.'), 250);
-    expect(find.text('No plugins match your search.'), findsOneWidget);
+    await scrollTo(
+      tester,
+      find.textContaining('No reviewed servers match.'),
+      250,
+    );
+    expect(find.textContaining('No reviewed servers match.'), findsOneWidget);
     await tester.drag(find.byType(ListView).first, const Offset(0, 600));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first, 'github');
@@ -916,8 +1012,8 @@ void main() {
     await scrollTo(tester, find.text('Installed'), -200);
     await tester.tap(find.text('Installed'));
     await tester.pump();
-    await scrollTo(tester, find.textContaining('No plugins installed'), 200);
-    expect(find.textContaining('No plugins installed'), findsOneWidget);
+    await scrollTo(tester, find.textContaining('Nothing installed yet.'), 200);
+    expect(find.textContaining('Nothing installed yet.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

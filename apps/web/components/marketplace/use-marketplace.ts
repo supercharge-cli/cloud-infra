@@ -20,6 +20,37 @@ export async function searchSkillMd(query: string): Promise<SkillMdItem[]> {
   if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'SkillMD search failed.');
   return Array.isArray(data.items) ? data.items as SkillMdItem[] : [];
 }
+
+export function useSkillMdCatalog() {
+  const [items, setItems] = useState<SkillMdItem[]>([]);
+  const [query, setQuery] = useState('');
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const sequence = useRef(0);
+  const load = useCallback(async (term: string, offset = 0, append = false) => {
+    const current = ++sequence.current;
+    setLoading(true); setError(null);
+    if (!append) { setItems([]); setNextOffset(null); }
+    try {
+      const result = term ? { items: await searchSkillMd(term), nextOffset: null } :
+        await marketJson<{ items: SkillMdItem[]; nextOffset: number | null }>(`/api/marketplace/skills?limit=48&offset=${offset}`);
+      if (sequence.current !== current) return;
+      setItems((previous) => append ? [...previous, ...result.items.filter((item) => !previous.some((existing) => existing.id === item.id))] : result.items);
+      setNextOffset(result.nextOffset);
+    } catch (failure) { if (sequence.current === current) setError((failure as Error).message); }
+    finally { if (sequence.current === current) setLoading(false); }
+  }, []);
+  useEffect(() => {
+    const counter = sequence;
+    const timer = setTimeout(() => { void load(''); }, 0);
+    return () => { clearTimeout(timer); counter.current++; };
+  }, [load]);
+  const search = (term: string) => { const normalized = term.trim(); setQuery(normalized); void load(normalized); };
+  const refresh = () => void load(query);
+  const loadMore = () => { if (!loading && nextOffset !== null) void load('', nextOffset, true); };
+  return { items, query, nextOffset, loading, error, search, refresh, loadMore };
+}
 export type InstalledPlugin = {
   id: string; revision: number; enabled: boolean; trusted: boolean;
   activeDigest: string; configuredKeys: string[];

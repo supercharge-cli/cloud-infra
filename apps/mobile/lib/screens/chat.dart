@@ -22,7 +22,7 @@ import '../chat/chat_store.dart';
 import '../chat/bot_profile.dart';
 import '../chat/bot_avatar.dart';
 import '../chat/group_thread.dart';
-import '../chat/github_auth.dart';
+import '../chat/github_auth_dialog.dart';
 import '../desktop/shell.dart';
 import '../chat/cli_update.dart';
 import '../chat/commands.dart';
@@ -1981,6 +1981,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
           ),
         ),
+        if (_botsEnabled && runtime == AgentRuntime.supercharge)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: OutlinedButton.icon(
+              key: const ValueKey('workspace-github-login'),
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (_) => GitHubAuthDialog(api: api, instanceId: id),
+              ),
+              icon: const Icon(Icons.login, color: Vc.greenSoft),
+              label: const Align(
+                alignment: Alignment.centerLeft,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Connect GitHub CLI',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    Text(
+                      'Sign in on this VM',
+                      style: TextStyle(fontSize: 12, color: Vc.muted),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         Expanded(
           child: ListView(
             children: [
@@ -3858,29 +3886,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 message: error!,
                 onRetry: _boot,
                 onDismiss: () => setState(() => error = null),
-              ),
-            if (!isDesktop &&
-                _botsEnabled &&
-                !_groupOpen &&
-                !_contactThreadLoading &&
-                _selectedBotId == 'github' &&
-                store.activeSessionId != null &&
-                store.conversations.any(
-                  (chat) =>
-                      chat.sessionId == store.activeSessionId &&
-                      chat.botId == 'github' &&
-                      chat.source == 'direct',
-                ))
-              Flexible(
-                fit: FlexFit.loose,
-                child: SingleChildScrollView(
-                  child: GitHubAuthPanel(
-                    key: ValueKey('github-auth-$id-${store.activeSessionId}'),
-                    api: api,
-                    instanceId: id,
-                    chatId: store.activeSessionId!,
-                  ),
-                ),
               ),
             Expanded(
               child: _contactThreadLoading

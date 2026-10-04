@@ -109,9 +109,17 @@ async function getJson(path: string): Promise<unknown> {
 export async function searchSkillMd(query: string): Promise<SkillMdItem[]> {
   const normalized = query.trim();
   if (!normalized) return [];
-  const payload = await getJson(`/v1/search?q=${encodeURIComponent(normalized)}`) as { items?: unknown };
+  const payload = await getJson(`/v1/search?q=${encodeURIComponent(normalized)}&limit=48`) as { items?: unknown };
   if (!Array.isArray(payload.items)) throw new Error('SKILLMD_INVALID_RESPONSE: search items are missing');
   return payload.items.map((item) => itemFromApi(item as ApiItem)).filter((item): item is SkillMdItem => !!item);
+}
+
+export async function listSkillMd(limit: number, offset: number): Promise<{ items: SkillMdItem[]; nextOffset: number | null }> {
+  const payload = await getJson(`/v1/skills?limit=${limit}&offset=${offset}`) as { items?: unknown };
+  if (!Array.isArray(payload.items)) throw new Error('SKILLMD_INVALID_RESPONSE: listing items are missing');
+  const items = payload.items.map((item) => itemFromApi(item as ApiItem)).filter((item): item is SkillMdItem => !!item);
+  const nextOffset = payload.items.length === limit && offset + limit <= 1000 ? offset + limit : null;
+  return { items, nextOffset };
 }
 
 export async function getSkillMdItem(owner: string, name: string): Promise<SkillMdItem> {

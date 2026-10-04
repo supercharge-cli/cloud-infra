@@ -325,6 +325,16 @@ class VectraClient {
     timeout: _slow,
   );
 
+  Future<Map<String, dynamic>> githubAuthStartStandalone(
+    String id,
+    String requestId,
+  ) => _json(
+    'POST',
+    '/api/instances/$id/github-auth',
+    body: {'action': 'start', 'requestId': requestId},
+    timeout: _slow,
+  );
+
   Future<Map<String, dynamic>> githubAuthDone(String id) => _json(
     'POST',
     '/api/instances/$id/github-auth',
@@ -403,6 +413,23 @@ class VectraClient {
   ) => _json('POST', '/api/instances/$id/bots', body: input, timeout: _slow);
 
   /// Web, mobile and VM use the same reviewed release inventory.
+  Future<Map<String, dynamic>> skillMdSkills({
+    int limit = 48,
+    int offset = 0,
+  }) => _json(
+    'GET',
+    '/api/marketplace/skills',
+    query: {'limit': '$limit', 'offset': '$offset'},
+  );
+
+  Future<Map<String, dynamic>> searchSkillMd(String query) =>
+      _json('GET', '/api/marketplace/search', query: {'q': query});
+
+  Future<Map<String, dynamic>> skillMdItem(String owner, String name) => _json(
+    'GET',
+    '/api/marketplace/items/${Uri.encodeComponent(owner)}/${Uri.encodeComponent(name)}',
+  );
+
   Future<Map<String, dynamic>> managedMcpCatalog() =>
       _json('GET', '/api/managed-mcp/catalog', timeout: _fast);
 

@@ -22,7 +22,7 @@ export function SkillMdDetail({ owner, name, market, backHref }: {
   const installed = market.plugins.find((plugin) => plugin.id === item?.pluginId);
   const disabled = market.loading || !!market.busy || !!market.error;
   return <article className="market-detail">
-    <Link href={backHref} className="market-back"><ArrowLeft size={17} />All plugins</Link>
+    <Link href={backHref} className="market-back"><ArrowLeft size={17} />Back to skills</Link>
     {error && <p className="market-error" role="alert">{error}</p>}
     {!item && !error && <p role="status">Loading SkillMD details…</p>}
     {item && <>
@@ -41,7 +41,7 @@ export function SkillMdDetail({ owner, name, market, backHref }: {
         </section>
         {installed && <section className="market-section"><h3>Manage installation</h3><button className="market-button" disabled={disabled || !installed.enabled} onClick={() => void market.run('Disable skill', () => market.change(installed, { action: 'disable' }))}>Disable</button> {confirmRemove ? <><button className="market-button danger" disabled={disabled || installed.enabled} onClick={() => void market.run('Uninstall skill', async () => { await market.change(installed, { action: 'uninstall' }); setConfirmRemove(false); })}>Confirm uninstall</button><button className="market-button" onClick={() => setConfirmRemove(false)}>Cancel</button></> : <button className="market-button" disabled={disabled || installed.enabled} onClick={() => setConfirmRemove(true)}>Uninstall…</button>}</section>}
       </div><aside className="market-release"><h3>SkillMD details</h3><dl><dt>Publisher</dt><dd>{item.owner}</dd><dt>Type</dt><dd>{item.itemType === 'skill' ? 'Single skill' : 'Bundle with supporting files'}</dd>{item.license && <><dt>License</dt><dd>{item.license}</dd></>}{item.commitSha && <><dt>Source revision</dt><dd className="market-digest">{item.commitSha}</dd></>}{item.verified !== undefined && <><dt>SkillMD verified</dt><dd>{item.verified ? 'Yes' : 'No'}</dd></>}</dl>
-        {item.files && <><h3>Included files</h3><ul className="market-permissions"><li>SKILL.md</li>{item.files.map((file) => <li key={file.path}>{file.path}{file.isScript ? ' · script (not run on install)' : ''}</li>)}</ul></>}
+        {item.files && <><h3>Included files</h3><ul className="market-permissions"><li>SKILL.md</li>{item.files.filter((file) => file.path.toLowerCase() !== 'skill.md').map((file) => <li key={file.path}>{file.path}{file.isScript ? ' · script (not run on install)' : ''}</li>)}</ul></>}
         {item.sourceRepo && <a href={item.sourceRepo} rel="noreferrer" target="_blank">View source repository</a>}{' '}<a href={item.sourceUrl} rel="noreferrer" target="_blank">View on SkillMD</a>
       </aside></div>
     </>}

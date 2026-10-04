@@ -17,10 +17,17 @@ class MarketplaceController extends ChangeNotifier {
   int _catalogEpoch = 0;
   int _discoveryEpoch = 0;
   int _conversationEpoch = 0;
+  int _skillsEpoch = 0;
   Timer? _poll;
 
   List<CloudInstance> workspaces = [];
   List<Map<String, dynamic>> catalog = [];
+  List<SkillMdItem> skills = [];
+  String skillsQuery = '';
+  int? nextSkillsOffset;
+  bool loadingSkills = true;
+  bool loadingMoreSkills = false;
+  String? skillsError;
   List<DiscoveryPlugin> discovery = [];
   Map<String, dynamic> discoverySource = {};
   List<Map<String, dynamic>> bots = [];
@@ -88,12 +95,63 @@ class MarketplaceController extends ChangeNotifier {
 
   Future<void> load({String? initialInstanceId, String? initialBotId}) async {
     await Future.wait([
+      loadSkills(),
       loadCatalog(),
       loadWorkspaces(
         preferredId: initialInstanceId,
         preferredBot: initialBotId,
       ),
     ]);
+  }
+
+  Future<void> loadSkills({String query = '', bool more = false}) async {
+    final normalized = query.trim();
+    if (more &&
+        (nextSkillsOffset == null ||
+            normalized.isNotEmpty ||
+            loadingMoreSkills)) {
+      return;
+    }
+    final epoch = more ? _skillsEpoch : ++_skillsEpoch;
+    final offset = more ? nextSkillsOffset! : 0;
+    if (!more) {
+      skillsQuery = normalized;
+      skills = [];
+      nextSkillsOffset = null;
+      loadingSkills = true;
+    } else {
+      loadingMoreSkills = true;
+    }
+    skillsError = null;
+    _emit();
+    try {
+      final response = normalized.isEmpty
+          ? await api.skillMdSkills(offset: offset)
+          : await api.searchSkillMd(normalized);
+      if (_disposed || epoch != _skillsEpoch) return;
+      if (response['items'] is! List) {
+        throw const FormatException('Invalid skills response');
+      }
+      final rows = marketplaceRows(
+        response['items'],
+      ).map(SkillMdItem.parse).whereType<SkillMdItem>();
+      final ids = skills.map((item) => item.id).toSet();
+      skills = [...skills, ...rows.where((item) => ids.add(item.id))];
+      final next = response['nextOffset'];
+      nextSkillsOffset = normalized.isEmpty && next is int && next > offset
+          ? next
+          : null;
+    } catch (_) {
+      if (_disposed || epoch != _skillsEpoch) return;
+      skillsError =
+          'SkillMD skills unavailable. Check your connection and retry.';
+    } finally {
+      if (!_disposed && epoch == _skillsEpoch) {
+        loadingSkills = false;
+        loadingMoreSkills = false;
+        _emit();
+      }
+    }
   }
 
   Future<void> loadCatalog() async {
@@ -433,6 +491,91 @@ class MarketplaceController extends ChangeNotifier {
         _emit();
       }
     }
+  }
+
+  MarketplacePlugin? installedSkill(SkillMdItem item) {
+    final row = inventory
+        .where((entry) => entry['id'] == item.pluginId)
+        .firstOrNull;
+    return row == null ? null : MarketplacePlugin({}, installed: row);
+  }
+
+  Future<bool> installSkill(SkillMdItem item) async {
+    if (!canAct || !item.installable || installedSkill(item) != null) {
+      return false;
+    }
+    return _act(
+      {
+        'action': 'installSkillMd',
+        'owner': item.owner,
+        'name': item.name,
+        'requestId': _requestId(),
+      },
+      'Skill installed disabled and untrusted in this bot VM. Review its files and permissions before approval.',
+    );
+  }
+
+  String? skillReviewFingerprint(SkillMdItem item) {
+    final selected = installedSkill(item);
+    if (!canAct ||
+        selected == null ||
+        !selected.reviewable ||
+        selected.trusted ||
+        selected.permissions.isNotEmpty ||
+        selected.servers.isNotEmpty) {
+      return null;
+    }
+    return jsonEncode([
+      _targetEpoch,
+      item.pluginId,
+      selected.installed!['revision'],
+      selected.permissions,
+    ]);
+  }
+
+  Future<bool> approveSkill(SkillMdItem item, String fingerprint) async {
+    final selected = installedSkill(item);
+    if (selected == null || skillReviewFingerprint(item) != fingerprint) {
+      return false;
+    }
+    return _change(selected, 'trust', {
+      'permissions': selected.permissions,
+    }, 'Skill approved in this VM. It has not run.');
+  }
+
+  Future<bool> setSkillEnabled(SkillMdItem item, bool enabled) async {
+    final selected = installedSkill(item);
+    if (!canAct ||
+        selected == null ||
+        !selected.reviewable ||
+        selected.permissions.isNotEmpty ||
+        selected.servers.isNotEmpty ||
+        (enabled &&
+            (!selected.trusted || selected.missingConfiguration.isNotEmpty))) {
+      return false;
+    }
+    return _change(
+      selected,
+      enabled ? 'enable' : 'disable',
+      {},
+      enabled ? 'Skill enabled for this bot.' : 'Skill disabled for this bot.',
+    );
+  }
+
+  Future<bool> uninstallSkill(SkillMdItem item) async {
+    final selected = installedSkill(item);
+    if (!canAct ||
+        selected == null ||
+        !selected.reviewable ||
+        selected.enabled) {
+      return false;
+    }
+    return _change(
+      selected,
+      'uninstall',
+      {},
+      'Skill uninstalled from this bot VM.',
+    );
   }
 
   Future<bool> install(String id) async {
