@@ -3835,6 +3835,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _steerTask() async {
+    final text = _input.text.trim();
+    final botId = _botScope;
+    final chatId = _chatScope;
+    if (!_botsEnabled ||
+        _groupOpen ||
+        !working ||
+        _chatQueued ||
+        sending ||
+        text.isEmpty ||
+        botId == null ||
+        chatId == null) {
+      return;
+    }
+    setState(() => sending = true);
+    try {
+      await api.steerChat(id, text, botId: botId, chatId: chatId);
+      if (mounted && chatId == _chatScope && _input.text.trim() == text) {
+        setState(() => _input.clear());
+      }
+    } catch (failure) {
+      if (mounted && chatId == _chatScope) {
+        setState(() => error = failure.toString());
+      }
+    } finally {
+      if (mounted && chatId == _chatScope) setState(() => sending = false);
+    }
+  }
+
   Future<void> _stopTask() async {
     if (!working && !sending && !_chatQueued) return;
     try {
@@ -4094,10 +4123,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     ),
                                   ),
                                 ),
-                                if (isDesktop &&
+                                if (_botsEnabled &&
+                                    !_groupOpen &&
+                                    working &&
+                                    !_chatQueued)
+                                  TextButton(
+                                    onPressed:
+                                        sending || _input.text.trim().isEmpty
+                                        ? null
+                                        : _steerTask,
+                                    child: const Text('Steer'),
+                                  ),
+                                if ((!_groupOpen || !_botsEnabled) &&
                                     (working || sending || _chatQueued))
                                   IconButton(
-                                    tooltip: 'Stop task (Ctrl+.)',
+                                    tooltip: isDesktop
+                                        ? 'Stop task (Ctrl+.)'
+                                        : 'Stop task',
                                     onPressed: _stopTask,
                                     icon: const Icon(
                                       Icons.stop_circle_outlined,

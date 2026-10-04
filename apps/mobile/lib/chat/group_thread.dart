@@ -80,11 +80,17 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
       ),
     );
     _input.text = '${cache['draft'] ?? ''}';
-    final unconfirmed = _messages.where((row) => row['failed'] == true || row['pending'] == true).firstOrNull;
+    final unconfirmed = _messages
+        .where((row) => row['failed'] == true || row['pending'] == true)
+        .firstOrNull;
     if (unconfirmed != null) {
-      _retryId = '${unconfirmed['id']}'; _retryText = '${unconfirmed['text']}';
-      _retryMentions = (unconfirmed['mentions'] as List? ?? const []).map((id) => '$id').toList();
-      _error = 'A previous message was not confirmed. Retry checks the same message without sending it twice.';
+      _retryId = '${unconfirmed['id']}';
+      _retryText = '${unconfirmed['text']}';
+      _retryMentions = (unconfirmed['mentions'] as List? ?? const [])
+          .map((id) => '$id')
+          .toList();
+      _error =
+          'A previous message was not confirmed. Retry checks the same message without sending it twice.';
     }
     setState(() => _loading = _messages.isEmpty);
     await _refresh();
@@ -141,7 +147,11 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
           final byId = {for (final row in _messages) '${row['id']}': row};
           for (final row in incoming) {
             byId['${row['id']}'] = row;
-            if (row['id'] == _retryId) { _retryId = null; _retryText = null; _retryMentions = []; }
+            if (row['id'] == _retryId) {
+              _retryId = null;
+              _retryText = null;
+              _retryMentions = [];
+            }
           }
           _messages
             ..clear()
@@ -179,7 +189,10 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
   Future<void> _send({bool retry = false}) async {
     if (_sending) return;
     if (!retry && _retryId != null) {
-      setState(() => _error = 'Retry the unconfirmed message first. Your new draft is kept here.');
+      setState(
+        () => _error =
+            'Retry the unconfirmed message first. Your new draft is kept here.',
+      );
       return;
     }
     final text = retry ? _retryText ?? '' : _input.text.trim();
@@ -242,6 +255,49 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
         setState(() => _sending = false);
         _save();
       }
+    }
+  }
+
+  Future<void> _stopAgent(Map<String, dynamic> item) async {
+    if (_sending) return;
+    final botId = item['botId'] as String?;
+    final chatId = item['sessionId'] as String?;
+    if (botId == null || chatId == null) return;
+    setState(() => _sending = true);
+    try {
+      await widget.api.stopChat(
+        widget.instanceId,
+        botId: botId,
+        chatId: chatId,
+      );
+      await _refresh();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _steerAgent(Map<String, dynamic> item) async {
+    final text = _input.text.trim();
+    if (_sending || item['state'] != 'working' || text.isEmpty) return;
+    final botId = item['botId'] as String?;
+    final chatId = item['sessionId'] as String?;
+    if (botId == null || chatId == null) return;
+    setState(() => _sending = true);
+    try {
+      await widget.api.steerChat(
+        widget.instanceId,
+        text,
+        botId: botId,
+        chatId: chatId,
+      );
+      if (mounted && _input.text.trim() == text) _input.clear();
+      await _refresh();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _sending = false);
     }
   }
 
@@ -406,30 +462,47 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
                   for (final item in _activity)
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
-                      child: ActionChip(
-                        avatar: Icon(
-                          item['state'] == 'working'
-                              ? Icons.bolt_outlined
-                              : Icons.schedule,
-                          color: item['state'] == 'working'
-                              ? Vc.greenSoft
-                              : Vc.amber,
-                          size: 17,
-                        ),
-                        label: Text(
-                          '${widget.bots.where((bot) => bot.id == item['botId']).firstOrNull?.name ?? item['botId']} · ${item['state']}',
-                        ),
-                        onPressed: () {
-                          final bot = widget.bots
-                              .where((bot) => bot.id == item['botId'])
-                              .firstOrNull;
-                          if (bot != null) {
-                            widget.onOpenAgent(
-                              bot,
-                              item['sessionId'] as String?,
-                            );
-                          }
-                        },
+                      child: Row(
+                        children: [
+                          ActionChip(
+                            avatar: Icon(
+                              item['state'] == 'working'
+                                  ? Icons.bolt_outlined
+                                  : Icons.schedule,
+                              color: item['state'] == 'working'
+                                  ? Vc.greenSoft
+                                  : Vc.amber,
+                              size: 17,
+                            ),
+                            label: Text(
+                              '${widget.bots.where((bot) => bot.id == item['botId']).firstOrNull?.name ?? item['botId']} · ${item['state']}',
+                            ),
+                            onPressed: () {
+                              final bot = widget.bots
+                                  .where((bot) => bot.id == item['botId'])
+                                  .firstOrNull;
+                              if (bot != null) {
+                                widget.onOpenAgent(
+                                  bot,
+                                  item['sessionId'] as String?,
+                                );
+                              }
+                            },
+                          ),
+                          if (item['state'] == 'working')
+                            IconButton(
+                              tooltip: 'Steer ${item['botId']}',
+                              onPressed: _sending || _input.text.trim().isEmpty
+                                  ? null
+                                  : () => _steerAgent(item),
+                              icon: const Icon(Icons.subdirectory_arrow_right),
+                            ),
+                          IconButton(
+                            tooltip: 'Stop ${item['botId']}',
+                            onPressed: _sending ? null : () => _stopAgent(item),
+                            icon: const Icon(Icons.stop_circle_outlined),
+                          ),
+                        ],
                       ),
                     ),
                 ],

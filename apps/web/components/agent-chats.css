@@ -9,4 +9,5 @@
 @media(min-width:1380px){.agent-chats{grid-template-columns:286px minmax(480px,1fr) minmax(340px,410px)}.agent-computer{display:block;overflow:auto;border-left:1px solid var(--chat-border);padding:12px}}
 @media(max-width:720px){.agent-chats{grid-template-columns:1fr;height:calc(100dvh - 68px);min-height:400px;margin:0;border:0;border-radius:0}.agent-thread{display:none}.agent-thread-open .agent-contacts{display:none}.agent-thread-open .agent-thread{display:flex}.agent-thread>header .agent-back{display:grid}.agent-thread>header{padding:10px;gap:8px}.agent-thread>header p{font-size:10px}.agent-messages{padding:16px 12px}.agent-message{max-width:90%}.agent-contacts{border:0}.agent-composer{margin:0 9px 10px}.agent-thread>header .agent-avatar{width:35px;height:35px}}
 @media(max-width:480px){.agent-github-link{flex-wrap:wrap}.agent-github-link a{white-space:nowrap}.agent-github-link button{width:100%;justify-content:center}}
+.agent-activity>div{display:flex;gap:4px;flex-shrink:0}.agent-activity button:disabled{opacity:.45;cursor:not-allowed}
 @media(prefers-reduced-motion:reduce){.agent-working{animation:none}}

@@ -222,6 +222,23 @@ class _BotClient extends _Client {
 
   final calls = <String>[];
   final sent = <(String?, String?, String)>[];
+  final steered = <(String, String, String)>[];
+  final stopped = <(String?, String?)>[];
+  @override
+  Future<void> steerChat(
+    String id,
+    String text, {
+    required String botId,
+    required String chatId,
+  }) async {
+    steered.add((botId, chatId, text));
+  }
+
+  @override
+  Future<void> stopChat(String id, {String? botId, String? chatId}) async {
+    stopped.add((botId, chatId));
+  }
+
   final savedBots = <Map<String, dynamic>>[
     {
       'id': 'main',
@@ -723,6 +740,43 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  testWidgets('phone direct chat can steer and stop a running agent', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    PathProviderPlatform.instance = _Paths();
+    await _size(tester, const Size(390, 844));
+    final client = _BotClient();
+    await _app(tester, client, path: '/chat/design?bot=main');
+    for (var i = 0; i < 100 && find.text('Steer').evaluate().isEmpty; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(find.text('Steer'), findsOneWidget);
+    expect(find.byTooltip('Stop task'), findsOneWidget);
+    final composer = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField && widget.decoration?.hintText == 'Message',
+    );
+    await tester.enterText(composer, 'Check the latest result first');
+    await tester.pump();
+    await tester.tap(find.text('Steer'));
+    await tester.pump();
+    expect(client.steered, [
+      ('main', 'chat-main', 'Check the latest result first'),
+    ]);
+    expect(client.sent, isEmpty);
+    expect(tester.widget<TextField>(composer).controller?.text, isEmpty);
+    await tester.tap(find.byTooltip('Stop task'));
+    await tester.pump();
+    expect(client.stopped, [('main', 'chat-main')]);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('phone home shows contacts and opens the shared group', (
     tester,
   ) async {
@@ -747,6 +801,62 @@ void main() {
     expect(find.byKey(const ValueKey('group-composer')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await _capture(tester, 'group-phone');
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('phone group can steer and stop its active agent', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    PathProviderPlatform.instance = _Paths();
+    await _size(tester, const Size(390, 844));
+    final client = _BotClient();
+    await _app(tester, client, path: '/chat/design?group=1');
+    for (
+      var i = 0;
+      i < 20 && find.byKey(const ValueKey('group-contact')).evaluate().isEmpty;
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 30)),
+      );
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    await tester.tap(find.byKey(const ValueKey('group-contact')));
+    for (
+      var i = 0;
+      i < 100 && find.byTooltip('Stop research').evaluate().isEmpty;
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(find.byTooltip('Stop research'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('group-composer')),
+      'Focus on the sources',
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('Steer research'));
+    await tester.pump();
+    expect(client.steered, [
+      ('research', 'group-research', 'Focus on the sources'),
+    ]);
+    expect(client.sent, isEmpty);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('group-composer')))
+          .controller
+          ?.text,
+      isEmpty,
+    );
+    await tester.tap(find.byTooltip('Stop research'));
+    await tester.pump();
+    expect(client.stopped, [('research', 'group-research')]);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
     debugDefaultTargetPlatformOverride = null;
   });
 

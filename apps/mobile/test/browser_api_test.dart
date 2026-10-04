@@ -480,6 +480,55 @@ void main() {
     },
   );
 
+  test(
+    'steer targets the active bot conversation and requires acknowledgement',
+    () async {
+      await http.runWithClient(
+        () => api.steerChat(
+          'instance-1',
+          'change direction',
+          botId: 'github',
+          chatId: 'chat-1',
+        ),
+        () => MockClient((request) async {
+          expect(request.method, 'POST');
+          expect(request.url.path, '/api/instances/instance-1/chat/steer');
+          expect(jsonDecode(request.body), {
+            'text': 'change direction',
+            'botId': 'github',
+            'chatId': 'chat-1',
+          });
+          return http.Response(jsonEncode({'ok': true, 'steered': true}), 200);
+        }),
+      );
+      await expectLater(
+        respond(
+          {'ok': false},
+          () => api.steerChat(
+            'instance-1',
+            'change direction',
+            botId: 'github',
+            chatId: 'chat-1',
+          ),
+        ),
+        throwsA(isA<ApiException>().having((e) => e.status, 'status', 502)),
+      );
+      await expectLater(
+        respond(
+          {'error': 'No running turn to steer'},
+          () => api.steerChat(
+            'instance-1',
+            'change direction',
+            botId: 'github',
+            chatId: 'chat-1',
+          ),
+          status: 409,
+        ),
+        throwsA(isA<ApiException>().having((e) => e.status, 'status', 409)),
+      );
+    },
+  );
+
   test('stop and release propagate server errors', () async {
     for (final action in <Future<void> Function()>[
       () => api.stopChat('instance-1'),

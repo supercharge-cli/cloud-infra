@@ -392,6 +392,23 @@ class VectraClient {
     timeout: _slow,
   );
 
+  Future<void> steerChat(
+    String id,
+    String text, {
+    required String botId,
+    required String chatId,
+  }) async {
+    final result = await _json(
+      'POST',
+      '/api/instances/$id/chat/steer',
+      body: {'text': text, 'botId': botId, 'chatId': chatId},
+      timeout: _fast,
+    );
+    if (result['ok'] != true || result['steered'] != true) {
+      throw ApiException(502, 'The agent did not accept the steer.');
+    }
+  }
+
   Future<Map<String, dynamic>> listBots(String id) =>
       _json('GET', '/api/instances/$id/bots', timeout: _fast);
 
