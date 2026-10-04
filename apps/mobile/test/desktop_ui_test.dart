@@ -224,6 +224,18 @@ class _BotClient extends _Client {
   final sent = <(String?, String?, String)>[];
   final steered = <(String, String, String)>[];
   final stopped = <(String?, String?)>[];
+  final groupSent = <String>[];
+  @override
+  Future<Map<String, dynamic>> sendGroupMessage(
+    String id,
+    String text,
+    String requestId,
+    List<String> mentions,
+  ) async {
+    groupSent.add(text);
+    return {'ok': true};
+  }
+
   @override
   Future<void> steerChat(
     String id,
@@ -767,13 +779,18 @@ void main() {
     await _size(tester, const Size(390, 844));
     final client = _BotClient();
     await _app(tester, client, path: '/chat/design?bot=main');
-    for (var i = 0; i < 100 && find.text('Steer').evaluate().isEmpty; i++) {
+    for (
+      var i = 0;
+      i < 100 && find.byTooltip('Steer').evaluate().isEmpty;
+      i++
+    ) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 20)),
       );
       await tester.pump(const Duration(milliseconds: 20));
     }
-    expect(find.text('Steer'), findsOneWidget);
+    expect(find.byTooltip('Steer'), findsOneWidget);
+    expect(find.text('Steer'), findsNothing);
     expect(find.byTooltip('Stop task'), findsOneWidget);
     final composer = find.byWidgetPredicate(
       (widget) =>
@@ -781,7 +798,7 @@ void main() {
     );
     await tester.enterText(composer, 'Check the latest result first');
     await tester.pump();
-    await tester.tap(find.text('Steer'));
+    await tester.tap(find.byTooltip('Steer'));
     await tester.pump();
     expect(client.steered, [
       ('main', 'chat-main', 'Check the latest result first'),
@@ -855,6 +872,7 @@ void main() {
     expect(find.byTooltip('Stop research'), findsOneWidget);
     expect(find.byTooltip('Stop main'), findsNothing);
     expect(find.byTooltip('Steer main'), findsNothing);
+    expect(find.byTooltip('Steer research'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('group-composer')),
       'Focus on the sources',
@@ -873,6 +891,16 @@ void main() {
           ?.text,
       isEmpty,
     );
+    await tester.enterText(
+      find.byKey(const ValueKey('group-composer')),
+      '@Main take a look',
+    );
+    await tester.pump();
+    expect(find.byTooltip('Send group message'), findsOneWidget);
+    await tester.tap(find.byTooltip('Send group message'));
+    await tester.pump();
+    expect(client.groupSent, ['@Main take a look']);
+    expect(client.steered, hasLength(1));
     await tester.tap(find.byTooltip('Stop research'));
     await tester.pump();
     expect(client.stopped, [('research', 'group-research')]);

@@ -278,6 +278,33 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
     }
   }
 
+  Map<String, dynamic>? get _steerTarget {
+    final text = _input.text;
+    final active = _activity
+        .where(
+          (item) =>
+              item['groupMessageId'] != null && item['state'] == 'working',
+        )
+        .toList();
+    final mentioned = widget.bots
+        .where((bot) => text.contains('@${bot.name}'))
+        .map((bot) => bot.id)
+        .toSet();
+    final candidates = mentioned.isEmpty
+        ? active
+        : active.where((item) => mentioned.contains(item['botId'])).toList();
+    return candidates.length == 1 ? candidates.single : null;
+  }
+
+  Future<void> _submit() async {
+    final target = _steerTarget;
+    if (target != null && _retryId == null) {
+      await _steerAgent(target);
+    } else {
+      await _send();
+    }
+  }
+
   Future<void> _steerAgent(Map<String, dynamic> item) async {
     final text = _input.text.trim();
     if (_sending || item['state'] != 'working' || text.isEmpty) return;
@@ -489,15 +516,6 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
                               }
                             },
                           ),
-                          if (item['groupMessageId'] != null &&
-                              item['state'] == 'working')
-                            IconButton(
-                              tooltip: 'Steer ${item['botId']}',
-                              onPressed: _sending || _input.text.trim().isEmpty
-                                  ? null
-                                  : () => _steerAgent(item),
-                              icon: const Icon(Icons.subdirectory_arrow_right),
-                            ),
                           if (item['groupMessageId'] != null)
                             IconButton(
                               tooltip: 'Stop ${item['botId']}',
@@ -655,7 +673,7 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
                   Expanded(
                     child: DesktopComposerKeys(
                       controller: _input,
-                      onSend: () => unawaited(_send()),
+                      onSend: () => unawaited(_submit()),
                       child: TextField(
                         key: const ValueKey('group-composer'),
                         controller: _input,
@@ -673,10 +691,12 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
                     ),
                   ),
                   IconButton.filled(
-                    tooltip: 'Send group message',
+                    tooltip: _steerTarget != null && _retryId == null
+                        ? 'Steer ${_steerTarget!['botId']}'
+                        : 'Send group message',
                     onPressed: _sending || _input.text.trim().isEmpty
                         ? null
-                        : () => _send(),
+                        : _submit,
                     icon: Icon(
                       _sending ? Icons.more_horiz : Icons.arrow_upward,
                     ),

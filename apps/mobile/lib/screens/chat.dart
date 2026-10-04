@@ -3844,6 +3844,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         !working ||
         _chatQueued ||
         sending ||
+        pending.isNotEmpty ||
         text.isEmpty ||
         botId == null ||
         chatId == null) {
@@ -4099,7 +4100,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 Expanded(
                                   child: DesktopComposerKeys(
                                     controller: _input,
-                                    onSend: () => _send(),
+                                    onSend: () =>
+                                        _botsEnabled &&
+                                            !_groupOpen &&
+                                            working &&
+                                            !_chatQueued
+                                        ? _steerTask()
+                                        : _send(),
                                     onPaste: _pasteClipboard,
                                     child: TextField(
                                       controller: _input,
@@ -4123,17 +4130,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     ),
                                   ),
                                 ),
-                                if (_botsEnabled &&
-                                    !_groupOpen &&
-                                    working &&
-                                    !_chatQueued)
-                                  TextButton(
-                                    onPressed:
-                                        sending || _input.text.trim().isEmpty
-                                        ? null
-                                        : _steerTask,
-                                    child: const Text('Steer'),
-                                  ),
                                 if ((!_groupOpen || !_botsEnabled) &&
                                     (working || sending || _chatQueued))
                                   IconButton(
@@ -4164,17 +4160,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                       : Colors.white,
                                   shape: const CircleBorder(),
                                   child: IconButton(
-                                    tooltip: isDesktop
+                                    tooltip:
+                                        _botsEnabled &&
+                                            !_groupOpen &&
+                                            working &&
+                                            !_chatQueued
+                                        ? 'Steer'
+                                        : isDesktop
                                         ? 'Send (Enter)'
                                         : 'Send',
                                     onPressed:
                                         _switchingBot ||
                                             sending ||
+                                            (_botsEnabled && _chatQueued) ||
                                             (_botsEnabled &&
-                                                (working || _chatQueued)) ||
+                                                working &&
+                                                pending.isNotEmpty) ||
                                             (_input.text.trim().isEmpty &&
                                                 pending.isEmpty)
                                         ? null
+                                        : _botsEnabled && !_groupOpen && working
+                                        ? _steerTask
                                         : () => _send(),
                                     icon: sending
                                         ? const SizedBox(
