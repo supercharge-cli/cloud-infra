@@ -63,14 +63,21 @@ async function connectDb(): Promise<Db> {
     );
   }
 
-  client = new MongoClient(uri);
+  client = new MongoClient(uri, { minPoolSize: 1, maxPoolSize: 8 });
   await client.connect();
   console.info('[timing] mongodb connect', { ms: Math.round(performance.now() - started) });
   const candidate = client.db(resolveMongoDbName());
-  const indexStarted = performance.now();
-  await ensureIndexes(candidate);
-  console.info('[timing] mongodb indexes', { ms: Math.round(performance.now() - indexStarted) });
   db = candidate;
+  // Indexes already live in Mongo. Creating them on the request path adds a
+  // full round trip before the first query can run.
+  const indexStarted = performance.now();
+  void ensureIndexes(candidate)
+    .then(() => {
+      console.info('[timing] mongodb indexes', { ms: Math.round(performance.now() - indexStarted) });
+    })
+    .catch((error) => {
+      console.warn('[mongodb] ensure indexes failed:', (error as Error).message);
+    });
   return candidate;
 }
 

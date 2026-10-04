@@ -441,37 +441,167 @@ export async function adminStats(): Promise<{
   ordersTotal: number;
 }> {
   const db = await getDb();
-  const users = await db.collection("users").countDocuments();
-  const allUsers = await db.collection<User>("users").find({}).toArray();
-  const admins = allUsers.filter((u) => isAdminUser(u)).length;
-  const instances = await db
-    .collection("instances")
-    .countDocuments({ status: { $ne: "destroyed" } });
-  const running = await db
-    .collection("instances")
-    .countDocuments({ status: "running" });
-  const paused = await db
-    .collection("instances")
-    .countDocuments({ status: "paused" });
   const now = new Date().toISOString();
-  const paidActive = await db.collection("instances").countDocuments({
-    status: { $ne: "destroyed" },
-    paidUntil: { $gt: now },
-  });
-  const ordersPaid = await db
-    .collection("orders")
-    .countDocuments({ status: "paid" });
-  const ordersTotal = await db.collection("orders").countDocuments();
-  return {
-    users,
-    admins,
-    instances,
-    running,
-    paused,
-    paidActive,
-    ordersPaid,
-    ordersTotal,
+  const adminEmails = (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const empty = {
+    users: 0,
+    admins: 0,
+    instances: 0,
+    running: 0,
+    paused: 0,
+    paidActive: 0,
+    ordersPaid: 0,
+    ordersTotal: 0,
   };
+  // One round trip. The previous version issued eight commands and loaded
+  // every user document; each command costs a full remote round trip.
+  const [row] = await db.collection("users").aggregate<{
+    users: number;
+    admins: number;
+    instances: number;
+    running: number;
+    paused: number;
+    paidActive: number;
+    ordersPaid: number;
+    ordersTotal: number;
+  }>([
+    {
+      $project: {
+        _id: 0,
+        kind: { $literal: "user" },
+        role: 1,
+        email: { $toLower: "$email" },
+      },
+    },
+    {
+      $unionWith: {
+        coll: "instances",
+        pipeline: [
+          {
+            $project: {
+              _id: 0,
+              kind: { $literal: "instance" },
+              status: 1,
+              paidUntil: 1,
+            },
+          },
+        ],
+      },
+    },
+    {
+      $unionWith: {
+        coll: "orders",
+        pipeline: [
+          { $project: { _id: 0, kind: { $literal: "order" }, status: 1 } },
+        ],
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        users: { $sum: { $cond: [{ $eq: ["$kind", "user"] }, 1, 0] } },
+        admins: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ["$kind", "user"] },
+                  {
+                    $or: [
+                      { $eq: ["$role", "admin"] },
+                      { $in: ["$email", adminEmails] },
+                    ],
+                  },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        instances: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ["$kind", "instance"] },
+                  { $ne: ["$status", "destroyed"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        running: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ["$kind", "instance"] },
+                  { $eq: ["$status", "running"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        paused: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ["$kind", "instance"] },
+                  { $eq: ["$status", "paused"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        paidActive: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ["$kind", "instance"] },
+                  { $ne: ["$status", "destroyed"] },
+                  { $gt: ["$paidUntil", now] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        ordersPaid: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ["$kind", "order"] },
+                  { $eq: ["$status", "paid"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        ordersTotal: {
+          $sum: { $cond: [{ $eq: ["$kind", "order"] }, 1, 0] },
+        },
+      },
+    },
+  ]).toArray();
+  if (!row) return empty;
+  const { _id: _drop, ...stats } = row as typeof empty & { _id?: unknown };
+  return stats;
 }
 
 export async function listInstances(

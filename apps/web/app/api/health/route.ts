@@ -25,18 +25,12 @@ export async function GET() {
     try {
       const { getDb } = await import('@/lib/mongodb');
       const db = await getDb();
-      const users = await db.collection('users').countDocuments();
-      const admins = await db
-        .collection('users')
-        .find({ role: 'admin' })
-        .project({ email: 1 })
-        .limit(10)
-        .toArray();
+      await db.command({ ping: 1 });
+      const users = await db.collection('users').estimatedDocumentCount();
       mongo = {
         ok: true,
         db: resolveMongoDbName(),
         users,
-        adminEmails: admins.map((a) => String((a as { email?: string }).email || '')),
       };
     } catch (e) {
       mongo = { ok: false, error: (e as Error).message.slice(0, 200) };
