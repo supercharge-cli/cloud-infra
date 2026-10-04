@@ -8,9 +8,11 @@ export type MarketEntry = CatalogEntry & {
   auth?: 'none' | 'oauth' | 'secrets'; capabilities?: string[];
 };
 export type SkillMdItem = {
-  id: string; source: 'skillmd'; itemType: 'skill' | 'plugin'; owner: string; name: string;
+  id: string; pluginId: string; source: 'skillmd'; itemType: 'skill' | 'plugin'; owner: string; name: string;
   description?: string; category?: string; agents: string[]; verified?: boolean;
-  rawUrl?: string; sourceUrl: string; installable: false; installError: string;
+  rawUrl?: string; bundleUrl?: string; sourceRepo?: string; license?: string; commitSha?: string;
+  lastSyncedAt?: string; files?: Array<{ path: string; sizeBytes?: number; isScript?: boolean }>;
+  sourceUrl: string; installable: boolean; installError?: string;
 };
 export async function searchSkillMd(query: string): Promise<SkillMdItem[]> {
   const response = await fetch(`/api/marketplace/search?q=${encodeURIComponent(query)}`);

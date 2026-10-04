@@ -2,8 +2,8 @@
 export const pluginRuntimeAssets = Object.freeze([
   {
     name: "control.mjs",
-    url: "https://raw.githubusercontent.com/iotserver24/supercharge-app/893407e48f125a857ef36a894c74623a0af2a670/public/managed-mcp/runtime-1/control.mjs",
-    sha256: "21e8a7d98e5f1bdfb1cd2b27a34acd72f6fae8b0436a914c988e92e074d92e0f",
+    url: "https://raw.githubusercontent.com/iotserver24/supercharge-app/db819c8ff89bebef9357364b430bb920ff4efed2/public/managed-mcp/runtime-1/control.mjs",
+    sha256: "ee49b184b3827bdca63c247281bf950bb4541a8aae38e01b6d10d8e8f7b1bce4",
   },
   {
     name: "catalog.json",

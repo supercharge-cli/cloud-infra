@@ -5,7 +5,7 @@ type Context = { params: Promise<{ owner: string; name: string }> };
 
 export async function GET(_request: Request, context: Context) {
   const { owner, name } = await context.params;
-  if (!/^[A-Za-z0-9_.-]{1,80}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,120}$/.test(name)) {
+  if (owner === '.' || owner === '..' || name === '.' || name === '..' || !/^[A-Za-z0-9_.-]{1,80}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,120}$/.test(name)) {
     return NextResponse.json({ error: 'SKILLMD_ITEM_NOT_FOUND: invalid SkillMD item identifier' }, { status: 400 });
   }
   try {

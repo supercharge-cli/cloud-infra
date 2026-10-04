@@ -11,6 +11,7 @@ const MANAGED_MCP_ACTIONS = new Set([
   'validate',
   'install',
   'installCatalog',
+  'installSkillMd',
   'pluginAction',
   'apply',
   'retry',
@@ -64,6 +65,13 @@ export async function POST(req: Request, ctx: Ctx) {
     return NextResponse.json({ error: 'Unsupported managed MCP action' }, { status: 400 });
   }
   const payload = body as Record<string, unknown>;
+  if (action === 'installSkillMd' && (
+    typeof payload.owner !== 'string' || ['.', '..'].includes(payload.owner) || !/^[A-Za-z0-9_.-]{1,80}$/.test(payload.owner) ||
+    typeof payload.name !== 'string' || ['.', '..'].includes(payload.name) || !/^[A-Za-z0-9_.-]{1,120}$/.test(payload.name) ||
+    typeof payload.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(payload.requestId)
+  )) {
+    return NextResponse.json({ error: 'Invalid SkillMD item identifier' }, { status: 400 });
+  }
   if (action === 'installCatalog' || (action === 'pluginAction' && (payload.pluginAction as { action?: unknown } | null)?.action === 'update')) {
     const catalogId = payload.catalogId;
     const catalogSha256 = payload.catalogSha256;

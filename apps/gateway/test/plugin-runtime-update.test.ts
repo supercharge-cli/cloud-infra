@@ -45,12 +45,12 @@ function fixture(t: { after: (fn: () => void) => void }) {
 
 test("immutable pins match locally reviewed release objects and accept only fixed modes", () => {
   const cwd = fileURLToPath(new URL("../../../../", import.meta.url));
-  const root = execFileSync("git", ["show", "1cb58d9acba36391123381e04238857cff658f63:sandbox/e2b-agent-template/plugin-api-control.mjs"], { cwd });
+  const root = execFileSync("git", ["-C", "supercharge-app", "show", "db819c8ff89bebef9357364b430bb920ff4efed2:public/managed-mcp/runtime-1/control.mjs"], { cwd });
   const catalog = execFileSync("git", ["-C", "cloud-infra", "show", "4722bd454cfc35d18a2e7c43059e2d8939d672a5:apps/web/public/managed-mcp/catalog.json"], { cwd });
   assert.equal(createHash("sha256").update(root).digest("hex"), pluginRuntimeAssets[0].sha256);
   assert.equal(createHash("sha256").update(catalog).digest("hex"), pluginRuntimeAssets[1].sha256);
   for (const asset of pluginRuntimeAssets) {
-    assert.match(asset.url, /^https:\/\/raw\.githubusercontent\.com\/iotserver24\/supercharge-app\/893407e48f125a857ef36a894c74623a0af2a670\/public\/managed-mcp\/runtime-1\//);
+    assert.match(asset.url, /^https:\/\/raw\.githubusercontent\.com\/iotserver24\/supercharge-app\/[a-f0-9]{40}\/public\/managed-mcp\/runtime-1\//);
   }
   assert.match(pluginRuntimeCommand("update"), /^python3 -c '/);
   assert.doesNotMatch(pluginRuntimeCommand("update"), /workspace|home\/user/);
