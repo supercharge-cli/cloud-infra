@@ -14,6 +14,7 @@ import { cycleRequired, cycleThreshold, sandboxRunStartedAt, runContinuousCycle 
 import { LifecycleStore, type LifecycleRecord } from "./lifecycle-store.js";
 import { pluginRuntimeCommand } from "./plugin-runtime-update.js";
 import { githubMcpTokenCommand } from "./github-token-read.js";
+import { deleteAfterKill, killWithPreStop, prepareMigration } from "./pre-stop.js";
 
 type SandboxLike = {
   sandboxId?: string;
@@ -182,7 +183,8 @@ const maxContinuousMs = (() => {
 })();
 /**
  * https://e2b.dev/docs/sandbox/auto-resume
- * Default onTimeout is "kill". We force "pause" (full memory + fs snapshot).
+ * Default onTimeout is "kill". We request "pause" (full memory + fs snapshot).
+ * An explicit kill override or a provider-enforced kill bypasses guest pre-stop.
  * String form "pause" keeps keepMemory=true (required for autoResume).
  * Do NOT use { action: 'pause', keepMemory: false } — that cannot auto-resume.
  */
@@ -1245,6 +1247,7 @@ function migratePackCommand(): string {
     "  --exclude='workspace/**/__pycache__'",
     "  --exclude='.xibecode/file-history'",
     "  --exclude='.superagent/file-history'",
+    "  --exclude='.superagent/lifecycle'",
     "  workspace .xibecode .superagent .supercharge",
     `wc -c < ${shQuote(MIGRATE_ARCHIVE)} | tr -d ' '`,
   ].join(" ");
@@ -1352,11 +1355,17 @@ async function recreateSandboxInSession(session: SessionRecord): Promise<{
   logs.push(
     `packing workspace + ${profile.label} runtime config (skip node_modules)`,
   );
-  const packed = await runInSession(session, {
-    command: migratePackCommand(),
-    cwd: "/tmp",
-    timeout: 300,
-  });
+  // Flush old-VM handlers before the final archive is assembled.
+  const packed = await prepareMigration(
+    session.sandbox,
+    session.runtime,
+    () => runInSession(session, {
+      command: migratePackCommand(),
+      cwd: "/tmp",
+      timeout: 300,
+    }),
+    (message) => logs.push(message),
+  );
   if (!packed.success) {
     throw new Error(
       `Failed to pack sandbox: ${String(packed.stderr || packed.message || "")}`,
@@ -1417,7 +1426,7 @@ async function recreateSandboxInSession(session: SessionRecord): Promise<{
     logs.push("extracted workspace + keys/chat");
   } catch (err) {
     try {
-      await created.kill?.();
+      await killWithPreStop(created, session.runtime, (message) => logs.push(message));
     } catch {
       /* ignore */
     }
@@ -1431,12 +1440,17 @@ async function recreateSandboxInSession(session: SessionRecord): Promise<{
   session.continuousRunStartedAt = Date.now();
   if (session.runtime === "supercharge") {
     await rememberRun(session, await Sandbox.getInfo(newSandboxId), session.continuousRunStartedAt);
-    await lifecycleStore.remove(oldSandboxId);
+    try {
+      await lifecycleStore.remove(oldSandboxId);
+    } catch (err) {
+      logs.push(`old sandbox lifecycle cleanup failed: ${(err as Error).message}`);
+    }
   }
   logs.push("session now points at new sandbox");
 
   try {
-    await oldSandbox.kill?.();
+    if (!oldSandbox.kill) throw new Error("E2B provider kill is unavailable");
+    await oldSandbox.kill();
     logs.push(`killed old sandbox ${oldSandboxId}`);
   } catch (err) {
     logs.push(`old sandbox kill failed: ${(err as Error).message}`);
@@ -1454,17 +1468,21 @@ async function recreateSandboxInSession(session: SessionRecord): Promise<{
 }
 
 async function closeSession(session: SessionRecord): Promise<void> {
-  if (session.runtime === "supercharge") await lifecycleStore.remove(session.sandboxId);
-  try {
-    await session.sandbox.kill?.();
-  } catch {
-    // Ignore provider shutdown errors so cleanup remains best-effort.
-  }
-  try {
-    await session.sandbox.close?.();
-  } catch {
-    // Ignore close errors; sandbox may already be terminated.
-  }
+  await deleteAfterKill(
+    session.sandbox,
+    session.runtime,
+    async () => {
+      if (session.runtime === "supercharge") {
+        try {
+          await lifecycleStore.remove(session.sandboxId);
+        } catch (err) {
+          console.warn(`[xibecode-e2b-gateway] lifecycle cleanup failed for ${session.sandboxId}:`, err);
+        }
+      }
+      sessions.delete(session.sessionId);
+    },
+    (message) => console.warn(message),
+  );
 }
 
 const pluginRuntimeLocks = new Set<string>();
@@ -2363,7 +2381,6 @@ const server = createServer(async (req, res) => {
         return;
       }
       await closeSession(session);
-      sessions.delete(sessionId);
       sendJson(res, 200, { success: true, sessionId });
       return;
     }
@@ -2481,6 +2498,9 @@ server.listen(port, "0.0.0.0", () => {
   console.log(
     `[xibecode-e2b-gateway] lifecycle onTimeout=${lifecycleOnTimeout} autoResume=${lifecycleAutoResume} inactivityMs=${sandboxTimeoutMs} maxContinuousMs=${maxContinuousMs}`,
   );
+  if (lifecycleOnTimeout === "kill") {
+    console.warn("[xibecode-e2b-gateway] E2B onTimeout=kill bypasses gateway pre-stop; use onTimeout=pause for Supercharge if preservation is required.");
+  }
   if (!process.env.E2B_API_KEY) {
     console.warn("[xibecode-e2b-gateway] Warning: E2B_API_KEY is not set yet.");
   }
