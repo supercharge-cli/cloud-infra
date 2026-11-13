@@ -15,7 +15,13 @@ set +a
 export SUPERAGENT_BIND="${SUPERAGENT_BIND:-0.0.0.0:8790}"
 export SUPERAGENT_AGENT_BINARY="${SUPERAGENT_AGENT_BINARY:-/usr/local/bin/supercharge}"
 export SUPERAGENT_DAEMON_WORKDIR="${SUPERAGENT_DAEMON_WORKDIR:-/home/user/workspace}"
+export SUPERAGENT_SHARE_WORKSPACE_ROOT="${SUPERAGENT_SHARE_WORKSPACE_ROOT:-/home/user/workspace}"
+export SUPERAGENT_MEDIA_ROOT="${SUPERAGENT_MEDIA_ROOT:-/home/user/workspace/.superagent-media}"
+export SUPERAGENT_BROWSER_CONTROL_ENABLED="${SUPERAGENT_BROWSER_CONTROL_ENABLED:-true}"
+export SUPERAGENT_WAKE_PORT="${SUPERAGENT_WAKE_PORT:-8788}"
 export SUPERCHARGE_WORKSPACE="${SUPERCHARGE_WORKSPACE:-/home/user/workspace}"
+# Latest supercharge template launches the static daemon binary directly.
+export SUPERAGENT_DAEMON_COMMAND="${SUPERAGENT_DAEMON_COMMAND:-/usr/local/bin/supercharge-superagent-server}"
 
 PIDFILE=/tmp/supercharge-daemon.pid
 LOGFILE=/tmp/supercharge-daemon.log
@@ -29,11 +35,10 @@ if [ -f "$PIDFILE" ]; then
 fi
 
 cd /home/user/workspace
-nohup supercharge agent --always-approve daemon --bind 0.0.0.0:8790 \
-  >>"$LOGFILE" 2>&1 &
+nohup $SUPERAGENT_DAEMON_COMMAND >>"$LOGFILE" 2>&1 &
 echo $! >"$PIDFILE"
 
-for i in 1 2 3 4 5 6 7 8 9 10; do
+for i in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8790/health >/dev/null 2>&1; then
     exit 0
   fi

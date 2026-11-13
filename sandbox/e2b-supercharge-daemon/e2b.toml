@@ -1,3 +1,4 @@
-# e2b template build --name supercharge-daemon-sandbox
+# e2b template create supercharge-daemon-sandbox -d Dockerfile
+# e2b template publish supercharge-daemon-sandbox -y
 team_id = "local"
 start_cmd = "/opt/vectra/start-supercharge-daemon.sh"
