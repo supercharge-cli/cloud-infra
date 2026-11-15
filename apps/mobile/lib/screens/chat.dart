@@ -4278,6 +4278,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final body = AppScaffold(
       currentInstanceId: id,
       isRoot: true,
+      onBack: () {
+        if (_botsEnabled && !_phoneContactsOpen) {
+          setState(() => _phoneContactsOpen = true);
+          return true;
+        }
+        return false;
+      },
       fullWidth: true,
       commands: {
         DesktopCommand.newChat: working || sending || _chatQueued

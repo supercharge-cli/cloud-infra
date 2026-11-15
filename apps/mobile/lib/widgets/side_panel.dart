@@ -26,6 +26,7 @@ class AppScaffold extends StatelessWidget {
     this.appBar,
     this.floatingActionButton,
     this.isRoot = false,
+    this.onBack,
     this.currentInstanceId,
     this.extendBodyBehindAppBar = false,
     this.commands = const {},
@@ -36,6 +37,7 @@ class AppScaffold extends StatelessWidget {
   final PreferredSizeWidget? appBar;
   final Widget? floatingActionButton;
   final bool isRoot;
+  final bool Function()? onBack;
   final String? currentInstanceId;
   final bool extendBodyBehindAppBar;
   final CommandHandlers commands;
@@ -122,6 +124,7 @@ class AppScaffold extends StatelessWidget {
     }
     return AppPopScope(
       isRoot: isRoot,
+      onBack: onBack,
       child: Scaffold(
         drawer: VectraSidePanel(currentInstanceId: currentInstanceId),
         appBar: appBar,

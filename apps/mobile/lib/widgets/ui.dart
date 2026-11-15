@@ -474,9 +474,15 @@ class _SecretFieldState extends State<SecretField> {
 }
 
 class AppPopScope extends StatelessWidget {
-  const AppPopScope({super.key, required this.child, this.isRoot = false});
+  const AppPopScope({
+    super.key,
+    required this.child,
+    this.isRoot = false,
+    this.onBack,
+  });
   final Widget child;
   final bool isRoot;
+  final bool Function()? onBack;
 
   static Future<bool> confirmLeave(BuildContext context) async {
     final ok = await showDialog<bool>(
@@ -507,16 +513,17 @@ class AppPopScope extends StatelessWidget {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
+        if (onBack?.call() == true) return;
+        if (context.canPop()) {
+          context.pop();
+          return;
+        }
         if (isRoot) {
           final leave = await confirmLeave(context);
           if (leave && context.mounted) SystemNavigator.pop();
           return;
         }
-        if (context.canPop()) {
-          context.pop();
-        } else {
-          context.go('/');
-        }
+        context.go('/');
       },
       child: child,
     );
