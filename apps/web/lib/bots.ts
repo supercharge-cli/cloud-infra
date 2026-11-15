@@ -150,8 +150,7 @@ export async function ensureGithubBot(instance: Instance): Promise<Bot | null> {
 }
 
 export async function listBots(instance: Instance, archived = false): Promise<Bot[]> {
-  await ensureMainBot(instance);
-  await ensureGithubBot(instance);
+  await Promise.all([ensureMainBot(instance), ensureGithubBot(instance)]);
   const db = await getDb();
   const rows = await db.collection<Bot>('bots')
     .find({ instanceId: instance.id, ...(archived ? {} : { archived: false }) })

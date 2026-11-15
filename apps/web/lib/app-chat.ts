@@ -57,6 +57,15 @@ export async function requireChatInstance(
   return { ok: true, inst };
 }
 
+// Health checks are network requests too. Reuse a recent successful check so
+// a send involving several inbox calls doesn't probe the same daemon each time.
+const HEALTH_TTL_MS = 5_000;
+const healthyInboxes = new Map<string, number>();
+
+function inboxKey(inst: Instance): string {
+  return JSON.stringify([inst.id, inst.sessionId, inst.sandboxId, inst.runtime]);
+}
+
 async function inboxHealthy(inst: Instance): Promise<boolean> {
   const opts = {
     sandboxId: inst.sandboxId,
@@ -67,7 +76,11 @@ async function inboxHealthy(inst: Instance): Promise<boolean> {
       const health = await appInboxFetch(inst.sessionId, path, {
         signal: AbortSignal.timeout(5_000),
       }, opts);
-      if (health.ok) return true;
+      if (health.ok) {
+        if (healthyInboxes.size >= 500) healthyInboxes.clear();
+        healthyInboxes.set(inboxKey(inst), Date.now() + HEALTH_TTL_MS);
+        return true;
+      }
     } catch {
       // try next path
     }
@@ -78,10 +91,12 @@ async function inboxHealthy(inst: Instance): Promise<boolean> {
 const inboxLocks = new Map<string, Promise<void>>();
 
 export async function ensureInbox(inst: Instance): Promise<void> {
+  if ((healthyInboxes.get(inboxKey(inst)) ?? 0) > Date.now()) return;
   const key = inst.id;
   const pending = inboxLocks.get(key);
   if (pending) {
     await pending;
+    if ((healthyInboxes.get(inboxKey(inst)) ?? 0) > Date.now()) return;
     if (await inboxHealthy(inst)) return;
   }
 
@@ -144,8 +159,15 @@ export async function proxyInbox(
   init: RequestInit = {},
 ): Promise<Response> {
   await ensureInbox(inst);
-  return appInboxFetch(inst.sessionId, path, init, {
-    sandboxId: inst.sandboxId,
-    runtime: inst.runtime || "xibecode",
-  });
+  try {
+    const response = await appInboxFetch(inst.sessionId, path, init, {
+      sandboxId: inst.sandboxId,
+      runtime: inst.runtime || "xibecode",
+    });
+    if ([502, 503, 504].includes(response.status)) healthyInboxes.delete(inboxKey(inst));
+    return response;
+  } catch (error) {
+    healthyInboxes.delete(inboxKey(inst));
+    throw error;
+  }
 }

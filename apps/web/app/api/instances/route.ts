@@ -84,8 +84,10 @@ export async function GET() {
   }
 
   const freeLimit = freeInstanceLimit();
-  const freeUsed = await countFreeInstancesForUser(user.id);
-  const rows = await listInstances(user.id);
+  const [freeUsed, rows] = await Promise.all([
+    countFreeInstancesForUser(user.id),
+    listInstances(user.id),
+  ]);
   const freeAvailable = rows.length > 0 ? 0 : Math.max(0, freeLimit - freeUsed);
   console.info("[timing] instances", {
     userId: user.id,

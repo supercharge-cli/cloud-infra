@@ -50,6 +50,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
   const [instructions, setInstructions] = useState('');
   const [creating, setCreating] = useState(false);
   const generation = useRef(0);
+  const refreshAfterSend = useRef<() => void>(() => {});
   const scroller = useRef<HTMLDivElement>(null);
   const draft = drafts[selected] ?? '';
   const current = bots.find((bot) => bot.id === selected);
@@ -79,6 +80,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
     const selection = ++generation.current;
     let stopped = false;
     let pending = false;
+    let refreshQueued = false;
     const resetTimer = setTimeout(() => {
       setMessages([]); setThread(null); setLoading(true); setSending(false); setError(''); setMentions([]); setRetry(null);
     }, 0);
@@ -113,13 +115,17 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
         setLoading(false);
       } catch (error) {
         if (!stopped && generation.current === selection) { setError((error as Error).message); setLoading(false); }
-      } finally { pending = false; }
+      } finally {
+        pending = false;
+        if (refreshQueued && !stopped) { refreshQueued = false; void refresh(); }
+      }
     }
+    refreshAfterSend.current = () => { if (pending) refreshQueued = true; else void refresh(); };
     void refresh();
     const timer = setInterval(() => void refresh(), 2500);
     const foreground = () => { if (!document.hidden) { void refresh(); void refreshBots(); } };
     document.addEventListener('visibilitychange', foreground);
-    return () => { stopped = true; clearTimeout(resetTimer); clearInterval(timer); document.removeEventListener('visibilitychange', foreground); };
+    return () => { stopped = true; refreshAfterSend.current = () => {}; clearTimeout(resetTimer); clearInterval(timer); document.removeEventListener('visibilitychange', foreground); };
   }, [base, selected, threadSelection, refreshBots]);
 
   useEffect(() => {
@@ -147,6 +153,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
       if (generation.current !== selection) return;
       setRetry(null); setMentions([]); setMentionOpen(false);
       setMessages((rows) => rows.map((row) => row.id === id ? { ...row, pending: false } : row));
+      refreshAfterSend.current();
     } catch (error) {
       if (generation.current !== selection) return;
       setError((error as Error).message);

@@ -105,4 +105,5 @@ async function ensureIndexes(database: Db): Promise<void> {
     unique: true, partialFilterExpression: { requestId: { $type: 'string' } },
   });
   await database.collection('orders').createIndex({ razorpayOrderId: 1 }, { unique: true, sparse: true });
+  await database.collection('users').createIndex({ id: 1 });
 }

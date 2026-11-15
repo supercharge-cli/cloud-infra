@@ -5,12 +5,13 @@ import ts from "typescript";
 
 function inboxFunctions(dependencies: Record<string, unknown>) {
   const source = readFileSync(new URL("./app-chat.ts", import.meta.url), "utf8");
-  const fragment = source.slice(source.indexOf("async function inboxHealthy"), source.indexOf("export async function proxyInbox"));
-  const { outputText } = ts.transpileModule(fragment.replace("export async function", "async function"), {
+  const fragment = source.slice(source.indexOf("const HEALTH_TTL_MS"));
+  const { outputText } = ts.transpileModule(fragment.replaceAll("export async function", "async function"), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
   });
-  return new Function(...Object.keys(dependencies), `${outputText}\nreturn { ensureInbox };`)(...Object.values(dependencies)) as {
+  return new Function(...Object.keys(dependencies), `${outputText}\nreturn { ensureInbox, proxyInbox };`)(...Object.values(dependencies)) as {
     ensureInbox: (instance: Record<string, string>) => Promise<void>;
+    proxyInbox: (instance: Record<string, string>, path: string) => Promise<Response>;
   };
 }
 
@@ -28,7 +29,22 @@ test("a healthz-only inbox handles consecutive checks without bootstrap or resta
   });
   await ensureInbox(instance);
   await ensureInbox(instance);
-  assert.deepEqual(paths, ["/health", "/healthz", "/health", "/healthz"]);
+  assert.deepEqual(paths, ["/health", "/healthz"]);
+});
+
+test("a failed inbox request invalidates cached health without retrying the request", async () => {
+  const paths: string[] = [];
+  const { proxyInbox } = inboxFunctions({
+    appInboxFetch: async (_session: string, path: string) => {
+      paths.push(path);
+      return new Response(null, { status: path === '/health' ? 200 : 502 });
+    },
+    bootstrapAppInbox: () => { throw new Error('unexpected bootstrap'); },
+    wakeSession: () => { throw new Error('unexpected wake'); },
+  });
+  await proxyInbox(instance, '/message');
+  await proxyInbox(instance, '/message');
+  assert.deepEqual(paths, ['/health', '/message', '/health', '/message']);
 });
 
 test("resume reuses a healthy frozen daemon without restarting its work", async () => {

@@ -10,8 +10,10 @@ export function botsEnabled(instance: Instance): boolean {
 }
 
 export async function syncBots(instance: Instance): Promise<void> {
-  const bots = await listBots(instance, true);
-  const capability = await ensureBotCapability(instance);
+  const [bots, capability] = await Promise.all([
+    listBots(instance, true),
+    ensureBotCapability(instance),
+  ]);
   const site = (process.env.PUBLIC_BASE_URL?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim() || 'https://infra.xibeai.in').replace(/\/$/, '');
   const base = new URL(site);
   if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash || base.pathname !== '/') {
