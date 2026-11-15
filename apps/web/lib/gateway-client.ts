@@ -1,3 +1,4 @@
+import { cachedInboxUrl, invalidateInboxUrl } from "./inbox-url-cache";
 /**
  * Thin HTTP client for packages/gateway (sandbox control plane).
  * API keys for the cloud provider stay on the gateway, not in the browser.
@@ -2324,22 +2325,24 @@ export function sandboxPublicBase(sandboxId: string, port: number): string {
   return `https://${port}-${sandboxId}.${domain}`;
 }
 
+function inboxUrlKey(sessionId: string, sandboxId?: string, runtime?: AgentRuntime): string {
+  return JSON.stringify([sessionId, sandboxId, runtime || "xibecode"]);
+}
+
 export async function appInboxUrl(
   sessionId: string,
   sandboxId?: string,
   runtime: AgentRuntime = "xibecode",
 ): Promise<string> {
-  if (sandboxId) {
-    await ensureGatewaySession(sessionId, sandboxId, runtime).catch(
-      () => undefined,
-    );
-  }
-  const host = await getSandboxPreviewHost(sessionId, APP_INBOX_PORT);
-  if (host) return host.replace(/\/$/, "");
-  if (sandboxId) return sandboxPublicBase(sandboxId, APP_INBOX_PORT);
-  throw new Error(
-    "App inbox host unavailable. Wake or restart the sandbox and try again; the selected runtime must expose port 8790.",
-  );
+  return cachedInboxUrl(inboxUrlKey(sessionId, sandboxId, runtime), async () => {
+    if (sandboxId) {
+      await ensureGatewaySession(sessionId, sandboxId, runtime).catch(() => undefined);
+    }
+    const host = await getSandboxPreviewHost(sessionId, APP_INBOX_PORT);
+    if (host) return { url: host.replace(/\/$/, ""), cacheable: true };
+    if (sandboxId) return { url: sandboxPublicBase(sandboxId, APP_INBOX_PORT), cacheable: false };
+    throw new Error("App inbox host unavailable. Wake or restart the sandbox and try again; the selected runtime must expose port 8790.");
+  });
 }
 
 export async function appInboxFetch(
@@ -2348,12 +2351,20 @@ export async function appInboxFetch(
   init: RequestInit = {},
   opts?: { sandboxId?: string; runtime?: AgentRuntime },
 ): Promise<Response> {
+  const key = inboxUrlKey(sessionId, opts?.sandboxId, opts?.runtime);
   const base = await appInboxUrl(sessionId, opts?.sandboxId, opts?.runtime);
   const headers = new Headers(init.headers);
   const secret = appInboxSecret();
   if (secret) headers.set("authorization", `Bearer ${secret}`);
   if (!headers.has("accept")) headers.set("accept", "application/json");
-  return fetch(`${base}${path}`, { ...init, headers });
+  try {
+    const response = await fetch(`${base}${path}`, { ...init, headers });
+    if ([502, 503, 504].includes(response.status)) invalidateInboxUrl(key);
+    return response;
+  } catch (error) {
+    invalidateInboxUrl(key);
+    throw error;
+  }
 }
 
 export type SandboxShare = {

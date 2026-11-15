@@ -11,3 +11,15 @@
 @media(max-width:480px){.agent-github-link{flex-wrap:wrap}.agent-github-link a{white-space:nowrap}.agent-github-link button{width:100%;justify-content:center}}
 .agent-activity>div{display:flex;gap:4px;flex-shrink:0}.agent-activity button:disabled{opacity:.45;cursor:not-allowed}
 @media(prefers-reduced-motion:reduce){.agent-working{animation:none}}
+
+.agent-markdown { overflow-wrap: anywhere; line-height: 1.5; }
+.agent-markdown > :first-child { margin-top: 0; }
+.agent-markdown > :last-child { margin-bottom: 0; }
+.agent-markdown p, .agent-markdown ul, .agent-markdown ol, .agent-markdown pre, .agent-markdown blockquote { margin: .5em 0; }
+.agent-markdown ul, .agent-markdown ol { padding-left: 1.5em; }
+.agent-markdown pre { overflow-x: auto; padding: .75em; border-radius: 8px; background: #0006; }
+.agent-markdown code { font-family: monospace; }
+.agent-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.agent-markdown th, .agent-markdown td { padding: .35em .6em; border: 1px solid var(--chat-border); }
+.agent-markdown a { color: var(--chat-accent); text-decoration: underline; }
+.agent-markdown img { max-width: 100%; height: auto; }

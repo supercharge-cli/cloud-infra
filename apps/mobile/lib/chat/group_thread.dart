@@ -8,6 +8,7 @@ import '../api/client.dart';
 import '../desktop/chat_workspace.dart';
 import '../state/agents.dart';
 import '../theme.dart';
+import '../widgets/markdown.dart';
 import 'bot_avatar.dart';
 import 'bot_profile.dart';
 import 'group_store.dart';
@@ -422,14 +423,13 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                  SelectableText(
-                    '${message['text'] ?? ''}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      height: 1.5,
-                      color: message['kind'] == 'error' ? Vc.red : Colors.white,
-                    ),
-                  ),
+                  if (message['kind'] == 'error')
+                    SelectableText(
+                      '${message['text'] ?? ''}',
+                      style: const TextStyle(fontSize: 14, height: 1.5, color: Vc.red),
+                    )
+                  else
+                    ChatMarkdown(data: '${message['text'] ?? ''}', soft: true),
                   const SizedBox(height: 4),
                   Row(
                     mainAxisSize: MainAxisSize.min,

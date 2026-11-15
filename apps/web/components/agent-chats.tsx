@@ -1,6 +1,9 @@
 "use client";
 
 import Link from 'next/link';
+import { mergePendingMessages } from '@/lib/chat-message-merge';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowUp, AtSign, CheckCheck, CircleUserRound, ExternalLink, Github, LoaderCircle, MessageSquare, Plug, Plus, RefreshCw, Search, Settings2, StopCircle, Users } from 'lucide-react';
 import { SandboxWorkspace } from './sandbox-workspace';
@@ -8,7 +11,7 @@ import { GitHubCliAuth } from './github-cli-auth';
 import './agent-chats.css';
 
 type Bot = { id: string; name: string; icon: string; instructions?: string; defaultFolder?: string };
-type Message = { id: string; text: string; senderBotId?: string | null; sessionId?: string; createdAt: number; pending?: boolean; failed?: boolean; sensitive?: boolean };
+type Message = { id: string; text: string; senderBotId?: string | null; sessionId?: string; createdAt: number; pending?: boolean; baseline?: number; failed?: boolean; sensitive?: boolean };
 type Activity = { botId: string; sessionId: string; state: string; groupMessageId?: string | null };
 type Workspace = { id: string; name: string; sandboxId?: string; status: string };
 
@@ -94,7 +97,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
           setActivity(data.activity || []);
           if (!data.paused) setMessages((previous) => {
             const remote: Message[] = data.messages || [];
-            return [...remote, ...previous.filter((row) => row.pending && !remote.some((item) => item.id === row.id))];
+            return mergePendingMessages(remote, previous, true);
           });
         } else {
           let conversation = await json(`${base}/chat/conversations?botId=${encodeURIComponent(selected)}`);
@@ -109,7 +112,8 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
           ]);
           if (stopped || generation.current !== selection) return;
           setThread(id);
-          setMessages((data.messages || []).map((row: { id: string; role: string; content: string; sensitive?: boolean }) => ({ id: row.id, text: row.content, senderBotId: row.role === 'user' ? null : selected, sessionId: id, createdAt: 0, sensitive: row.sensitive === true })));
+          const remote: Message[] = (data.messages || []).map((row: { id: string; role: string; content: string; sensitive?: boolean }) => ({ id: row.id, text: row.content, senderBotId: row.role === 'user' ? null : selected, sessionId: id, createdAt: 0, sensitive: row.sensitive === true }));
+          setMessages((previous) => mergePendingMessages(remote, previous, false));
           setActivity((status.conversations || []).filter((row: { busy?: boolean; queued?: boolean }) => row.busy || row.queued).map((row: { botId: string; sessionId: string; busy: boolean }) => ({ botId: row.botId, sessionId: row.sessionId, state: row.busy ? 'working' : 'queued' })));
         }
         setLoading(false);
@@ -147,18 +151,17 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
     const id = retrying ? retry!.id : crypto.randomUUID();
     const tagged = retrying ? retry!.mentions : mentions.filter((id) => text.includes(`@${bots.find((bot) => bot.id === id)?.name}`));
     setSending(true); setError('');
-    if (!retrying) { setMessages((rows) => [...rows, { id, text, createdAt: Date.now(), pending: true }]); setDrafts((all) => ({ ...all, [selected]: '' })); }
+    if (!retrying) { setMessages((rows) => [...rows, { id, text, createdAt: Date.now(), pending: true, baseline: rows.filter((row) => !row.senderBotId && row.text === text).length }]); setDrafts((all) => ({ ...all, [selected]: '' })); }
     try {
       await json(group ? `${base}/group` : `${base}/chat`, { method: 'POST', body: JSON.stringify(group ? { text, requestId: id, mentions: tagged } : { text, botId: selected, chatId: thread }) });
       if (generation.current !== selection) return;
       setRetry(null); setMentions([]); setMentionOpen(false);
-      setMessages((rows) => rows.map((row) => row.id === id ? { ...row, pending: false } : row));
       refreshAfterSend.current();
     } catch (error) {
       if (generation.current !== selection) return;
       setError((error as Error).message);
       if (group) setRetry({ id, text, mentions: tagged });
-      else setDrafts((all) => ({ ...all, [selected]: text }));
+      else { setMessages((rows) => rows.filter((row) => row.id !== id)); setDrafts((all) => ({ ...all, [selected]: text })); }
     } finally { if (generation.current === selection) setSending(false); }
   }
 
@@ -222,7 +225,7 @@ export function AgentChats({ workspace, onSettings }: { workspace: Workspace; on
       <header><button type="button" className="agent-back" aria-label="Back to chats" onClick={() => setMobileThread(false)}><ArrowLeft size={20} /></button>{group ? <span className="agent-avatar group"><Users size={22} /></span> : current ? <Avatar bot={current} instance={workspace.id} /> : null}<div><h2>{group ? 'Agent group' : current?.name ?? 'Agent'}</h2><p>{group ? 'Everyone can read · Chief replies unless tagged' : 'Direct conversation · separate from the group'}</p></div><button type="button" aria-label="Refresh agents" onClick={() => void refreshBots()}><RefreshCw size={18} /></button></header>
       {error && <div className="agent-error" role="alert">{error}{retry && <button type="button" onClick={() => void send(true)}>Retry message</button>}</div>}
       {!!activity.length && <div className="agent-activity">{activity.map((item, index) => <div key={`${item.sessionId}-${index}`}><button type="button" onClick={() => select(item.botId, item.sessionId)}>{item.state === 'working' && <LoaderCircle size={13} className="agent-working" />}{bots.find((bot) => bot.id === item.botId)?.name ?? item.botId} · {item.state}<ExternalLink size={12} /></button>{group && item.groupMessageId && <button type="button" aria-label={`Stop ${item.botId}`} title={`Stop ${item.botId}`} disabled={sending} onClick={() => void stopTurn(item)}><StopCircle size={17} /></button>}</div>)}</div>}
-      <div className="agent-messages" ref={scroller} aria-live="polite">{loading ? <p className="agent-empty">Opening {group ? 'group chat' : current?.name ?? 'agent'}…</p> : !messages.length ? <div className="agent-empty"><MessageSquare size={42} /><h3>Your agents, together</h3><p>Ask a question or tag an agent with @. Group messages are shared; direct chats stay separate.</p></div> : messages.map((message) => { const bot = bots.find((bot) => bot.id === message.senderBotId); return <article key={message.id} className={`agent-message ${!message.senderBotId ? 'mine' : ''}`}>{message.senderBotId && <button type="button" className="agent-author" onClick={() => select(message.senderBotId!, message.sessionId)}>{bot?.name ?? message.senderBotId}<ExternalLink size={11} /></button>}<div>{message.sensitive && <strong className="agent-sensitive-label">Sensitive credential · saved in this private chat</strong>}{message.text}</div><small>{message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}{!message.senderBotId && <CheckCheck size={13} />}</small></article>; })}</div>
+      <div className="agent-messages" ref={scroller} aria-live="polite">{loading ? <p className="agent-empty">Opening {group ? 'group chat' : current?.name ?? 'agent'}…</p> : !messages.length ? <div className="agent-empty"><MessageSquare size={42} /><h3>Your agents, together</h3><p>Ask a question or tag an agent with @. Group messages are shared; direct chats stay separate.</p></div> : messages.map((message) => { const bot = bots.find((bot) => bot.id === message.senderBotId); return <article key={message.id} className={`agent-message ${!message.senderBotId ? 'mine' : ''}`}>{message.senderBotId && <button type="button" className="agent-author" onClick={() => select(message.senderBotId!, message.sessionId)}>{bot?.name ?? message.senderBotId}<ExternalLink size={11} /></button>}<div className="agent-markdown">{message.sensitive && <strong className="agent-sensitive-label">Sensitive credential · saved in this private chat</strong>}<ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ children, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a> }}>{message.text}</ReactMarkdown></div><small>{message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}{!message.senderBotId && <CheckCheck size={13} />}</small></article>; })}</div>
       {mentionOpen && <div className="agent-mentions">{bots.map((bot) => <button type="button" key={bot.id} onClick={() => { setDrafts((all) => ({ ...all, [selected]: `${draft.replace(/@[^@\n]*$/, '')}@${bot.name} ` })); setMentions((ids) => [...new Set([...ids, bot.id])]); setMentionOpen(false); }}><Avatar bot={bot} instance={workspace.id} />{bot.name}</button>)}</div>}
       <form className="agent-composer" onSubmit={(e) => { e.preventDefault(); submitDraft(); }}>{group && <button type="button" aria-label="Mention an agent" onClick={() => setMentionOpen(!mentionOpen)}><AtSign size={20} /></button>}<textarea aria-label={group ? 'Message the group' : `Message ${current?.name ?? 'agent'}`} placeholder={group ? 'Message the group · @ to mention' : 'Write a message…'} value={draft} rows={1} onChange={(e) => { setDrafts((all) => ({ ...all, [selected]: e.target.value })); if (group) setMentionOpen(/@[^@\n ]*$/.test(e.target.value)); }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submitDraft(); } }} />{currentActivity && <button type="button" aria-label="Stop running agent" title="Stop agent" disabled={sending} onClick={() => void stopTurn(currentActivity)}><StopCircle size={20} /></button>}<button className="agent-send" type="submit" aria-label={steerTarget ? `Steer ${steerTarget.botId}` : 'Send message'} title={steerTarget ? `Steer ${steerTarget.botId}` : 'Send message'} disabled={!draft.trim() || loading || sending}>{sending ? <LoaderCircle size={20} /> : <ArrowUp size={20} />}</button></form>
     </div>

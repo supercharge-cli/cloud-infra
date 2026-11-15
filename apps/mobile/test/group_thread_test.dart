@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vectra_cloud/widgets/markdown.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:vectra_cloud/api/client.dart';
 import 'package:vectra_cloud/chat/bot_profile.dart';
@@ -62,6 +63,26 @@ void main() {
     expect((await first.load())['draft'], 'draft');
     expect(await GroupStore('owner-two', 'sandbox').load(), isEmpty);
     expect(await GroupStore('owner-one', 'other-sandbox').load(), isEmpty);
+  });
+
+  testWidgets('group agent replies render Markdown', (tester) async {
+    final client = _Client();
+    client.messages.add({
+      'id': 'formatted', 'text': '**Bold answer**',
+      'senderBotId': 'research', 'createdAt': 1,
+    });
+    final directory = AgentDirectory(() => client);
+    await tester.pumpWidget(MaterialApp(theme: Vc.dark(), home: Scaffold(body: GroupThread(
+      api: client, instanceId: 'sandbox', accountId: 'markdown-owner', bots: bots,
+      directory: directory, onOpenAgent: (_, _) {},
+    ))));
+    await settle(tester);
+    expect(find.byType(ChatMarkdown), findsOneWidget);
+    expect(find.text('Bold answer', findRichText: true), findsOneWidget);
+    expect(find.text('**Bold answer**'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    directory.dispose();
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('group sends mention IDs and opens working agent exact thread', (tester) async {
