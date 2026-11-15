@@ -11,7 +11,7 @@ description: Vectra Cloud desktop client
 license: UNLICENSED
 contents:
   - src: ${PACKAGE_ROOT}/opt/vectra-cloud/
-    dst: /opt/vectra-cloud/
+    dst: /opt/vectra-cloud
   - src: /opt/vectra-cloud/vectra_cloud
     dst: /usr/bin/vectra-cloud
     type: symlink

@@ -122,6 +122,7 @@ jobs:
           curl -fsSL -o /tmp/appimage-runtime 'https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64'
           chmod +x /tmp/appimagetool
           echo /tmp >> "$GITHUB_PATH"
+      - run: python3 apps/mobile/linux/packaging/test_package_layout.py
       - run: apps/mobile/linux/packaging/package.sh
         env:
           VERSION: ${{ needs.version.outputs.name }}
