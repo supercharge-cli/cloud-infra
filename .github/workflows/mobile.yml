@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "App version and build number (for example 1.0.30+31)"
+        description: "App version (for example 1.0.30)"
         required: true
         type: string
 
@@ -37,15 +37,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${REQUESTED_VERSION:-$(sed -n 's/^version: //p' apps/mobile/pubspec.yaml)}"
-          if [[ ! "$version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\+([1-9][0-9]*)$ ]]; then
-            echo "Version must be MAJOR.MINOR.PATCH+BUILD, for example 1.0.30+31" >&2
+          version="${REQUESTED_VERSION:-$(sed -n 's/^version: \([^+]*\).*/\1/p' apps/mobile/pubspec.yaml)}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must be MAJOR.MINOR.PATCH, for example 1.0.30" >&2
             exit 1
           fi
-          echo "name=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-          echo "number=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] && git ls-remote --exit-code --tags origin "refs/tags/v${BASH_REMATCH[1]}" >/dev/null 2>&1; then
-            echo "Tag v${BASH_REMATCH[1]} already exists; choose a new version." >&2
+          # The checked-in Android build number is 30. GitHub's workflow run
+          # number increases on each run and is stable when rerunning a run.
+          echo "name=$version" >> "$GITHUB_OUTPUT"
+          echo "number=$((30 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] && git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "Tag v$version already exists; choose a new version." >&2
             exit 1
           fi
 

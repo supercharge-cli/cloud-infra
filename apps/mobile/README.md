@@ -29,10 +29,11 @@ approve / ask. Events are JSON (`typing`, `text`, `tool`, `ask`, `approve`,
 ## Linux desktop
 
 To make a release, open GitHub Actions, select the **mobile** workflow, and run
-it with a new version and Android build number, for example `1.0.30+31`. After
+it with a new version, for example `1.0.30`. The Android build number is assigned
+automatically from the workflow run number. After
 the tests and all platform builds succeed, the workflow creates a GitHub
 Release with the Android APK, desktop archives, Linux AppImage, deb and rpm,
-and an AUR recipe. Use a build number greater than previous Android releases.
+and an AUR recipe.
 The AUR recipe is not automatically published to the AUR. The AppImage still
 requires system GTK 3, WebKitGTK 4.1, libsecret and libmpv libraries. Android
 uses a debug signing key and desktop packages are not release-signed or notarized.
