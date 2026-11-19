@@ -2111,6 +2111,34 @@ export async function getSandboxState(
   };
 }
 
+/**
+ * Pause a sandbox for billing suspension (memory + filesystem kept).
+ * Older gateways without the route return 404; callers treat that as
+ * "not paused now" and rely on the idle auto-pause plus access gating.
+ */
+export async function pauseSandbox(sandboxId: string): Promise<{
+  ok: boolean;
+  paused: boolean;
+  state?: string;
+  message?: string;
+}> {
+  const res = await gwFetch(`/sandboxes/${encodeURIComponent(sandboxId)}/pause`, {
+    method: "POST",
+    body: "{}",
+    signal: AbortSignal.timeout(130_000),
+  });
+  let data: { success?: boolean; paused?: boolean; state?: string; message?: string } = {};
+  try {
+    data = (await res.json()) as typeof data;
+  } catch {
+    /* non-JSON */
+  }
+  if (!res.ok || data.success === false) {
+    return { ok: false, paused: false, state: data.state, message: data.message || `HTTP ${res.status}` };
+  }
+  return { ok: true, paused: Boolean(data.paused), state: data.state };
+}
+
 /** Resume a paused sandbox (and optionally restart xibecode daemon for Telegram). */
 export async function wakeSession(
   sessionId: string,

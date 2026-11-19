@@ -1720,6 +1720,31 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // Billing suspension: pause (full memory + fs snapshot) without killing.
+    // Idempotent: an already paused sandbox returns paused:false, state:"paused".
+    const sandboxPauseMatch = url.pathname.match(/^\/sandboxes\/([^/]+)\/pause$/);
+    if (method === "POST" && sandboxPauseMatch) {
+      const sandboxId = decodeURIComponent(sandboxPauseMatch[1] || "").trim();
+      if (!sandboxId) {
+        sendJson(res, 400, { success: false, error: true, message: "Missing sandboxId" });
+        return;
+      }
+      try {
+        const info = (await Sandbox.getInfo(sandboxId, { requestTimeoutMs: 30_000 })) as { state?: string };
+        const state = String(info.state || "unknown");
+        if (state !== "running") {
+          sendJson(res, 200, { success: true, sandboxId, paused: false, state });
+          return;
+        }
+        await Sandbox.pause(sandboxId, { requestTimeoutMs: 120_000 });
+        sendJson(res, 200, { success: true, sandboxId, paused: true, state: "paused" });
+      } catch (e) {
+        const msg = (e as Error).message || String(e);
+        sendJson(res, 502, { success: false, error: true, sandboxId, message: msg.slice(0, 300) });
+      }
+      return;
+    }
+
     // Live E2B state by sandbox id (works even if gateway session map is empty / sandbox paused)
     const sandboxStateMatch = url.pathname.match(
       /^\/sandboxes\/([^/]+)(?:\/state)?$/,
