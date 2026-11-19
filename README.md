@@ -31,7 +31,7 @@ cloud-infra/
 | `XIBECODE_GATEWAY_TOKEN`                  | same secret as gateway                                         |
 | `PUBLIC_BASE_URL`                         | public site origin (Telegram wake)                             |
 | `POLLINATIONS_APP_KEY`                    | Pollinations BYOP App Key (`pk_…`) — server only               |
-| `CRON_SECRET`                             | auth for `/api/cron/arm-telegram-wake` (required on Vercel)    |
+| `CRON_SECRET`                             | auth for `/api/cron/*` crons (required on Vercel)              |
 | `E2B_LIFECYCLE_WEBHOOK_SECRET`            | optional but recommended; E2B lifecycle → arm TG wake on pause |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | server keys                                                    |
 | `NEXT_PUBLIC_RAZORPAY_KEY_ID`             | client key                                                     |
@@ -39,6 +39,11 @@ cloud-infra/
 | `BILLING_PRICE_INR`                       | e.g. `399` (rupees)                                            |
 | `BILLING_PRICE_USD`                       | e.g. `4.59` (dollars)                                          |
 | `BILLING_PERIOD_DAYS`                     | e.g. `30`                                                      |
+| `RAZORPAY_PLAN_ID_<SIZE>`                 | autopay plan per size: `2C4G`, `4C8G`, `8C8G`, `16C16G`        |
+| `RAZORPAY_PLAN_ID_<SIZE>_USD`             | optional USD plans                                             |
+| `BILLING_GRACE_DAYS`                      | access after a failed renewal before pause (default `3`)       |
+| `BILLING_RETENTION_DAYS`                  | keep a paused workspace before deletion flag (default `14`)    |
+| `BILLING_SUBSCRIPTION_TOTAL_COUNT`        | monthly cycles per subscription (default `120`)                |
 
 Production example:
 
@@ -53,6 +58,42 @@ Razorpay webhook URL:
 ```text
 https://your-app.vercel.app/api/billing/webhook
 ```
+
+### Billing: autopay subscriptions
+
+Paid sandboxes renew monthly through Razorpay Subscriptions (card or UPI
+Autopay / e-mandate). Workspaces bought as one-off 30-day orders keep their
+paid-until date; when it ends the dashboard offers autopay, and moving onto
+autopay before then sets the first charge to the old end date.
+
+1. Razorpay dashboard → enable **Subscriptions** (test mode first).
+2. Create the plans with your own keys and paste the printed lines into Vercel:
+
+   ```bash
+   cd apps/web
+   RAZORPAY_KEY_ID=rzp_test_… RAZORPAY_KEY_SECRET=… node scripts/razorpay-create-plans.mjs
+   ```
+
+   It reuses plans it created before (matched by size, currency and amount), so
+   rerunning is safe. Changing a price creates a new plan; existing subscribers
+   stay on the old one.
+3. Webhook `https://your-app/api/billing/webhook` with `RAZORPAY_WEBHOOK_SECRET`
+   and these events: `payment.captured`, `order.paid` (one-off orders) plus
+   `subscription.authenticated`, `subscription.activated`, `subscription.charged`,
+   `subscription.pending`, `subscription.halted`, `subscription.cancelled`,
+   `subscription.completed`, `subscription.paused`, `subscription.resumed`,
+   `subscription.updated`.
+
+Lifecycle: a failed renewal keeps access for `BILLING_GRACE_DAYS` while Razorpay
+retries, then the daily `/api/cron/billing-lifecycle` pauses the sandbox. A
+cancelled subscription runs to the end of the paid period, then pauses. A
+paused workspace is kept `BILLING_RETENTION_DAYS`, then gets `deletionFlaggedAt`.
+Nothing is deleted automatically. Paying again resumes it. A free workspace that
+was upgraded falls back to the free base instead of pausing.
+
+Size changes: upgrades apply now, downgrades at the cycle end. Razorpay does
+not allow plan changes on UPI Autopay or e-mandate subscriptions, so those
+customers cancel and subscribe to the new size.
 
 ### Auto-resume (E2B pause → Telegram wake)
 
