@@ -13,9 +13,9 @@ export function loadLib<T = Record<string, unknown>>(name: string): T {
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
   });
-  const module = { exports: {} as Record<string, unknown> };
+  const mod = { exports: {} as Record<string, unknown> };
   const localRequire = (spec: string) => (spec.startsWith('./') ? loadLib(spec.slice(2)) : nodeRequire(spec));
-  new Function('require', 'module', 'exports', outputText)(localRequire, module, module.exports);
-  cache.set(name, module.exports);
-  return module.exports as T;
+  new Function('require', 'module', 'exports', outputText)(localRequire, mod, mod.exports);
+  cache.set(name, mod.exports);
+  return mod.exports as T;
 }

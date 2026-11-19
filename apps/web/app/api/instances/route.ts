@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { razorpayPlanIdFromEnv } from "@/lib/subscription-core";
 import { withWorkspaceCreation, WorkspaceLimitError } from '@/lib/workspace-limit';
 import { getSessionUser } from "@/lib/auth";
 import {
@@ -6,6 +7,7 @@ import {
   freeInstanceLimit,
   getPlan,
   hasInstanceAccess,
+  subscriptionBillingConfig,
   listPlans,
   planById,
   priceForCurrency,
@@ -148,7 +150,9 @@ export async function GET() {
       priceInr: item.priceInr,
       priceUsd: item.priceUsd,
       label: item.label,
+      autopay: Boolean(razorpayPlanIdFromEnv(process.env, item.id, "INR")),
     })),
+    billing: (({ graceDays, retentionDays }) => ({ graceDays, retentionDays }))(subscriptionBillingConfig()),
   });
 }
 

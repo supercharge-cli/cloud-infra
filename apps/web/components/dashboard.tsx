@@ -26,6 +26,7 @@ import type { Instance } from "@/lib/store";
 import { SandboxWorkspace } from "@/components/sandbox-workspace";
 import { ManagedMcpCard } from "@/components/managed-mcp";
 import { AgentChats } from '@/components/agent-chats';
+import { AutopayNote, startAutopayCheckout, SubscriptionPanel } from '@/components/billing/subscription-panel';
 
 type AgentRuntime = "xibecode" | "supercharge";
 
@@ -144,7 +145,8 @@ export function Dashboard({ email }: { email: string }) {
   const [creatingFree, setCreatingFree] = useState(false);
   const [name, setName] = useState("workspace");
   const [runtime, setRuntime] = useState<AgentRuntime>("supercharge");
-  const [plans, setPlans] = useState<Array<{ id: string; name: string; priceInr: number; priceUsd: number }>>([]);
+  const [plans, setPlans] = useState<Array<{ id: string; name: string; priceInr: number; priceUsd: number; autopay?: boolean }>>([]);
+  const [billingCfg, setBillingCfg] = useState<{ graceDays?: number; retentionDays?: number }>({});
   const [planId, setPlanId] = useState("hosting-2c4g");
   const [chatMode, setChatMode] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
@@ -230,6 +232,7 @@ export function Dashboard({ email }: { email: string }) {
     setInstances(data.instances || []);
     if (data.plan) setPlan(data.plan);
     if (Array.isArray(data.plans)) setPlans(data.plans);
+    if (data.billing && typeof data.billing === "object") setBillingCfg(data.billing);
     // Default 1 free if API omits freeQuota (old deploy) — never silently zero it.
     if (data.freeQuota && typeof data.freeQuota === "object") {
       const limit = Math.max(0, Math.floor(Number(data.freeQuota.limit)));
@@ -278,6 +281,7 @@ export function Dashboard({ email }: { email: string }) {
       const sp = new URLSearchParams(window.location.search);
       const pre = sp.get("selected");
       if (pre) setSelected(pre);
+      if (sp.get("billing")) setChatMode(false);
     } catch {
       /* ignore */
     }
@@ -290,7 +294,12 @@ export function Dashboard({ email }: { email: string }) {
         const pre = new URLSearchParams(window.location.search).get("selected");
         if (pre) return loadDetail(pre);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        if (new URLSearchParams(window.location.search).get("billing")) {
+          window.setTimeout(() => document.getElementById("billing")?.scrollIntoView({ behavior: "smooth" }), 300);
+        }
+      });
   }, [refresh]);
 
   const chosen = plans.find((item) => item.id === planId);
@@ -298,6 +307,12 @@ export function Dashboard({ email }: { email: string }) {
   const chosenUsd = chosen?.priceUsd || plan.priceUsd;
   const priceLabel = currency === "USD" ? `$${chosenUsd}/mo` : `₹${chosenInr}/mo`;
   const buttonLabel = currency === "USD" ? `Pay $${chosenUsd}` : `Pay ₹${chosenInr}`;
+  const chosenAutopay = Boolean(chosen?.autopay);
+  const createLabel = chosenAutopay
+    ? `Subscribe ${priceLabel} & create`
+    : `${buttonLabel} & create`;
+  const autopayPlanFor = (planIdForInst?: string) =>
+    plans.find((p) => p.id === planIdForInst && p.autopay) || plans.find((p) => p.autopay);
 
   async function payWithRazorpay(opts: {
     purpose: "new_instance" | "renew";
@@ -405,6 +420,17 @@ export function Dashboard({ email }: { email: string }) {
     setCreating(true);
     setError("");
     try {
+      if (chosenAutopay) {
+        const v = await startAutopayCheckout({ planId, currency, email, name });
+        await refresh();
+        if (v.instance?.id) {
+          setSelected(v.instance.id);
+          await loadDetail(v.instance.id);
+        } else {
+          setLogs("Payment received. Your workspace is being created and appears here in a minute.");
+        }
+        return;
+      }
       await payWithRazorpay({ purpose: "new_instance", name, runtime });
     } catch (e) {
       const msg = (e as Error).message;
@@ -418,6 +444,14 @@ export function Dashboard({ email }: { email: string }) {
     setBusy(true);
     setError("");
     try {
+      const inst = instances.find((i) => i.id === id);
+      const autopay = autopayPlanFor(inst?.plan);
+      if (autopay) {
+        // Expired one-off or lapsed autopay: move onto autopay (no forced migration before expiry).
+        await startAutopayCheckout({ planId: autopay.id, currency, email, instanceId: id });
+        await refresh();
+        return;
+      }
       await payWithRazorpay({ purpose: "renew", instanceId: id });
     } catch (e) {
       const msg = (e as Error).message;
@@ -1221,9 +1255,10 @@ export function Dashboard({ email }: { email: string }) {
             onClick={createInstance}
             className="rounded-lg bg-orange-600 px-5 py-2 font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
           >
-            {creating ? "Opening checkout…" : `${buttonLabel} & create`}
+            {creating ? "Opening checkout…" : createLabel}
           </button>
         </div>
+        {chosenAutopay ? <div className="mt-3 max-w-2xl"><AutopayNote /></div> : null}
         <p className="mt-2 text-xs text-zinc-500">
           {freeQuota.limit > 0 ? (
             <>
@@ -1307,9 +1342,13 @@ export function Dashboard({ email }: { email: string }) {
                       <span className="ml-2 text-red-400">
                         · payment expired
                       </span>
+                    ) : inst.billingStatus === "grace" ? (
+                      <span className="ml-2 text-red-400">
+                        · payment failed, retrying
+                      </span>
                     ) : inst.paidUntil ? (
                       <span className="ml-2 text-zinc-500">
-                        · paid until{" "}
+                        · {inst.subscriptionStatus === "active" && !inst.cancelAtCycleEnd ? "renews" : "paid until"}{" "}
                         {new Date(inst.paidUntil).toLocaleDateString()}
                       </span>
                     ) : null}
@@ -1331,7 +1370,7 @@ export function Dashboard({ email }: { email: string }) {
                     }}
                     className="mt-3 w-full rounded-lg bg-orange-600 py-2 text-sm font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
                   >
-                    Renew {priceLabel}
+                    {autopayPlanFor(inst.plan) ? "Subscribe to resume" : `Renew ${priceLabel}`}
                   </button>
                 ) : isPaused && inst.resumable !== false ? (
                   <button
@@ -1377,7 +1416,7 @@ export function Dashboard({ email }: { email: string }) {
                   onClick={() => renewInstance(selectedInst.id)}
                   className="ml-3 rounded-lg bg-orange-600 px-3 py-1 text-xs font-semibold text-white"
                 >
-                  Renew now
+                  {autopayPlanFor(selectedInst.plan) ? "Subscribe" : "Renew now"}
                 </button>
               </div>
             )}
@@ -1388,6 +1427,16 @@ export function Dashboard({ email }: { email: string }) {
               <strong>Pay & create</strong> above.
             </div>
           ) : null}
+          <SubscriptionPanel
+            key={selectedInst.id}
+            instance={selectedInst}
+            plans={plans}
+            currency={currency}
+            email={email}
+            graceDays={billingCfg.graceDays}
+            retentionDays={billingCfg.retentionDays}
+            onChanged={refresh}
+          />
           {(selectedInst.liveState === "paused" ||
             selectedInst.status === "paused") &&
             selectedInst.paid !== false && (
@@ -1523,7 +1572,7 @@ export function Dashboard({ email }: { email: string }) {
                     onClick={() => renewInstance(selectedInst.id)}
                     className="rounded-lg bg-orange-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
                   >
-                    Renew {buttonLabel}
+                    {autopayPlanFor(selectedInst.plan) ? "Subscribe" : `Renew ${buttonLabel}`}
                   </button>
                 )}
               <button
