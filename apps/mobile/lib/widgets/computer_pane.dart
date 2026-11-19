@@ -71,6 +71,7 @@ class ComputerPage extends StatefulWidget {
     this.onRunCommand,
     this.onManualBrowserControl,
     this.browser,
+    this.preview,
   });
 
   final ComputerState state;
@@ -80,6 +81,7 @@ class ComputerPage extends StatefulWidget {
   final Future<void> Function(String command)? onRunCommand;
   final Future<void> Function()? onManualBrowserControl;
   final Widget? browser;
+  final Widget? preview;
 
   @override
   State<ComputerPage> createState() => _ComputerPageState();
@@ -155,7 +157,7 @@ class _ComputerPageState extends State<ComputerPage> {
                               child: _ViewMenuRow(
                                 icon: Icons.terminal,
                                 label: 'Terminal',
-                                selected: !state.isBrowser,
+                                selected: state.tab == 'terminal',
                               ),
                             ),
                             PopupMenuItem(
@@ -164,8 +166,16 @@ class _ComputerPageState extends State<ComputerPage> {
                                 icon: state.desktopAvailable
                                     ? Icons.desktop_windows_outlined
                                     : Icons.public,
-                                label: state.screenLabel,
+                                label: 'Agent computer',
                                 selected: state.isBrowser,
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'preview',
+                              child: _ViewMenuRow(
+                                icon: Icons.language,
+                                label: 'Preview',
+                                selected: state.isPreview,
                               ),
                             ),
                           ],
@@ -249,7 +259,15 @@ class _ComputerPageState extends State<ComputerPage> {
                                 color: Color(0xFF2A2E36),
                               ),
                               Expanded(
-                                child: state.isBrowser
+                                child: state.isPreview
+                                    ? widget.preview ??
+                                          const Center(
+                                            child: Text(
+                                              'No preview yet',
+                                              style: TextStyle(color: Vc.muted),
+                                            ),
+                                          )
+                                    : state.isBrowser
                                     ? widget.browser ??
                                           ComputerBrowserView(
                                             state: state,
@@ -266,7 +284,7 @@ class _ComputerPageState extends State<ComputerPage> {
                       ),
                     ),
                   ),
-                  if (!state.isBrowser && widget.onRunCommand != null)
+                  if (state.tab == 'terminal' && widget.onRunCommand != null)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                       child: Row(

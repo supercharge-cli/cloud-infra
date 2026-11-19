@@ -6,8 +6,6 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_highlight/flutter_highlight.dart';
-import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'package:open_filex/open_filex.dart';
@@ -461,16 +459,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
       case PreviewKind.code:
       case PreviewKind.text:
       case PreviewKind.binary:
-        return _CodePane(
-          data: text?.text ?? '',
-          language: kind == PreviewKind.json
-              ? 'json'
-              : highlightLanguage(widget.title),
-          highlight:
-              kind != PreviewKind.binary &&
-              kind != PreviewKind.text &&
-              (text?.text.length ?? 0) <= maxHighlightBytes,
-        );
+        return _CodePane(data: text?.text ?? '');
       case PreviewKind.csv:
       case PreviewKind.spreadsheet:
         return _SheetPane(
@@ -557,35 +546,15 @@ class _MarkdownPane extends StatelessWidget {
 }
 
 class _CodePane extends StatelessWidget {
-  const _CodePane({required this.data, this.language, this.highlight = false});
+  const _CodePane({required this.data});
   final String data;
-  final String? language;
-  final bool highlight;
 
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) return const _EmptyPane('Empty file.');
-    if (highlight && language != null) {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: HighlightView(
-            data,
-            language: language,
-            theme: atomOneDarkTheme,
-            padding: const EdgeInsets.all(12),
-            textStyle: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 13,
-              height: 1.45,
-            ),
-          ),
-        ),
-      );
-    }
     final lines = const LineSplitter().convert(data);
-    return ListView.builder(
+    return SelectionArea(
+      child: ListView.builder(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
       itemCount: lines.length,
       itemBuilder: (ctx, i) {
@@ -609,7 +578,7 @@ class _CodePane extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: SelectableText(
+                child: Text(
                   lines[i].isEmpty ? ' ' : lines[i],
                   style: const TextStyle(
                     color: Color(0xFFE4E4E7),
@@ -623,6 +592,7 @@ class _CodePane extends StatelessWidget {
           ),
         );
       },
+    ),
     );
   }
 }

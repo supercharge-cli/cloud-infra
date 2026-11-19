@@ -1,6 +1,6 @@
 import { proxyInbox, requireChatInstance } from '@/lib/app-chat';
 import { inboxEventStream } from '@/lib/inbox-event-stream';
-import { prepareBotRequest } from '@/lib/bot-routing';
+import { activeBotChat, prepareBotRequest } from '@/lib/bot-routing';
 
 export const maxDuration = 55;
 const streamBudgetMs = 40_000;
@@ -17,10 +17,15 @@ export async function GET(req: Request, ctx: Ctx) {
   const since = url.searchParams.get('since') || '';
   const explicitChatId = url.searchParams.get('chatId');
   const botId = url.searchParams.get('botId');
-  const rejected = await prepareBotRequest(gate.inst, botId ?? undefined, explicitChatId ?? undefined,
+  let chatId = explicitChatId || undefined;
+  if (botId && !chatId) {
+    try { chatId = await activeBotChat(gate.inst, botId); }
+    catch (error) { return Response.json({ error: (error as Error).message }, { status: 502 }); }
+  }
+  const rejected = await prepareBotRequest(gate.inst, botId ?? undefined, chatId,
     { allowLegacyChatId: true });
   if (rejected) return rejected;
-  const q = new URLSearchParams({ chatId: explicitChatId || 'owner' });
+  const q = new URLSearchParams({ chatId: chatId || 'owner' });
   if (botId) q.set('botId', botId);
   if (since) q.set('since', since);
 

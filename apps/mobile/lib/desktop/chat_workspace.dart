@@ -18,6 +18,7 @@ class DesktopChatWorkspace extends StatefulWidget {
     required this.onRunCommand,
     required this.onManualControl,
     this.browser,
+    this.preview,
   });
 
   final Widget chat;
@@ -27,6 +28,7 @@ class DesktopChatWorkspace extends StatefulWidget {
   final Future<void> Function(String) onRunCommand;
   final Future<void> Function()? onManualControl;
   final Widget? browser;
+  final Widget? preview;
 
   @override
   State<DesktopChatWorkspace> createState() => _DesktopChatWorkspaceState();
@@ -146,8 +148,13 @@ class _DesktopChatWorkspaceState extends State<DesktopChatWorkspace> {
                       ),
                       ButtonSegment(
                         value: 'browser',
-                        icon: Icon(Icons.public, size: 16),
-                        label: Text('Browser'),
+                        icon: Icon(Icons.desktop_windows_outlined, size: 16),
+                        label: Text('Agent computer'),
+                      ),
+                      ButtonSegment(
+                        value: 'preview',
+                        icon: Icon(Icons.language, size: 16),
+                        label: Text('Preview'),
                       ),
                     ],
                     selected: {state.tab},
@@ -165,13 +172,21 @@ class _DesktopChatWorkspaceState extends State<DesktopChatWorkspace> {
             ),
             const Divider(height: 1),
             Expanded(
-              child: state.isBrowser
+              child: state.isPreview
+                  ? widget.preview ??
+                        const Center(
+                          child: Text(
+                            'No preview yet',
+                            style: TextStyle(color: Vc.muted),
+                          ),
+                        )
+                  : state.isBrowser
                   ? widget.browser ??
                         ComputerBrowserView(state: state, compact: false)
                   : ComputerTerminalView(state: state, compact: false),
             ),
             const Divider(height: 1),
-            if (!state.isBrowser)
+            if (state.tab == 'terminal')
               Padding(
                 padding: const EdgeInsets.all(10),
                 child: Row(
@@ -201,7 +216,7 @@ class _DesktopChatWorkspaceState extends State<DesktopChatWorkspace> {
                   ],
                 ),
               )
-            else if (widget.browser == null)
+            else if (state.isBrowser && widget.browser == null)
               Padding(
                 padding: const EdgeInsets.all(10),
                 child: Row(

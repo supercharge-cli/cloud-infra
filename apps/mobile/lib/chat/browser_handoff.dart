@@ -85,7 +85,8 @@ class BrowserHandoffController extends ChangeNotifier {
   String? get error => _error;
   DateTime? get expiresAt => _expiresAt;
 
-  Future<void> takeControl() => _enqueue(_takeControl);
+  Future<void> takeControl({bool force = false}) =>
+      _enqueue(() => _takeControl(force: force));
 
   Future<void> returnControl({String notes = '', bool continueTask = true}) =>
       _enqueue(
@@ -124,7 +125,7 @@ class BrowserHandoffController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  Future<void> _takeControl() async {
+  Future<void> _takeControl({bool force = false}) async {
     if (_closeRequested || _hasControl) return;
     _error = null;
     _expired = false;
@@ -146,11 +147,23 @@ class BrowserHandoffController extends ChangeNotifier {
       }
       if (computer['handoff'] != false &&
           (_handoffId == null || computer['handoffId'] != _handoffId)) {
-        throw StateError(
-          computer['handoff'] == true
-              ? 'Another viewer already has browser control.'
-              : 'Could not confirm that browser control is available.',
-        );
+        final existing = computer['handoffId'];
+        if (force &&
+            computer['handoff'] == true &&
+            existing is String &&
+            existing.isNotEmpty) {
+          await _api.stopBrowserHandoff(
+            _instanceId,
+            handoffId: existing,
+            botId: _botId,
+          );
+        } else {
+          throw StateError(
+            computer['handoff'] == true
+                ? 'Another viewer already has browser control.'
+                : 'Could not confirm that browser control is available.',
+          );
+        }
       }
       _wasBusy = await _readBusy(timeout: _pollTimeout);
       if (_closeRequested) return;

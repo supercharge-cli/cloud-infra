@@ -17,12 +17,14 @@ class PreviewBrowserScreen extends StatefulWidget {
     this.initialUrl,
     this.sandboxId,
     this.resolvePort,
+    this.embedded = false,
   });
 
   final String instanceName;
   final String? initialUrl;
   final String? sandboxId;
   final Future<String?> Function(int port)? resolvePort;
+  final bool embedded;
 
   @override
   State<PreviewBrowserScreen> createState() => _PreviewBrowserScreenState();
@@ -128,30 +130,9 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
     await _go(url);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Vc.bg,
-      appBar: AppBar(
-        titleSpacing: 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Preview',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-            Text(
-              widget.instanceName,
-              style: const TextStyle(
-                color: Vc.muted,
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-        actions: [
+  Widget _toolbar() {
+    return Row(
+      children: [
           IconButton(
             tooltip: 'Back',
             onPressed: isDesktop
@@ -193,9 +174,14 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
             icon: const Icon(Icons.open_in_new),
           ),
         ],
-      ),
-      body: Column(
-        children: [
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final column = Column(
+      children: [
+        if (widget.embedded) _toolbar(),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
             child: TextField(
@@ -268,7 +254,34 @@ class _PreviewBrowserScreenState extends State<PreviewBrowserScreen> {
                 : WebViewWidget(controller: _web!),
           ),
         ],
+    );
+    if (widget.embedded) {
+      return ColoredBox(color: Vc.bg, child: column);
+    }
+    return Scaffold(
+      backgroundColor: Vc.bg,
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Preview',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+            Text(
+              widget.instanceName,
+              style: const TextStyle(
+                color: Vc.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        actions: [_toolbar()],
       ),
+      body: column,
     );
   }
 }

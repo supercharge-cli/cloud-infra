@@ -393,7 +393,12 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
       if (mounted) setState(() => _closing = false);
       return;
     }
-    final error = _control.error ?? priorError;
+    final error = _control.error != null &&
+            _control.error!.contains('continuing failed')
+        ? _control.error
+        : priorError != null && priorError.contains('continuing failed')
+        ? priorError
+        : null;
     await _desktop?.close();
     if (isDesktop && _desktop != null) {
       await DesktopNative.inlineDispose(DesktopNative.viewerSurface);
@@ -482,6 +487,21 @@ class _BrowserHandoffScreenState extends State<BrowserHandoffScreen> {
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(color: Vc.muted),
                                   ),
+                                  if (error != null &&
+                                      error.contains('Another viewer'))
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 16),
+                                      child: FilledButton(
+                                        onPressed: busy
+                                            ? null
+                                            : () => unawaited(
+                                                _control.takeControl(
+                                                  force: true,
+                                                ),
+                                              ),
+                                        child: const Text('Force access'),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
