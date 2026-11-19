@@ -70,7 +70,7 @@ class ComputerState extends ChangeNotifier {
   bool agentWorking = false;
   bool desktopAvailable = false;
 
-  String get screenLabel => desktopAvailable ? 'Desktop' : 'Browser';
+  String get screenLabel => 'Agent computer';
   String get tab => _tab;
   set tab(String value) {
     if (_tab == value) return;
@@ -79,14 +79,18 @@ class ComputerState extends ChangeNotifier {
   }
 
   bool get isBrowser => _tab == 'browser';
+  bool get isPreview => _tab == 'preview';
 
   bool get hasPreview =>
       (liveJpeg != null && liveJpeg!.isNotEmpty) ||
       (stillPath != null && stillPath!.isNotEmpty) ||
       (stillUrl != null && stillUrl!.isNotEmpty);
 
-  String get usingLabel =>
-      isBrowser ? 'Vectra is using $screenLabel' : 'Vectra is using Terminal';
+  String get usingLabel => isPreview
+      ? 'Vectra is showing Preview'
+      : isBrowser
+      ? 'Vectra is using $screenLabel'
+      : 'Vectra is using Terminal';
 
   String get usingDetail {
     if (isBrowser) {

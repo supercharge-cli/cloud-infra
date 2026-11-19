@@ -11,7 +11,11 @@ export async function GET(_req: Request, ctx: Ctx) {
   if (!gate.ok) return gate.response;
   if (!botsEnabled(gate.inst)) return NextResponse.json({ error: 'Supercharge E2B only' }, { status: 404 });
   try {
-    return NextResponse.json({ bots: (await listBots(gate.inst)).map(exposedBot) });
+    const bots = (await listBots(gate.inst)).map(exposedBot);
+    // Listing is what the app does on open. Push Chief and GitHub into the VM
+    // so the default GitHub bot exists without a separate create step.
+    try { await syncBots(gate.inst); } catch { /* sandbox may be paused */ }
+    return NextResponse.json({ bots });
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 502 });
   }

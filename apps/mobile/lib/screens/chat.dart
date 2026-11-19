@@ -2423,13 +2423,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           answered.contains(ev.ref ?? ev.id)) {
         continue;
       }
-      if (ev.type == 'tool' &&
-          groups.isNotEmpty &&
-          groups.last.first.type == 'tool') {
-        groups.last.add(ev);
-      } else {
-        groups.add([ev]);
-      }
+      if (ev.type == 'tool' || ev.type == 'progress') continue;
+      groups.add([ev]);
     }
     _groupsStamp = stamp;
     _groupsCache = groups;
@@ -3707,6 +3702,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               onManualBrowserControl: _isSupercharge
                   ? _openBrowserHandoff
                   : null,
+              preview: PreviewBrowserScreen(
+                embedded: true,
+                instanceName: instanceName,
+                initialUrl: _latestPreviewUrl(),
+                sandboxId: _sandboxId,
+                resolvePort: (port) => api.previewHost(id, port: port),
+              ),
             ),
             transitionsBuilder: (ctx, anim, sec, child) {
               return FadeTransition(opacity: anim, child: child);
@@ -4572,6 +4574,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     onManualControl: _isSupercharge
                         ? _openBrowserHandoff
                         : null,
+                    preview: PreviewBrowserScreen(
+                      embedded: true,
+                      instanceName: instanceName,
+                      initialUrl: _latestPreviewUrl(),
+                      sandboxId: _sandboxId,
+                      resolvePort: (port) => api.previewHost(id, port: port),
+                    ),
                   ),
                 ),
               ],
