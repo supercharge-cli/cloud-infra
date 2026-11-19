@@ -568,6 +568,35 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
               ),
             ),
           ),
+        Material(
+          color: Vc.surface,
+          child: SizedBox(
+            height: 72,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              itemCount: widget.bots.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (_, index) {
+                final bot = widget.bots[index];
+                return Tooltip(
+                  message: '${bot.name} · ${bot.defaultFolder}',
+                  child: InkWell(
+                    key: ValueKey('group-member-${bot.id}'),
+                    onTap: () => widget.onOpenAgent(bot, null),
+                    borderRadius: BorderRadius.circular(20),
+                    child: BotAvatar(
+                      bot: bot,
+                      instanceId: widget.instanceId,
+                      client: widget.api,
+                      radius: 18,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
         Expanded(
           child: _loading
               ? const Center(
@@ -598,7 +627,7 @@ class _GroupThreadState extends State<GroupThread> with WidgetsBindingObserver {
                         ),
                         const SizedBox(height: 10),
                         const Text(
-                          'Ask the group and Main will answer. Use @ to choose an agent. Everyone can read this group; direct chats stay separate.',
+                          'Every agent is in this group. Each one keeps its own folder. @ someone to have them answer here. Direct chats stay private.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Vc.muted, height: 1.5),
                         ),
