@@ -185,6 +185,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String? get _botScope =>
       _botsEnabled && store.activeSessionId != null ? _selectedBotId : null;
   String? get _chatScope => _botsEnabled ? store.activeSessionId : null;
+
+  Future<(String?, String?)> _conversationScope() async {
+    if (!_botsEnabled || _groupOpen) return (null, null);
+    final current = store.activeSessionId;
+    if (current != null && current.isNotEmpty) return (_selectedBotId, current);
+    ConversationMeta? pick(Map<String, dynamic> raw) {
+      final rows = ((raw['conversations'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((item) => ConversationMeta.fromJson(Map<String, dynamic>.from(item)))
+          .where((item) => item.source != 'group' && item.sessionId.isNotEmpty)
+          .toList();
+      final active = raw['active'] as String?;
+      return rows.where((item) => item.sessionId == active).firstOrNull ??
+          rows.where((item) => item.botId == _selectedBotId).firstOrNull ??
+          rows.firstOrNull;
+    }
+    var selected = pick(await api.listConversations(id, botId: _selectedBotId));
+    selected ??= pick(await api.startNewConversation(id, botId: _selectedBotId));
+    final sessionId = selected?.sessionId;
+    if (sessionId == null || sessionId.isEmpty) {
+      throw StateError('No conversation returned for $_selectedBotName');
+    }
+    if (store.activeSessionId == null || store.activeSessionId!.isEmpty) {
+      store.activeSessionId = sessionId;
+    }
+    return (_selectedBotId, sessionId);
+  }
   String? get _desktopBotTarget =>
       _botsEnabled ? (_groupOpen ? 'main' : _selectedBotId) : null;
   String? get _desktopChatTarget => _groupOpen ? null : _chatScope;
@@ -829,11 +856,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     while (active()) {
       try {
         var receivedReady = false;
+        final scope = await _conversationScope();
+        if (!active()) return;
         await for (final ev in api.events(
           id,
           since: _isServerSeq(lastServerId) ? lastServerId : null,
-          botId: _botScope,
-          chatId: _chatScope,
+          botId: scope.$1,
+          chatId: scope.$2,
           cancellation: cancellation,
         )) {
           if (!active()) return;
@@ -2636,8 +2665,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       return;
     }
-    final sentBot = _botScope;
-    final sentChat = _chatScope;
+    final scope = await _conversationScope();
+    final sentBot = scope.$1;
+    final sentChat = scope.$2;
     final drafts = List<DraftAttach>.from(pending);
     final cmd = slashCommandName(t);
     final agentTurn =

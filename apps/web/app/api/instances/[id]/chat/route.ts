@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { proxyInbox, requireChatInstance } from '@/lib/app-chat';
-import { prepareBotRequest } from '@/lib/bot-routing';
+import { activeBotChat, prepareBotRequest } from '@/lib/bot-routing';
 
 export const maxDuration = 300;
 
@@ -20,6 +20,8 @@ export async function POST(req: Request, ctx: Ctx) {
   }
 
   try {
+    const missingChat = body.chatId == null || body.chatId === '';
+    if (typeof body.botId === 'string' && missingChat) body.chatId = await activeBotChat(gate.inst, body.botId);
     const rejected = await prepareBotRequest(gate.inst, body.botId, body.chatId, { sync: true, allowLegacyChatId: true });
     if (rejected) return rejected;
     const res = await proxyInbox(gate.inst, '/v1/chat', {
