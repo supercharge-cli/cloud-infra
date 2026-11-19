@@ -117,6 +117,12 @@ class CloudInstance {
     this.liveMessage,
     this.paidUntil,
     this.runtime = AgentRuntime.xibecode,
+    this.subscriptionStatus,
+    this.nextChargeAt,
+    this.cancelAtCycleEnd = false,
+    this.graceUntil,
+    this.billingSuspendedAt,
+    this.retainUntil,
   });
   final String id;
   final String name;
@@ -131,14 +137,41 @@ class CloudInstance {
   final String? liveMessage;
   final String? paidUntil;
   final AgentRuntime runtime;
+  /// Razorpay autopay status (active, pending, halted, paused, cancelled, …).
+  final String? subscriptionStatus;
+  final String? nextChargeAt;
+  final bool cancelAtCycleEnd;
+  final String? graceUntil;
+  final String? billingSuspendedAt;
+  final String? retainUntil;
 
   String get runtimeLabel => runtime.label;
+  bool get billingSuspended => billingSuspendedAt != null && billingSuspendedAt!.isNotEmpty;
+  bool get paymentFailed =>
+      subscriptionStatus == 'pending' || subscriptionStatus == 'halted' || billingStatus == 'grace';
+
+  /// One-line billing summary for lists and the billing screen.
+  String? get billingSummary {
+    if (isFree && subscriptionStatus == null) return null;
+    if (billingSuspended) return 'Paused for billing · files kept until ${shortDate(retainUntil)}';
+    if (paymentFailed) return 'Payment failed · retrying until ${shortDate(graceUntil ?? paidUntil)}';
+    if (subscriptionStatus == 'active' && !cancelAtCycleEnd) {
+      return 'Autopay on · next charge ${shortDate(nextChargeAt ?? paidUntil)}';
+    }
+    if (subscriptionStatus == 'active' && cancelAtCycleEnd) {
+      return 'Autopay cancelled · access until ${shortDate(paidUntil)}';
+    }
+    if (subscriptionStatus == 'authenticated') return 'Autopay approved · first charge ${shortDate(nextChargeAt ?? paidUntil)}';
+    if (subscriptionStatus == 'paused') return 'Autopay paused · access until ${shortDate(paidUntil)}';
+    if (paidUntil != null && paidUntil!.isNotEmpty) return 'Paid until ${shortDate(paidUntil)}';
+    return null;
+  }
 
   String get displayState => liveState ?? status;
   bool get isPaused => displayState.toLowerCase() == 'paused';
   bool get isRunning => displayState.toLowerCase() == 'running';
   bool get needsPayment => !isFree && paid == false;
-  bool get pastDue => billingStatus == 'past_due' || needsPayment;
+  bool get pastDue => billingStatus == 'past_due' || billingStatus == 'suspended' || needsPayment;
 
   factory CloudInstance.fromJson(Map<String, dynamic> j) => CloudInstance(
         id: '${j['id'] ?? ''}',
@@ -154,7 +187,21 @@ class CloudInstance {
         liveMessage: j['liveMessage'] as String?,
         paidUntil: j['paidUntil'] as String?,
         runtime: AgentRuntimeApi.parse(j['runtime']),
+        subscriptionStatus: j['subscriptionStatus'] as String?,
+        nextChargeAt: j['nextChargeAt'] as String?,
+        cancelAtCycleEnd: j['cancelAtCycleEnd'] == true,
+        graceUntil: j['graceUntil'] as String?,
+        billingSuspendedAt: j['billingSuspendedAt'] as String?,
+        retainUntil: j['retainUntil'] as String?,
       );
+}
+
+/// `2026-12-19T…Z` → `19 Dec 2026` (local time).
+String shortDate(String? iso) {
+  final d = iso == null ? null : DateTime.tryParse(iso)?.toLocal();
+  if (d == null) return '—';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return '${d.day} ${months[d.month - 1]} ${d.year}';
 }
 
 class DashboardData {

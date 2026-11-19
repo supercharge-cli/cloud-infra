@@ -645,12 +645,13 @@ class _InstancesScreenState extends State<InstancesScreen> {
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          if (inst.paidUntil != null &&
-                              inst.paidUntil!.isNotEmpty)
+                          if (inst.billingSummary != null)
                             Text(
-                              'Paid until ${inst.paidUntil}',
-                              style: const TextStyle(
-                                color: Vc.faint,
+                              inst.billingSummary!,
+                              style: TextStyle(
+                                color: inst.paymentFailed || inst.billingSuspended
+                                    ? Vc.red
+                                    : Vc.faint,
                                 fontSize: 11,
                               ),
                             ),

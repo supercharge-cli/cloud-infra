@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api/models.dart';
 import '../desktop.dart';
@@ -27,6 +28,7 @@ class _BillingScreenState extends State<BillingScreen> {
   bool loading = true;
   bool busy = false;
   Razorpay? _rzp;
+  CloudInstance? instance;
 
   BillingArgs get args => widget.args ?? const BillingArgs();
 
@@ -49,8 +51,13 @@ class _BillingScreenState extends State<BillingScreen> {
 
   Future<void> _load() async {
     try {
-      cfg = await context.read<SessionController>().client.billingConfig();
+      final client = context.read<SessionController>().client;
+      cfg = await client.billingConfig();
       plan = PlanInfo.fromJson(cfg?['plan'] as Map<String, dynamic>?);
+      if (args.renew) {
+        final list = await client.instances();
+        instance = list.where((i) => i.id == args.instanceId).firstOrNull;
+      }
     } catch (e) {
       error = e.toString();
     }
@@ -115,6 +122,21 @@ class _BillingScreenState extends State<BillingScreen> {
     if (mounted) setState(() => busy = false);
   }
 
+  /// Autopay is set up for this size on the server (plan id configured).
+  bool get _autopayForSize {
+    final plans = cfg?['plans'];
+    if (plans is! List) return false;
+    final want = args.planId;
+    return plans.any((p) => p is Map && p['id'] == want && p['autopay'] == true);
+  }
+
+  /// Subscriptions (start, change size, cancel) are managed on the web dashboard.
+  Future<void> _openWebBilling() async {
+    final base = context.read<SessionController>().client.baseUrl;
+    final q = args.instanceId == null ? 'billing=1' : 'selected=${Uri.encodeQueryComponent(args.instanceId!)}&billing=1';
+    await launchUrl(Uri.parse('$base/dashboard?$q'), mode: LaunchMode.externalApplication);
+  }
+
   Future<void> _onSuccess(PaymentSuccessResponse res) async {
     setState(() {
       busy = true;
@@ -172,6 +194,49 @@ class _BillingScreenState extends State<BillingScreen> {
                 if (error != null) ...[
                   Text(error!, style: const TextStyle(color: Vc.red)),
                   const SizedBox(height: 16),
+                ],
+                if (instance != null || _autopayForSize) ...[
+                  VcPanel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'AUTOPAY',
+                          style: TextStyle(
+                            color: Vc.green,
+                            fontSize: 11,
+                            letterSpacing: 1.4,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          instance?.billingSummary ?? 'Monthly autopay is not on for this workspace.',
+                          style: TextStyle(
+                            color: instance != null && (instance!.paymentFailed || instance!.billingSuspended)
+                                ? Vc.red
+                                : null,
+                            fontWeight: FontWeight.w600,
+                            height: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Start autopay, change size or cancel on the web dashboard. '
+                          'Card or UPI Autopay / e-mandate required; charges are not refunded, '
+                          'and cancelling keeps access until the paid period ends.',
+                          style: TextStyle(color: Vc.muted, height: 1.4, fontSize: 12),
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          onPressed: busy ? null : _openWebBilling,
+                          icon: const Icon(Icons.open_in_new, size: 18),
+                          label: const Text('Manage billing on the web'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
                 ],
                 VcPanel(
                   child: Column(
