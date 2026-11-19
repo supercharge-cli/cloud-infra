@@ -1,41 +1,50 @@
 ---
 title: Billing
-description: Pricing and renewals for Vectra Cloud instances
+description: Sandbox sizes, monthly autopay, cancellation and what happens when a payment fails
 ---
 
 # Billing
 
-## Free tier
+## Free base
 
-Every account includes **1 free instance** (no payment, no expiry).
+Every account gets **one free workspace** at 2 vCPU · 4 GB. It does not expire. Add agents inside it.
 
-- Create it from the dashboard with **Create free instance**.
-- Destroying a free instance frees the slot so you can create another free one later.
-- Extra sandboxes beyond the free slot require payment.
+## Paid sizes
 
-## Price (paid instances)
+| Size | India | International |
+| --- | --- | --- |
+| 2 vCPU · 4 GB | ₹199 / month | $2.26 / month |
+| 4 vCPU · 8 GB | ₹399 / month | $4.54 / month |
+| 8 vCPU · 8 GB | ₹599 / month | $6.81 / month |
+| 16 vCPU · 16 GB | ₹1199 / month | $13.63 / month |
 
-| | |
-| --- | --- |
-| India | **₹** per instance (set by host; default ₹399) / **30 days** |
-| International | **$** per instance (set by host; default $4.59) / **30 days** |
+USD is the rupee price at ₹95 per dollar plus 8%. The dashboard always shows the current price before you pay.
 
-Each payment unlocks **one** additional sandbox for 30 days. Multiple paid instances = multiple payments.
+## Monthly autopay
 
-## How payment works
+Paid sandboxes are monthly subscriptions through Razorpay. You approve a recurring payment once and each month renews automatically until you cancel.
 
-1. On the dashboard, choose currency and click **Pay & create** (or **Renew** on an existing paid instance).
-2. Complete checkout with Razorpay.
-3. After a successful payment, access is active until the **paid until** date on the card.
+- **Payment methods:** a card that supports recurring payments, or UPI Autopay / e-mandate approved in your UPI or bank app.
+- **Start:** open the dashboard settings, pick a size in the **Billing** card and choose **Subscribe**. A new account can subscribe straight from **Create sandbox**.
+- **Next charge:** shown on the Billing card.
+- **Change size:** upgrades apply now, downgrades at the next renewal. UPI Autopay and e-mandate subscriptions cannot change size; cancel and subscribe to the new size.
 
-## Renew
+## Cancel
 
-When a **paid** period ends, status shows payment expired. Use **Renew** on that instance — you keep the same sandbox and settings; only the paid period extends. Free-tier instances do not expire and do not need renew.
+Choose **Cancel subscription** on the Billing card and confirm. There are no further charges. The sandbox keeps working until the end of the period you paid for, then it pauses.
 
-## Notes
+## Failed payments
 
-- Free-tier sandboxes are provisioned immediately (no checkout).
-- Paid sandboxes are not provisioned until payment succeeds.
-- You can still **see** expired or paused instances on the dashboard and renew or resume as needed.
-- **Refunds:** sales are final under our [Refund Policy](/refund). See also [Terms](/terms) and [Privacy](/privacy).
-- For payment issues, contact support (`hello@vectra.cloud`) with your account email and approximate payment time.
+If a renewal fails, Razorpay retries it and the sandbox keeps working for a **3-day grace period** (the Billing card shows the date and a **Fix payment** link). If it still fails, the sandbox pauses.
+
+## Paused for billing
+
+A paused workspace keeps its files, settings and agent memory for **14 days**. Subscribing or paying the due amount in that time resumes it. After that it may be deleted. An upgraded free workspace goes back to the free base instead of pausing.
+
+## Older one-off payments
+
+Workspaces paid with a one-off 30-day payment keep their paid-until date. When it ends, the dashboard offers **Subscribe**. If you subscribe before it ends, the first autopay charge happens on that date, so you never pay twice for the same days.
+
+## Refunds
+
+Charges are not refunded; duplicate or erroneous charges are reversed. See the [Refund & Cancellation Policy](/refund), [Terms](/terms) and [Privacy](/privacy). For payment issues, contact `hello@vectra.cloud` with your account email and the Razorpay payment id.
