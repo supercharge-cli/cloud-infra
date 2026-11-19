@@ -1,8 +1,12 @@
+import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { fulfillPaidOrder } from '@/lib/billing-fulfill';
 import { verifyWebhookSignature } from '@/lib/razorpay';
+import { subscriptionService } from '@/lib/subscription-runtime';
 
 export const runtime = 'nodejs';
+/** subscription.activated / charged may boot the paid workspace */
+export const maxDuration = 300;
 
 /**
  * Razorpay webhook — server-side payment verification.
@@ -10,9 +14,12 @@ export const runtime = 'nodejs';
  * Dashboard → Settings → Webhooks:
  *   URL:  https://YOUR_DOMAIN/api/billing/webhook
  *   Secret: RAZORPAY_WEBHOOK_SECRET
- *   Events: payment.captured, order.paid
+ *   Events: payment.captured, order.paid (legacy one-off orders) and
+ *           subscription.authenticated, activated, charged, pending, halted,
+ *           cancelled, completed, paused, resumed, updated (autopay)
  *
- * Works with client /api/billing/verify (shared fulfill, idempotent).
+ * Subscription events are idempotent by X-Razorpay-Event-Id (billing_events).
+ * One-off orders stay idempotent through the order claim in fulfillPaidOrder.
  */
 export async function POST(req: Request) {
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET?.trim();
@@ -50,6 +57,23 @@ export async function POST(req: Request) {
   const eventType = event.event || '';
   console.log(`[billing/webhook] ${eventType}`);
 
+  if (eventType.startsWith('subscription.')) {
+    const eventId =
+      req.headers.get('x-razorpay-event-id')?.trim() ||
+      `body_${createHash('sha256').update(rawBody).digest('hex')}`;
+    try {
+      const result = await subscriptionService().handleWebhookEvent(eventId, event as never);
+      if (result.status === 'in_progress') {
+        // Another delivery is mid-flight; non-2xx makes Razorpay retry later.
+        return NextResponse.json({ status: 'in_progress' }, { status: 409 });
+      }
+      return NextResponse.json({ status: result.status, reason: result.reason, subscriptionId: result.subscriptionId });
+    } catch (e) {
+      console.error('[billing/webhook] subscription exception', (e as Error).message);
+      return NextResponse.json({ error: 'Subscription update failed' }, { status: 500 });
+    }
+  }
+
   // Prefer payment.captured (has order_id + payment id)
   if (eventType === 'payment.captured' || eventType === 'payment.authorized') {
     const payment = event.payload?.payment?.entity;
@@ -63,6 +87,11 @@ export async function POST(req: Request) {
         status: 'ignored',
         reason: `payment status ${payment.status}`,
       });
+    }
+
+    // Autopay charges carry an invoice and are handled by subscription.charged.
+    if (payment.invoice_id || payment.subscription_id) {
+      return NextResponse.json({ status: 'ignored', reason: 'subscription payment' });
     }
 
     // Ensure notes mark this as our product (optional guard)
@@ -109,6 +138,9 @@ export async function POST(req: Request) {
     // Fallback: order paid but we need payment id from nested payload when present
     const orderId = event.payload?.order?.entity?.id;
     const payment = event.payload?.payment?.entity;
+    if (payment?.invoice_id || payment?.subscription_id) {
+      return NextResponse.json({ status: 'ignored', reason: 'subscription payment' });
+    }
     if (orderId && payment?.id) {
       try {
         const result = await fulfillPaidOrder({
@@ -140,6 +172,8 @@ type RazorpayPaymentEntity = {
   status?: string;
   amount?: number;
   currency?: string;
+  invoice_id?: string | null;
+  subscription_id?: string | null;
   notes?: Record<string, string>;
 };
 

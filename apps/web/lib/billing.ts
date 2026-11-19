@@ -1,4 +1,11 @@
 /** Vectra Cloud pricing — values come from env (with safe defaults). */
+import {
+  computeAccess,
+  computeBillingStatus,
+  type InstanceBilling,
+  type InstanceBillingStatus,
+} from './subscription-core';
+
 
 export type BillingCurrency = 'INR' | 'USD';
 
@@ -112,7 +119,7 @@ export const PLAN = {
   },
 } as Plan;
 
-export type BillingStatus = 'active' | 'past_due' | 'none';
+export type BillingStatus = InstanceBillingStatus;
 
 /**
  * How many free instances each user may hold at once (non-destroyed).
@@ -126,21 +133,33 @@ export function freeInstanceLimit(): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 1;
 }
 
-/** Access is granted for free-tier instances or while paidUntil is in the future. */
-export function hasInstanceAccess(inst: {
-  isFree?: boolean | null;
-  paidUntil?: string | null;
-}): boolean {
-  if (inst.isFree) return true;
-  return isSubscriptionActive(inst.paidUntil);
+/**
+ * Access: free tier, paid period, or failed-renewal grace — and never while
+ * billing has suspended the workspace.
+ */
+export function hasInstanceAccess(inst: InstanceBilling): boolean {
+  return computeAccess(inst);
 }
 
-export function billingStatusForInstance(inst: {
-  isFree?: boolean | null;
-  paidUntil?: string | null;
-}): BillingStatus {
-  if (inst.isFree) return 'active';
-  return billingStatusFromPaidUntil(inst.paidUntil);
+export function billingStatusForInstance(inst: InstanceBilling): BillingStatus {
+  return computeBillingStatus(inst);
+}
+
+function envInt(key: string, fallback: number, min: number): number {
+  const raw = process.env[key]?.trim();
+  if (!raw) return fallback;
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n >= min ? n : fallback;
+}
+
+/** Subscription lifecycle knobs (server-side env). */
+export function subscriptionBillingConfig(): { graceDays: number; retentionDays: number; totalCount: number } {
+  return {
+    graceDays: envInt('BILLING_GRACE_DAYS', 3, 0),
+    retentionDays: envInt('BILLING_RETENTION_DAYS', 14, 1),
+    // Monthly cycles Razorpay may charge before the subscription completes.
+    totalCount: envInt('BILLING_SUBSCRIPTION_TOTAL_COUNT', 120, 1),
+  };
 }
 
 export function normalizeCurrency(raw?: string | null): BillingCurrency {

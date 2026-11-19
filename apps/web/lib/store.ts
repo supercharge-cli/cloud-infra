@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { getDb } from "./mongodb";
 import { hashPassword, verifyPassword } from "./auth";
+import type { InstanceBillingStatus, SubscriptionStatus } from "./subscription-core";
 
 export type UserRole = "admin" | "user";
 
@@ -122,7 +123,21 @@ export type Instance = {
   isFree?: boolean;
   /** ISO — access valid until this time (see BILLING_* env for price/period). Ignored when isFree. */
   paidUntil?: string;
-  billingStatus?: "active" | "past_due" | "none";
+  billingStatus?: InstanceBillingStatus;
+  /** Razorpay autopay (sub_…) managing this workspace */
+  subscriptionId?: string | null;
+  subscriptionStatus?: SubscriptionStatus | null;
+  nextChargeAt?: string | null;
+  cancelAtCycleEnd?: boolean | null;
+  pendingPlanId?: string | null;
+  /** Failed renewal: access continues until this time */
+  graceUntil?: string | null;
+  /** Billing paused the sandbox (data kept until retainUntil) */
+  billingSuspendedAt?: string | null;
+  retainUntil?: string | null;
+  /** Retention ended; an operator may delete. Nothing deletes automatically. */
+  deletionFlaggedAt?: string | null;
+  wasFree?: boolean | null;
   lastPaymentId?: string;
   lastOrderId?: string;
   createdAt: string;
@@ -873,4 +888,23 @@ export async function markOrderPaid(
   const { _id: _drop, ...clean } = next as PendingOrder & { _id?: unknown };
   await db.collection("orders").updateOne({ razorpayOrderId }, { $set: clean });
   return clean as PendingOrder;
+}
+
+/** Billing-only patch without an owner session (webhook / cron). null unsets. */
+export async function updateInstanceBilling(
+  id: string,
+  patch: Partial<Instance>,
+): Promise<void> {
+  const db = await getDb();
+  const $set: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+  const $unset: Record<string, ""> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === "_id" || key === "id" || key === "userId") continue;
+    if (value === null) $unset[key] = "";
+    else if (value !== undefined) $set[key] = value;
+  }
+  await db.collection("instances").updateOne(
+    { id },
+    Object.keys($unset).length ? { $set, $unset } : { $set },
+  );
 }

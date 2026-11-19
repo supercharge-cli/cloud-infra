@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/arm-telegram-wake",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/billing-lifecycle",
+      "schedule": "30 6 * * *"
     }
   ]
 }

@@ -13,6 +13,7 @@ import {
   markOrderPaid,
   publicInstance,
   updateInstance,
+  type AgentRuntime,
   type Instance,
   type PendingOrder,
 } from "./store";
@@ -154,38 +155,13 @@ export async function fulfillPaidOrder(input: {
   // New instance creation shares the same account lock as the free endpoint.
   try {
   return await withWorkspaceCreation(order.userId, async (): Promise<FulfillResult> => {
-  const size = planById(order.planId);
-  const session = await createGatewaySession({
-    strategy: "sandbox_full",
-    runtime: order.runtime || "supercharge",
-    cpuCount: size.cpu,
-    memoryMB: size.memoryMb,
-  });
-  const paidUntil = addBillingPeriod();
-  const instance = await createInstanceRecord({
+  const instance = await provisionPaidWorkspace({
     userId: order.userId,
     name: order.instanceName,
-    sessionId: session.sessionId,
-    sandboxId: session.sandboxId,
     runtime: order.runtime || "supercharge",
-    plan: size.id,
+    planId: order.planId,
   });
-  await bootstrapAppInbox(
-    session.sessionId,
-    session.sandboxId,
-    instance.id,
-    order.runtime || "xibecode",
-  );
-  if (order.runtime === "supercharge") {
-    const restart = await restartDaemon(session.sessionId, session.sandboxId, "supercharge");
-    if (!restart.ok) throw new Error("New Supercharge sandbox daemon could not adopt its instance identity");
-  }
-  const { applySavedPollinationsToNewInstance } =
-    await import("@/lib/pollinations-account");
-  await applySavedPollinationsToNewInstance({
-    userId: order.userId,
-    instance,
-  }).catch(() => undefined);
+  const paidUntil = addBillingPeriod();
   const withBilling = await updateInstance(order.userId, instance.id, {
     paidUntil,
     billingStatus: "active",
@@ -245,4 +221,39 @@ async function claimOrderPaid(
   // Already paid or missing
   const existing = await findPendingOrderByRazorpayId(razorpayOrderId);
   return { claimed: false, order: existing };
+}
+
+/**
+ * Boot a paid workspace at the size that was bought. Caller holds the
+ * account's workspace-creation lock (withWorkspaceCreation).
+ */
+export async function provisionPaidWorkspace(input: {
+  userId: string;
+  name: string;
+  runtime: AgentRuntime;
+  planId?: string;
+}): Promise<Instance> {
+  const size = planById(input.planId);
+  const session = await createGatewaySession({
+    strategy: "sandbox_full",
+    runtime: input.runtime,
+    cpuCount: size.cpu,
+    memoryMB: size.memoryMb,
+  });
+  const instance = await createInstanceRecord({
+    userId: input.userId,
+    name: input.name,
+    sessionId: session.sessionId,
+    sandboxId: session.sandboxId,
+    runtime: input.runtime,
+    plan: size.id,
+  });
+  await bootstrapAppInbox(session.sessionId, session.sandboxId, instance.id, input.runtime);
+  if (input.runtime === "supercharge") {
+    const restart = await restartDaemon(session.sessionId, session.sandboxId, "supercharge");
+    if (!restart.ok) throw new Error("New Supercharge sandbox daemon could not adopt its instance identity");
+  }
+  const { applySavedPollinationsToNewInstance } = await import("@/lib/pollinations-account");
+  await applySavedPollinationsToNewInstance({ userId: input.userId, instance }).catch(() => undefined);
+  return instance;
 }
