@@ -159,6 +159,8 @@ export async function createGatewaySession(opts?: {
   sandboxId?: string;
   strategy?: "sandbox_full" | "host_only";
   runtime?: AgentRuntime;
+  cpuCount?: number;
+  memoryMB?: number;
 }): Promise<GatewaySession> {
   const res = await gwFetch("/sessions", {
     method: "POST",
@@ -167,6 +169,8 @@ export async function createGatewaySession(opts?: {
       sandboxId: opts?.sandboxId,
       strategy: opts?.strategy || "sandbox_full",
       runtime: opts?.runtime || "xibecode",
+      cpuCount: opts?.cpuCount,
+      memoryMB: opts?.memoryMB,
     }),
   });
   const text = await res.text();

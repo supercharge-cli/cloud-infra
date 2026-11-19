@@ -144,6 +144,8 @@ export function Dashboard({ email }: { email: string }) {
   const [creatingFree, setCreatingFree] = useState(false);
   const [name, setName] = useState("workspace");
   const [runtime, setRuntime] = useState<AgentRuntime>("supercharge");
+  const [plans, setPlans] = useState<Array<{ id: string; name: string; priceInr: number; priceUsd: number }>>([]);
+  const [planId, setPlanId] = useState("hosting-2c4g");
   const [chatMode, setChatMode] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [config, setConfig] = useState<ConfigView | null>(null);
@@ -227,6 +229,7 @@ export function Dashboard({ email }: { email: string }) {
     }
     setInstances(data.instances || []);
     if (data.plan) setPlan(data.plan);
+    if (Array.isArray(data.plans)) setPlans(data.plans);
     // Default 1 free if API omits freeQuota (old deploy) — never silently zero it.
     if (data.freeQuota && typeof data.freeQuota === "object") {
       const limit = Math.max(0, Math.floor(Number(data.freeQuota.limit)));
@@ -290,14 +293,11 @@ export function Dashboard({ email }: { email: string }) {
       .finally(() => setLoading(false));
   }, [refresh]);
 
-  const priceLabel =
-    currency === "USD"
-      ? plan.currencies?.USD.priceLabel || `$${plan.priceUsd}/mo`
-      : plan.currencies?.INR.priceLabel || `₹${plan.priceInr}/mo`;
-  const buttonLabel =
-    currency === "USD"
-      ? plan.currencies?.USD.buttonLabel || `Pay $${plan.priceUsd}`
-      : plan.currencies?.INR.buttonLabel || `Pay ₹${plan.priceInr}`;
+  const chosen = plans.find((item) => item.id === planId);
+  const chosenInr = chosen?.priceInr || plan.priceInr;
+  const chosenUsd = chosen?.priceUsd || plan.priceUsd;
+  const priceLabel = currency === "USD" ? `$${chosenUsd}/mo` : `₹${chosenInr}/mo`;
+  const buttonLabel = currency === "USD" ? `Pay $${chosenUsd}` : `Pay ₹${chosenInr}`;
 
   async function payWithRazorpay(opts: {
     purpose: "new_instance" | "renew";
@@ -317,6 +317,7 @@ export function Dashboard({ email }: { email: string }) {
         name: opts.name,
         instanceId: opts.instanceId,
         runtime: opts.runtime || runtime,
+        planId,
         currency,
       }),
     });
@@ -1159,7 +1160,7 @@ export function Dashboard({ email }: { email: string }) {
                     : "text-zinc-400 hover:text-white"
                 }`}
               >
-                ₹{plan.priceInr || "—"}
+                ₹{chosenInr || "—"}
               </button>
               <button
                 type="button"
@@ -1170,7 +1171,7 @@ export function Dashboard({ email }: { email: string }) {
                     : "text-zinc-400 hover:text-white"
                 }`}
               >
-                ${plan.priceUsd || "—"}
+                ${chosenUsd || "—"}
               </button>
             </div>
             <span className="rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-xs font-medium text-orange-300">
@@ -1180,41 +1181,22 @@ export function Dashboard({ email }: { email: string }) {
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500">
-              New instance agent image
-            </label>
-            <div className="flex rounded-lg border border-zinc-700 p-0.5">
-              <button
-                type="button"
-                aria-pressed={runtime === "xibecode"}
-                title="Existing Vectra XibeCode sandbox runtime"
-                onClick={() => setRuntime("xibecode")}
-                className={`rounded-md px-3 py-2 text-sm font-medium transition ${
-                  runtime === "xibecode"
-                    ? "bg-orange-600 text-white"
-                    : "text-zinc-400 hover:text-white"
-                }`}
-              >
-                XibeCode
-              </button>
-              <button
-                type="button"
-                aria-pressed={runtime === "supercharge"}
-                title="Supercharge-backed Vectra sandbox runtime"
-                onClick={() => setRuntime("supercharge")}
-                className={`rounded-md px-3 py-2 text-sm font-medium transition ${
-                  runtime === "supercharge"
-                    ? "bg-sky-600 text-white"
-                    : "text-zinc-400 hover:text-white"
-                }`}
-              >
-                Supercharge
-              </button>
+            <div className="mb-2 flex flex-wrap gap-1">
+              {(plans.length ? plans : [{ id: "hosting-2c4g", name: "2 vCPU · 4 GB", priceInr: chosenInr, priceUsd: chosenUsd }]).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setPlanId(item.id)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium ${
+                    planId === item.id ? "bg-orange-600 text-white" : "border border-zinc-700 text-zinc-400"
+                  }`}
+                >
+                  {item.name} · ₹{item.priceInr} / ${item.priceUsd}
+                </button>
+              ))}
             </div>
-            <p className="mt-1 max-w-xs text-[11px] text-zinc-500">
-              XibeCode keeps the existing image; Supercharge uses the separately
-              published Supercharge E2B template with the same Vectra browser,
-              chat, and workspace contract.
+            <p className="max-w-xs text-[11px] text-zinc-500">
+              USD is the rupee price at ₹95 per dollar, plus 8%. {plan.periodDays} days.
             </p>
           </div>
           <input
@@ -1223,7 +1205,7 @@ export function Dashboard({ email }: { email: string }) {
             placeholder="workspace name"
             className="min-w-[200px] flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-white"
           />
-          {freeQuota.available > 0 ? (
+          {freeQuota.available > 0 && planId === "hosting-2c4g" ? (
             <button
               type="button"
               disabled={creatingFree || creating || busy}
@@ -1300,12 +1282,6 @@ export function Dashboard({ email }: { email: string }) {
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-white">
                       {inst.name}
-                      <span className="ml-2 text-xs font-normal text-sky-300">
-                        ·{" "}
-                        {inst.runtime === "supercharge"
-                          ? "Supercharge"
-                          : "XibeCode"}
-                      </span>
                     </span>
                     <StatusPill status={displayStatus} />
                   </div>
@@ -1429,7 +1405,7 @@ export function Dashboard({ email }: { email: string }) {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <strong className="text-white">
-                      {cliUpdate.runtime === "supercharge" ? "Supercharge" : "XibeCode"} update available
+                      Supercharge update available
                     </strong>
                     <p className="mt-1 text-sky-100/90">
                       {cliUpdate.latest} available
@@ -1911,8 +1887,7 @@ export function Dashboard({ email }: { email: string }) {
                 <h3 className="font-semibold text-white">Command pane</h3>
                 <p className="mt-0.5 text-xs text-zinc-500">
                   Run shell commands in this sandbox (wakes if paused). Same as{" "}
-                  <code className="text-zinc-400">/cmd</code> in chat for
-                  XibeCode and Supercharge. Working directory defaults to{" "}
+                  <code className="text-zinc-400">/cmd</code> in chat. Working directory defaults to{" "}
                   <span className="font-mono text-zinc-400">
                     /home/user/workspace
                   </span>

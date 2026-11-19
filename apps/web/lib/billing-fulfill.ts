@@ -2,7 +2,7 @@
  * Shared fulfillment after a Razorpay payment is confirmed
  * (client checkout signature OR server webhook).
  */
-import { addBillingPeriod, getPlan, type Plan } from "./billing";
+import { addBillingPeriod, planById, type Plan } from "./billing";
 import { bootstrapAppInbox, createGatewaySession, restartDaemon } from "./gateway-client";
 import { getDb } from "./mongodb";
 import { withWorkspaceCreation, WorkspaceLimitError } from './workspace-limit';
@@ -67,7 +67,7 @@ export async function fulfillPaidOrder(input: {
           purpose: "new_instance",
           instance: publicInstance(existing),
           paidUntil: existing.paidUntil,
-          plan: getPlan(),
+          plan: planById(pending.planId),
         };
       }
     }
@@ -80,7 +80,7 @@ export async function fulfillPaidOrder(input: {
           purpose: "renew",
           instance: publicInstance(existing),
           paidUntil: existing.paidUntil,
-          plan: getPlan(),
+          plan: planById(pending.planId),
         };
       }
     }
@@ -99,7 +99,7 @@ export async function fulfillPaidOrder(input: {
         purpose: again.purpose,
         instance: existing ? publicInstance(existing) : null,
         paidUntil: existing?.paidUntil,
-        plan: getPlan(),
+        plan: planById(pending.planId),
       };
     }
     if (
@@ -117,7 +117,7 @@ export async function fulfillPaidOrder(input: {
         purpose: "renew",
         instance: existing ? publicInstance(existing) : null,
         paidUntil: existing?.paidUntil,
-        plan: getPlan(),
+        plan: planById(pending.planId),
       };
     }
   }
@@ -147,16 +147,19 @@ export async function fulfillPaidOrder(input: {
       purpose: "renew",
       instance: updated ? publicInstance(updated) : publicInstance(inst),
       paidUntil,
-      plan: getPlan(),
+      plan: planById(pending.planId),
     };
   }
 
   // New instance creation shares the same account lock as the free endpoint.
   try {
   return await withWorkspaceCreation(order.userId, async (): Promise<FulfillResult> => {
+  const size = planById(order.planId);
   const session = await createGatewaySession({
     strategy: "sandbox_full",
-    runtime: order.runtime || "xibecode",
+    runtime: order.runtime || "supercharge",
+    cpuCount: size.cpu,
+    memoryMB: size.memoryMb,
   });
   const paidUntil = addBillingPeriod();
   const instance = await createInstanceRecord({
@@ -164,7 +167,8 @@ export async function fulfillPaidOrder(input: {
     name: order.instanceName,
     sessionId: session.sessionId,
     sandboxId: session.sandboxId,
-    runtime: order.runtime || "xibecode",
+    runtime: order.runtime || "supercharge",
+    plan: size.id,
   });
   await bootstrapAppInbox(
     session.sessionId,
@@ -202,7 +206,7 @@ export async function fulfillPaidOrder(input: {
     purpose: "new_instance",
     instance: publicInstance(withBilling || instance),
     paidUntil,
-    plan: getPlan(),
+    plan: planById(pending.planId),
   };
   });
   } catch (error) {

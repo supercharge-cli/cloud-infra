@@ -21,7 +21,7 @@ import { BRAND } from '@/lib/brand';
 
 const perks = [
   { icon: Zap, text: `${BRAND.plan.label} sandboxes` },
-  { icon: Cloud, text: 'XibeCode agent preinstalled' },
+  { icon: Cloud, text: 'Supercharge agent preinstalled' },
   { icon: Shield, text: 'Telegram / Discord / Slack pairing' },
   { icon: Sparkles, text: 'Dashboard config in under a minute' },
 ];

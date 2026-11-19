@@ -97,7 +97,7 @@ export type Instance = {
   status: InstanceStatus;
   aiConfigured: boolean;
   telegramConfigured: boolean;
-  plan: "hosting-4c8g";
+  plan: string;
   config?: InstanceConfigMeta;
   /** Random secret in Telegram webhook URL — host fallback wake (legacy long-poll path). */
   wakeSecret?: string;
@@ -138,6 +138,7 @@ export type PendingOrder = {
   instanceId?: string;
   instanceName: string;
   runtime?: AgentRuntime;
+  planId?: string;
   razorpayOrderId: string;
   amountCents: number;
   currency: string;
@@ -673,6 +674,7 @@ export async function createInstanceRecord(input: {
   sessionId: string;
   sandboxId?: string;
   runtime?: AgentRuntime;
+  plan?: string;
   isFree?: boolean;
   paidUntil?: string;
   billingStatus?: Instance["billingStatus"];
@@ -696,7 +698,7 @@ export async function createInstanceRecord(input: {
     status: "running",
     aiConfigured: false,
     telegramConfigured: false,
-    plan: "hosting-4c8g",
+    plan: input.plan || "hosting-2c4g",
     config: {},
     wakeSecret: nanoid(24),
     ...(input.isFree

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireWorkspaceSlot, WorkspaceLimitError } from '@/lib/workspace-limit';
 import { nanoid } from "nanoid";
 import { getSessionUser } from "@/lib/auth";
-import { getPlan, normalizeCurrency, priceForCurrency } from "@/lib/billing";
+import { normalizeCurrency, planById, priceForCurrency } from "@/lib/billing";
 import { createRazorpayOrder, publicRazorpayKeyId } from "@/lib/razorpay";
 import { getInstance, savePendingOrder, type AgentRuntime } from "@/lib/store";
 
@@ -19,14 +19,16 @@ export async function POST(req: Request) {
       instanceId?: string;
       currency?: string;
       runtime?: AgentRuntime;
+      planId?: string;
     };
     const purpose = body.purpose === "renew" ? "renew" : "new_instance";
     if (purpose === 'new_instance') await requireWorkspaceSlot(user.id);
     const currency = normalizeCurrency(body.currency);
-    const price = priceForCurrency(currency);
-    const plan = getPlan();
+    let plan = planById(body.planId);
     const runtime: AgentRuntime =
-      body.runtime === "supercharge" ? "supercharge" : "xibecode";
+      purpose === "new_instance" || body.runtime === "supercharge"
+        ? "supercharge"
+        : "xibecode";
 
     let instanceName =
       String(body.name || "workspace")
@@ -50,7 +52,9 @@ export async function POST(req: Request) {
         );
       }
       instanceName = inst.name;
+      if (!body.planId) plan = planById(inst.plan);
     }
+    const price = priceForCurrency(currency, plan);
 
     const receipt = `vc_${purpose.slice(0, 4)}_${nanoid(8)}`;
     const order = await createRazorpayOrder({
@@ -79,6 +83,7 @@ export async function POST(req: Request) {
       instanceId,
       instanceName,
       runtime: purpose === "new_instance" ? runtime : undefined,
+      planId: plan.id,
       razorpayOrderId: order.id,
       amountCents: order.amount,
       currency: order.currency,

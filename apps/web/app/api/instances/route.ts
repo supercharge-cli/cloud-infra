@@ -6,6 +6,8 @@ import {
   freeInstanceLimit,
   getPlan,
   hasInstanceAccess,
+  listPlans,
+  planById,
   priceForCurrency,
 } from "@/lib/billing";
 import {
@@ -128,15 +130,25 @@ export async function GET() {
       available: freeAvailable,
     },
     plan: {
+      id: plan.id,
       priceInr: plan.priceInr,
       priceUsd: plan.priceUsd,
       periodDays: plan.periodDays,
       label: plan.label,
       currencies: {
-        INR: priceForCurrency("INR"),
-        USD: priceForCurrency("USD"),
+        INR: priceForCurrency("INR", plan),
+        USD: priceForCurrency("USD", plan),
       },
     },
+    plans: listPlans().map((item) => ({
+      id: item.id,
+      name: item.name,
+      cpu: item.cpu,
+      memoryMb: item.memoryMb,
+      priceInr: item.priceInr,
+      priceUsd: item.priceUsd,
+      label: item.label,
+    })),
   });
 }
 
@@ -174,23 +186,22 @@ export async function POST(req: Request) {
   }
 
   let name = "workspace";
-  let runtime: "xibecode" | "supercharge" = "xibecode";
+  const runtime = "supercharge" as const;
   try {
-    const body = (await req.json()) as {
-      name?: string;
-      runtime?: "xibecode" | "supercharge";
-    };
+    const body = (await req.json()) as { name?: string };
     if (body?.name) name = String(body.name).trim().slice(0, 64) || "workspace";
-    runtime = body?.runtime === "supercharge" ? "supercharge" : "xibecode";
   } catch {
     /* empty body ok */
   }
 
   try {
     return await withWorkspaceCreation(user.id, async () => {
+    const freePlan = planById("hosting-2c4g");
     const session = await createGatewaySession({
       strategy: "sandbox_full",
       runtime,
+      cpuCount: freePlan.cpu,
+      memoryMB: freePlan.memoryMb,
     });
 
     // Re-check after slow provision so two parallel requests don't both get free slots
@@ -220,6 +231,7 @@ export async function POST(req: Request) {
       sessionId: session.sessionId,
       sandboxId: session.sandboxId,
       runtime,
+      plan: freePlan.id,
       isFree: true,
     });
 

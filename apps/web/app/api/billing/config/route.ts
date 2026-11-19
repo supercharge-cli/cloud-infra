@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getPlan, priceForCurrency } from '@/lib/billing';
+import { getPlan, listPlans, priceForCurrency } from '@/lib/billing';
 import { publicRazorpayKeyId } from '@/lib/razorpay';
 
 /** Public pricing + whether checkout keys are configured. */
@@ -27,5 +27,15 @@ export async function GET() {
     keyId: keyId || null,
     webhookConfigured: Boolean(process.env.RAZORPAY_WEBHOOK_SECRET?.trim()),
     webhookPath: '/api/billing/webhook',
+    plans: listPlans().map((item) => ({
+      id: item.id,
+      name: item.name,
+      cpu: item.cpu,
+      memoryMb: item.memoryMb,
+      priceInr: item.priceInr,
+      priceUsd: item.priceUsd,
+      periodDays: item.periodDays,
+      label: item.label,
+    })),
   });
 }

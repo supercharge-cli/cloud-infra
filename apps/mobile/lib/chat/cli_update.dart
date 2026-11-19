@@ -18,7 +18,7 @@ class CliVersion {
   final String runtime;
 
   bool get isSupercharge => runtime == 'supercharge';
-  String get product => isSupercharge ? 'Supercharge' : 'XibeCode';
+  String get product => isSupercharge ? 'Supercharge' : 'Workspace';
 
   factory CliVersion.fromJson(Map<String, dynamic>? j, {String? runtime}) {
     if (j == null) {

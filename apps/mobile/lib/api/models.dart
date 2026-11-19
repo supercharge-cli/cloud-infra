@@ -5,7 +5,7 @@ enum AgentRuntime { xibecode, supercharge }
 extension AgentRuntimeApi on AgentRuntime {
   String get apiValue => name;
 
-  String get label => this == AgentRuntime.supercharge ? 'Supercharge' : 'XibeCode';
+  String get label => this == AgentRuntime.supercharge ? 'Supercharge' : 'Workspace';
 
   static AgentRuntime parse(Object? raw) =>
       '$raw'.toLowerCase() == 'supercharge' ? AgentRuntime.supercharge : AgentRuntime.xibecode;
@@ -14,12 +14,14 @@ extension AgentRuntimeApi on AgentRuntime {
 class CreateInstanceRequest {
   const CreateInstanceRequest({
     required this.name,
-    this.runtime = AgentRuntime.xibecode,
+    this.runtime = AgentRuntime.supercharge,
     this.paid = false,
+    this.planId = 'hosting-4c8g',
   });
   final String name;
   final AgentRuntime runtime;
   final bool paid;
+  final String planId;
 }
 
 class AuthUser {
@@ -307,11 +309,13 @@ class BillingArgs {
   const BillingArgs({
     this.instanceId,
     this.name,
-    this.runtime = AgentRuntime.xibecode,
+    this.runtime = AgentRuntime.supercharge,
+    this.planId = 'hosting-4c8g',
   });
   final String? instanceId;
   final String? name;
   final AgentRuntime runtime;
+  final String planId;
   bool get renew => instanceId != null && instanceId!.isNotEmpty;
 }
 

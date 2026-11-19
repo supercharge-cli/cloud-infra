@@ -107,7 +107,10 @@ class _InstancesScreenState extends State<InstancesScreen> {
     final request = await showDialog<CreateInstanceRequest>(
       context: context,
       builder: (ctx) =>
-          _CreateInstanceDialog(canCreateFree: quota.canCreateFree),
+          _CreateInstanceDialog(
+            canCreateFree: quota.canCreateFree,
+            plan: plan,
+          ),
     );
     if (request == null || request.name.isEmpty) return;
     final name = request.name;
@@ -117,7 +120,7 @@ class _InstancesScreenState extends State<InstancesScreen> {
       await _afterPush(
         context.push(
           '/billing',
-          extra: BillingArgs(name: name, runtime: runtime),
+          extra: BillingArgs(name: name, runtime: runtime, planId: request.planId),
         ),
       );
       return;
@@ -136,7 +139,7 @@ class _InstancesScreenState extends State<InstancesScreen> {
         await _afterPush(
           context.push(
             '/billing',
-            extra: BillingArgs(name: name, runtime: runtime),
+            extra: BillingArgs(name: name, runtime: runtime, planId: request.planId),
           ),
         );
       } else {
@@ -269,18 +272,10 @@ class _InstancesScreenState extends State<InstancesScreen> {
                                   i.runtime == AgentRuntime.supercharge &&
                                   cliById[i.id]?.updateAvailable == true,
                             );
-                            final xc = items.any(
-                              (i) =>
-                                  i.runtime != AgentRuntime.supercharge &&
-                                  cliById[i.id]?.updateAvailable == true,
-                            );
-                            if (sc && xc) {
-                              return 'A Supercharge or XibeCode CLI update is out. Open that workspace and tap Update.';
-                            }
                             if (sc) {
-                              return 'A new Supercharge CLI is out. Open a Supercharge workspace and tap Update — same as /update.';
+                              return 'A new Supercharge CLI is out. Open the workspace and tap Update — same as /update.';
                             }
-                            return 'A new XibeCode CLI is out. Open a XibeCode workspace and tap Update — same as /update.';
+                            return 'A CLI update is out. Open the workspace and tap Update.';
                           }(), style: const TextStyle(fontSize: 13, height: 1.35)),
                         ),
                       ],
@@ -768,17 +763,23 @@ class _InstancesScreenState extends State<InstancesScreen> {
 }
 
 class _CreateInstanceDialog extends StatefulWidget {
-  const _CreateInstanceDialog({required this.canCreateFree});
+  const _CreateInstanceDialog({required this.canCreateFree, this.plan});
   final bool canCreateFree;
+  final PlanInfo? plan;
 
   @override
   State<_CreateInstanceDialog> createState() => _CreateInstanceDialogState();
 }
 
 class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
+  static const _sizes = [
+    ('hosting-2c4g', '2 vCPU · 4 GB', '₹199', '\$2.26'),
+    ('hosting-4c8g', '4 vCPU · 8 GB', '₹399', '\$4.54'),
+    ('hosting-8c8g', '8 vCPU · 8 GB', '₹599', '\$6.81'),
+    ('hosting-16c16g', '16 vCPU · 16 GB', '₹1,199', '\$13.63'),
+  ];
   final _name = TextEditingController(text: 'workspace');
-  AgentRuntime _runtime = AgentRuntime.supercharge;
-
+  String _planId = 'hosting-2c4g';
   @override
   void dispose() {
     _name.dispose();
@@ -790,7 +791,12 @@ class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
     if (name.isEmpty) return;
     Navigator.pop(
       context,
-      CreateInstanceRequest(name: name, runtime: _runtime, paid: paid),
+      CreateInstanceRequest(
+        name: name,
+        runtime: AgentRuntime.supercharge,
+        paid: paid,
+        planId: _planId,
+      ),
     );
   }
 
@@ -802,37 +808,17 @@ class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Agent image',
-            style: TextStyle(
-              color: Vc.muted,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+          ..._sizes.map((size) => ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: Text(size.$2),
+            subtitle: Text('${size.$3} or ${size.$4} / 30 days'),
+            leading: Icon(
+              _planId == size.$1 ? Icons.radio_button_checked : Icons.radio_button_off,
+              color: Vc.greenSoft,
             ),
-          ),
-          const SizedBox(height: 8),
-          SegmentedButton<AgentRuntime>(
-            segments: const [
-              ButtonSegment(
-                value: AgentRuntime.xibecode,
-                label: Text('XibeCode'),
-              ),
-              ButtonSegment(
-                value: AgentRuntime.supercharge,
-                label: Text('Supercharge'),
-              ),
-            ],
-            selected: {_runtime},
-            onSelectionChanged: (value) {
-              if (value.isEmpty) return;
-              setState(() => _runtime = value.first);
-            },
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Supercharge uses the published Supercharge E2B template. XibeCode keeps the existing image.',
-            style: TextStyle(color: Vc.faint, fontSize: 11, height: 1.35),
-          ),
+            onTap: () => setState(() => _planId = size.$1),
+          )),
           const SizedBox(height: 14),
           TextField(
             controller: _name,
@@ -840,10 +826,10 @@ class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
           ),
           const SizedBox(height: 12),
           Text(
-            widget.canCreateFree
-                ? 'Free slot available.'
-                : 'Hosting requires an active plan. You can have one workspace with many agents.',
-            style: const TextStyle(color: Vc.muted, fontSize: 12),
+            widget.canCreateFree && _planId == 'hosting-2c4g'
+                ? 'The base size, 2 vCPU · 4 GB, is free for the first workspace. Other sizes are paid.'
+                : 'USD is the rupee price at ₹95 per dollar, plus 8%.',
+            style: const TextStyle(color: Vc.muted, fontSize: 12, height: 1.35),
           ),
         ],
       ),
@@ -852,17 +838,16 @@ class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        if (!widget.canCreateFree)
-          FilledButton(
-            onPressed: () => _submit(paid: true),
-            child: const Text('Pay & create'),
-          )
-        else ...[
+        if (widget.canCreateFree && _planId == 'hosting-2c4g')
           FilledButton(
             onPressed: () => _submit(paid: false),
             child: const Text('Create free'),
+          )
+        else
+          FilledButton(
+            onPressed: () => _submit(paid: true),
+            child: Text('Pay ${_sizes.firstWhere((s) => s.$1 == _planId).$3}'),
           ),
-        ],
       ],
     );
   }

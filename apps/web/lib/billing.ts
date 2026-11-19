@@ -31,46 +31,57 @@ function formatMoney(n: number): string {
   return (Math.round(n * 100) / 100).toFixed(2);
 }
 
-/**
- * Live plan from environment.
- *
- * | Env | Default | Notes |
- * | --- | --- | --- |
- * | `BILLING_PRICE_INR` | `399` | Rupees (major) |
- * | `BILLING_PRICE_USD` | `4.59` | Dollars (major) |
- * | `BILLING_PERIOD_DAYS` | `30` | Access length after pay |
- * | `BILLING_AMOUNT_PAISE` | `price×100` | Optional Razorpay override |
- * | `BILLING_AMOUNT_CENTS` | `price×100` | Optional Razorpay override |
- * | `BILLING_PLAN_ID` | `hosting-4c8g` | Plan id stored on orders |
- * | `BILLING_PLAN_NAME` | `Vectra Cloud instance` | Display name |
- */
-export function getPlan(): Plan {
-  const priceInr = envNumber('BILLING_PRICE_INR', 399);
-  const priceUsd = envNumber('BILLING_PRICE_USD', 4.59);
-  const periodDays = Math.max(1, Math.round(envNumber('BILLING_PERIOD_DAYS', 30)));
+/** ₹95 = $1, then USD is 8% above that conversion. */
+const INR_PER_USD = 95;
+const USD_OVER_INR = 1.08;
 
-  const amountPaise = process.env.BILLING_AMOUNT_PAISE?.trim()
-    ? Math.round(envNumber('BILLING_AMOUNT_PAISE', priceInr * 100))
-    : Math.round(priceInr * 100);
-  const amountCents = process.env.BILLING_AMOUNT_CENTS?.trim()
-    ? Math.round(envNumber('BILLING_AMOUNT_CENTS', priceUsd * 100))
-    : Math.round(priceUsd * 100);
+export function usdFromInr(priceInr: number): number {
+  return Math.round((priceInr / INR_PER_USD) * USD_OVER_INR * 100) / 100;
+}
 
-  const id = process.env.BILLING_PLAN_ID?.trim() || 'hosting-4c8g';
-  const name = process.env.BILLING_PLAN_NAME?.trim() || 'Vectra Cloud instance';
-  const inrLabel = formatMoney(priceInr);
-  const usdLabel = formatMoney(priceUsd);
+type Size = { id: string; cpu: number; memoryMb: number; priceInr: number; name: string };
 
+const SIZES: Size[] = [
+  { id: 'hosting-2c4g', cpu: 2, memoryMb: 4096, priceInr: 199, name: '2 vCPU · 4 GB' },
+  { id: 'hosting-4c8g', cpu: 4, memoryMb: 8192, priceInr: 399, name: '4 vCPU · 8 GB' },
+  { id: 'hosting-8c8g', cpu: 8, memoryMb: 8192, priceInr: 599, name: '8 vCPU · 8 GB' },
+  { id: 'hosting-16c16g', cpu: 16, memoryMb: 16384, priceInr: 1199, name: '16 vCPU · 16 GB' },
+];
+
+function toPlan(size: Size, periodDays: number): Plan & { cpu: number; memoryMb: number } {
+  const priceUsd = usdFromInr(size.priceInr);
   return {
-    id,
-    name,
-    priceInr,
-    amountPaise,
+    id: size.id,
+    name: size.name,
+    cpu: size.cpu,
+    memoryMb: size.memoryMb,
+    priceInr: size.priceInr,
+    amountPaise: Math.round(size.priceInr * 100),
     priceUsd,
-    amountCents,
+    amountCents: Math.round(priceUsd * 100),
     periodDays,
-    label: `4 vCPU · 8 GB · ₹${inrLabel} / $${usdLabel} mo`,
+    label: `${size.name} · ₹${formatMoney(size.priceInr)} / $${formatMoney(priceUsd)} mo`,
   };
+}
+
+export type HostingPlan = ReturnType<typeof toPlan>;
+
+function periodDays(): number {
+  return Math.max(1, Math.round(envNumber('BILLING_PERIOD_DAYS', 30)));
+}
+
+export function listPlans(): HostingPlan[] {
+  const days = periodDays();
+  return SIZES.map((size) => toPlan(size, days));
+}
+
+export function planById(id?: string | null): HostingPlan {
+  return listPlans().find((plan) => plan.id === id) || listPlans()[1];
+}
+
+/** Default sold size: 4 vCPU · 8 GB. USD is derived from INR. */
+export function getPlan(): Plan {
+  return planById('hosting-4c8g');
 }
 
 /** @deprecated Prefer getPlan() — alias for call sites that still import PLAN */
@@ -137,7 +148,7 @@ export function normalizeCurrency(raw?: string | null): BillingCurrency {
   return c === 'USD' ? 'USD' : 'INR';
 }
 
-export function priceForCurrency(currency: BillingCurrency): {
+export function priceForCurrency(currency: BillingCurrency, plan: Plan = getPlan()): {
   currency: BillingCurrency;
   /** Display amount in major units */
   display: number;
@@ -146,7 +157,6 @@ export function priceForCurrency(currency: BillingCurrency): {
   priceLabel: string;
   buttonLabel: string;
 } {
-  const plan = getPlan();
   if (currency === 'USD') {
     const usd = formatMoney(plan.priceUsd);
     return {

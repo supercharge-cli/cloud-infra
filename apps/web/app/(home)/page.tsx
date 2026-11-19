@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -18,8 +19,8 @@ import { SiteHeader } from '@/components/site-header';
 const features = [
   {
     icon: Cpu,
-    title: '4 vCPU · 8 GB sandboxes',
-    desc: 'Dedicated 4 vCPU / 8 GB machines with XibeCode preinstalled — ready for real coding agents, not toy containers.',
+    title: 'Four sandbox sizes',
+    desc: '2 vCPU / 4 GB through 16 vCPU / 16 GB. The first workspace is free and uses the base size.',
   },
   {
     icon: Bot,
@@ -43,12 +44,32 @@ const features = [
   },
   {
     icon: Terminal,
-    title: 'Built on XibeCode',
-    desc: 'Same open-source agent engine as the CLI — modes, tools, memory — hosted for you.',
+    title: 'Supercharge inside',
+    desc: 'The Supercharge agent — modes, tools, memory, and a shared group of bots — hosted for you.',
   },
 ];
 
 export default function HomePage() {
+  const [prices, setPrices] = useState<{ inr: string; usd: string; days: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/billing/config')
+      .then((res) => res.json())
+      .then((data) => {
+        const plan = data?.plan;
+        if (!plan || cancelled) return;
+        setPrices({
+          inr: plan.currencies?.INR?.priceLabel || `₹${plan.priceInr}/mo`,
+          usd: plan.currencies?.USD?.priceLabel || `$${plan.priceUsd}/mo`,
+          days: plan.periodDays || 30,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="min-h-screen overflow-hidden bg-black text-zinc-100">
       <SiteHeader />
@@ -91,9 +112,10 @@ export default function HomePage() {
           </div>
 
           <p className="mt-6 text-sm text-zinc-600">
-            Plan:{' '}
             <span className="text-zinc-400">
-              {BRAND.plan.label} · 1 free instance · pay for more
+              {BRAND.plan.label}
+              {prices ? ` · ${prices.inr} or ${prices.usd}` : ''} · 1 free workspace ·{' '}
+              {prices ? `${prices.days} days` : '30 days'} after payment
             </span>
           </p>
         </div>
@@ -124,6 +146,36 @@ export default function HomePage() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="border-t border-zinc-900 py-16">
+        <div className="mx-auto max-w-3xl px-4 text-center">
+          <h2 className="mb-3 text-3xl font-bold text-white">Pricing</h2>
+          <p className="mb-8 text-zinc-400">
+            One Supercharge workspace. Add as many agents as you want inside it.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              ['2 vCPU · 4 GB', '₹199', '$2.26'],
+              ['4 vCPU · 8 GB', '₹399', '$4.54'],
+              ['8 vCPU · 8 GB', '₹599', '$6.81'],
+              ['16 vCPU · 16 GB', '₹1,199', '$13.63'],
+            ].map(([name, inr, usd]) => (
+              <div key={name} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 text-left">
+                <p className="text-sm text-orange-400">{name}</p>
+                <p className="mt-2 text-2xl font-bold text-white">{inr}<span className="ml-2 text-lg text-zinc-400">{usd}</span></p>
+                <p className="mt-1 text-xs text-zinc-500">30 days · USD is ₹95 per dollar plus 8%</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-sm text-zinc-500">The first workspace on an account is free and uses the base size, 2 vCPU · 4 GB.</p>
+          <Link
+            href={BRAND.signup}
+            className="mt-6 inline-flex rounded-full bg-orange-600 px-6 py-3 font-semibold text-white hover:bg-orange-500"
+          >
+            Create a workspace
+          </Link>
         </div>
       </section>
 

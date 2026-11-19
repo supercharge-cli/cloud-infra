@@ -175,7 +175,7 @@ class VectraClient {
 
   Future<CloudInstance> createInstance(
     String name, {
-    AgentRuntime runtime = AgentRuntime.xibecode,
+    AgentRuntime runtime = AgentRuntime.supercharge,
   }) async {
     final data = await _json(
       'POST',
@@ -806,7 +806,8 @@ class VectraClient {
     String? name,
     String? instanceId,
     String currency = 'INR',
-    AgentRuntime runtime = AgentRuntime.xibecode,
+    AgentRuntime runtime = AgentRuntime.supercharge,
+    String planId = 'hosting-4c8g',
   }) => _json(
     'POST',
     '/api/billing/create-order',
@@ -816,6 +817,7 @@ class VectraClient {
       'instanceId': ?instanceId,
       'currency': currency,
       'runtime': runtime.apiValue,
+      'planId': planId,
     },
     timeout: _fast,
   );

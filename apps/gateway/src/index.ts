@@ -667,12 +667,25 @@ async function touchSession(session: SessionRecord): Promise<void> {
   }
 }
 
+const SANDBOX_SIZES = new Set(["2:4096", "4:8192", "8:8192", "16:16384"]);
+
+function sandboxSize(cpuCount?: number, memoryMB?: number): { cpuCount: number; memoryMB: number } | undefined {
+  if (!cpuCount && !memoryMB) return undefined;
+  const key = `${cpuCount}:${memoryMB}`;
+  if (!SANDBOX_SIZES.has(key)) {
+    throw new Error(`Unsupported sandbox size ${cpuCount} vCPU / ${memoryMB} MiB`);
+  }
+  return { cpuCount: cpuCount as number, memoryMB: memoryMB as number };
+}
+
 async function createSession(input: {
   sessionId?: string;
   cwd?: string;
   strategy?: string;
   workspaceRoot?: string;
   runtime?: AgentRuntime | string;
+  cpuCount?: number;
+  memoryMB?: number;
   /** Re-attach an existing E2B sandbox after gateway restart (hosting recovery). */
   sandboxId?: string;
 }): Promise<SessionRecord> {
@@ -719,10 +732,12 @@ async function createSession(input: {
     // Exact docs shape: https://e2b.dev/docs/sandbox/auto-resume
     //   lifecycle: { onTimeout: 'pause', autoResume: true }
     // Default onTimeout is 'kill' — without lifecycle, idle sandboxes die permanently.
+    const size = sandboxSize(input.cpuCount, input.memoryMB);
     sandbox = (await Sandbox.create({
       template: profile.template,
       timeoutMs: sandboxTimeoutMs,
       lifecycle: sandboxLifecycle,
+      ...(size ? { cpuCount: size.cpuCount, memoryMB: size.memoryMB } : {}),
     })) as unknown as SandboxLike;
     sandboxId = sandbox.sandboxId || randomUUID();
     try {
@@ -784,8 +799,9 @@ async function createSession(input: {
   if (runtime === "supercharge") {
     const info = await Sandbox.getInfo(sandboxId);
     await rememberRun(session, info, actualStartedAt ?? undefined);
-    if (info.cpuCount !== 16 || info.memoryMB !== 16384) {
-      console.warn(`[vectra-gateway] resource mismatch sandbox=${sandboxId}: ${info.cpuCount} vCPU / ${info.memoryMB} MiB (expected 16/16384)`);
+    const expected = sandboxSize(input.cpuCount, input.memoryMB);
+    if (expected && (info.cpuCount !== expected.cpuCount || info.memoryMB !== expected.memoryMB)) {
+      console.warn(`[vectra-gateway] resource mismatch sandbox=${sandboxId}: ${info.cpuCount} vCPU / ${info.memoryMB} MiB (expected ${expected.cpuCount}/${expected.memoryMB})`);
     }
   }
   sessions.set(sessionId, session);
@@ -1824,6 +1840,8 @@ const server = createServer(async (req, res) => {
         runtime?: AgentRuntime | string;
         workspaceRoot?: string;
         sandboxId?: string;
+        cpuCount?: number;
+        memoryMB?: number;
       }>(req);
       const session = await createSession(body);
       sendJson(res, 200, {

@@ -71,6 +71,7 @@ class _BillingScreenState extends State<BillingScreen> {
         name: args.name,
         currency: currency,
         runtime: args.runtime,
+        planId: args.planId,
       );
       final options = <String, dynamic>{
         'key': order['keyId'],
@@ -202,11 +203,7 @@ class _BillingScreenState extends State<BillingScreen> {
                       if (args.name != null) ...[
                         const SizedBox(height: 10),
                         Text(
-                          'Instance: ${args.name}',
-                          style: const TextStyle(color: Vc.muted),
-                        ),
-                        Text(
-                          'Runtime: ${args.runtime.label}',
+                          'Workspace: ${args.name}',
                           style: const TextStyle(color: Vc.muted),
                         ),
                       ],
@@ -216,7 +213,7 @@ class _BillingScreenState extends State<BillingScreen> {
                         child: SizedBox(
                           width: double.infinity,
                           child: Text(
-                            plan.inrButton,
+                            'Pay ${plan.inrLabel}',
                             textAlign: TextAlign.center,
                           ),
                         ),
@@ -227,7 +224,7 @@ class _BillingScreenState extends State<BillingScreen> {
                         child: SizedBox(
                           width: double.infinity,
                           child: Text(
-                            plan.usdButton,
+                            'Pay ${plan.usdLabel}',
                             textAlign: TextAlign.center,
                           ),
                         ),

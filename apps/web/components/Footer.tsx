@@ -96,8 +96,7 @@ export function Footer() {
         </div>
         <div className="border-t border-zinc-800 pt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-zinc-500">
-            © {new Date().getFullYear()} {BRAND.name}. All rights reserved. Not affiliated with
-            the public XibeCode CLI docs site.
+            © {new Date().getFullYear()} {BRAND.name}. All rights reserved.
           </p>
           <p className="text-xs text-zinc-600">
             <Link href="/terms" className="hover:text-zinc-400">

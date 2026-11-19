@@ -357,7 +357,7 @@ class TaskNotifications {
         android: AndroidNotificationDetails(
           cliUpdateChannel,
           'CLI updates',
-          channelDescription: 'When a new XibeCode CLI is published',
+          channelDescription: 'When a new Supercharge CLI is published',
           importance: Importance.defaultImportance,
           priority: Priority.defaultPriority,
           icon: '@drawable/ic_stat_vectra',
