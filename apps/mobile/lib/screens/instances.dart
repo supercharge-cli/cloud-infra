@@ -774,10 +774,10 @@ class _CreateInstanceDialog extends StatefulWidget {
 
 class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
   static const _sizes = [
-    ('hosting-2c4g', '2 vCPU · 4 GB', '₹199', '\$2.26'),
-    ('hosting-4c8g', '4 vCPU · 8 GB', '₹399', '\$4.54'),
-    ('hosting-8c8g', '8 vCPU · 8 GB', '₹599', '\$6.81'),
-    ('hosting-16c16g', '16 vCPU · 16 GB', '₹1,199', '\$13.63'),
+    ('hosting-2c4g', '2 vCPU · 4 GB', '₹199', '\$2.29'),
+    ('hosting-4c8g', '4 vCPU · 8 GB', '₹399', '\$4.59'),
+    ('hosting-8c8g', '8 vCPU · 8 GB', '₹599', '\$6.79'),
+    ('hosting-16c16g', '16 vCPU · 16 GB', '₹1,199', '\$13.49'),
   ];
   final _name = TextEditingController(text: 'workspace');
   String _planId = 'hosting-2c4g';
@@ -829,7 +829,7 @@ class _CreateInstanceDialogState extends State<_CreateInstanceDialog> {
           Text(
             widget.canCreateFree && _planId == 'hosting-2c4g'
                 ? 'The base size, 2 vCPU · 4 GB, is free for the first workspace. Other sizes are paid.'
-                : 'USD is the rupee price at ₹95 per dollar, plus 8%.',
+                : 'Billed monthly in INR or USD.',
             style: const TextStyle(color: Vc.muted, fontSize: 12, height: 1.35),
           ),
         ],

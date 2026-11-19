@@ -1230,7 +1230,7 @@ export function Dashboard({ email }: { email: string }) {
               ))}
             </div>
             <p className="max-w-xs text-[11px] text-zinc-500">
-              USD is the rupee price at ₹95 per dollar, plus 8%. {plan.periodDays} days.
+              Billed monthly in INR or USD. {plan.periodDays} days.
             </p>
           </div>
           <input

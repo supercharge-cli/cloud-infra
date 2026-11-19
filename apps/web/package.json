@@ -13,7 +13,7 @@
     "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",
     "postinstall": "fumadocs-mdx",
     "lint": "eslint",
-    "test:billing": "node --test lib/subscription-core.test.ts lib/subscription-service.test.ts lib/razorpay-signature.test.ts"
+    "test:billing": "node --test lib/billing.test.ts lib/subscription-core.test.ts lib/subscription-service.test.ts lib/razorpay-signature.test.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.1.5",

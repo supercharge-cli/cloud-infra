@@ -32,19 +32,16 @@ const mode = keyId.startsWith('rzp_live_') ? 'LIVE' : 'TEST';
 
 // ── sizes from lib/billing.ts ───────────────────────────────────────────
 const billingSrc = readFileSync(new URL('../lib/billing.ts', import.meta.url), 'utf8');
-const sizes = [...billingSrc.matchAll(/\{\s*id:\s*'(hosting-[a-z0-9]+)',\s*cpu:\s*(\d+),\s*memoryMb:\s*(\d+),\s*priceInr:\s*([\d.]+),\s*name:\s*'([^']+)'\s*\}/g)]
-  .map((m) => ({ id: m[1], cpu: Number(m[2]), memoryMb: Number(m[3]), priceInr: Number(m[4]), name: m[5] }));
+const sizes = [...billingSrc.matchAll(/\{\s*id:\s*'(hosting-[a-z0-9]+)',\s*cpu:\s*(\d+),\s*memoryMb:\s*(\d+),\s*priceInr:\s*([\d.]+),\s*priceUsd:\s*([\d.]+),\s*name:\s*'([^']+)'\s*\}/g)]
+  .map((m) => ({ id: m[1], cpu: Number(m[2]), memoryMb: Number(m[3]), priceInr: Number(m[4]), priceUsd: Number(m[5]), name: m[6] }));
 if (!sizes.length) {
   console.error('Could not read sandbox sizes from lib/billing.ts');
   process.exit(1);
 }
-const inrPerUsd = Number(billingSrc.match(/const INR_PER_USD = ([\d.]+)/)?.[1] || 95);
-const usdOverInr = Number(billingSrc.match(/const USD_OVER_INR = ([\d.]+)/)?.[1] || 1.08);
-const usdFromInr = (inr) => Math.round((inr / inrPerUsd) * usdOverInr * 100) / 100;
 
 const sizeKey = (id) => id.replace(/^hosting-/, '').replace(/[^a-z0-9]/gi, '_').toUpperCase();
 const envKey = (id) => `RAZORPAY_PLAN_ID_${sizeKey(id)}${currency === 'USD' ? '_USD' : ''}`;
-const amountFor = (size) => Math.round((currency === 'USD' ? usdFromInr(size.priceInr) : size.priceInr) * 100);
+const amountFor = (size) => Math.round((currency === 'USD' ? size.priceUsd : size.priceInr) * 100);
 
 // ── Razorpay API ────────────────────────────────────────────────────────
 const auth = `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString('base64')}`;

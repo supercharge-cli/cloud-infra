@@ -38,25 +38,17 @@ function formatMoney(n: number): string {
   return (Math.round(n * 100) / 100).toFixed(2);
 }
 
-/** ₹95 = $1, then USD is 8% above that conversion. */
-const INR_PER_USD = 95;
-const USD_OVER_INR = 1.08;
-
-export function usdFromInr(priceInr: number): number {
-  return Math.round((priceInr / INR_PER_USD) * USD_OVER_INR * 100) / 100;
-}
-
-type Size = { id: string; cpu: number; memoryMb: number; priceInr: number; name: string };
+type Size = { id: string; cpu: number; memoryMb: number; priceInr: number; priceUsd: number; name: string };
 
 const SIZES: Size[] = [
-  { id: 'hosting-2c4g', cpu: 2, memoryMb: 4096, priceInr: 199, name: '2 vCPU · 4 GB' },
-  { id: 'hosting-4c8g', cpu: 4, memoryMb: 8192, priceInr: 399, name: '4 vCPU · 8 GB' },
-  { id: 'hosting-8c8g', cpu: 8, memoryMb: 8192, priceInr: 599, name: '8 vCPU · 8 GB' },
-  { id: 'hosting-16c16g', cpu: 16, memoryMb: 16384, priceInr: 1199, name: '16 vCPU · 16 GB' },
+  { id: 'hosting-2c4g', cpu: 2, memoryMb: 4096, priceInr: 199, priceUsd: 2.29, name: '2 vCPU · 4 GB' },
+  { id: 'hosting-4c8g', cpu: 4, memoryMb: 8192, priceInr: 399, priceUsd: 4.59, name: '4 vCPU · 8 GB' },
+  { id: 'hosting-8c8g', cpu: 8, memoryMb: 8192, priceInr: 599, priceUsd: 6.79, name: '8 vCPU · 8 GB' },
+  { id: 'hosting-16c16g', cpu: 16, memoryMb: 16384, priceInr: 1199, priceUsd: 13.49, name: '16 vCPU · 16 GB' },
 ];
 
 function toPlan(size: Size, periodDays: number): Plan & { cpu: number; memoryMb: number } {
-  const priceUsd = usdFromInr(size.priceInr);
+  const priceUsd = size.priceUsd;
   return {
     id: size.id,
     name: size.name,
@@ -86,7 +78,7 @@ export function planById(id?: string | null): HostingPlan {
   return listPlans().find((plan) => plan.id === id) || listPlans()[1];
 }
 
-/** Default sold size: 4 vCPU · 8 GB. USD is derived from INR. */
+/** Default sold size: 4 vCPU · 8 GB. */
 export function getPlan(): Plan {
   return planById('hosting-4c8g');
 }

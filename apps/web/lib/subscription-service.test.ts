@@ -10,9 +10,9 @@ const NOW = new Date('2026-11-19T10:00:00.000Z');
 const DAY = 86_400_000;
 const sec = (days: number) => Math.floor((NOW.getTime() + days * DAY) / 1000);
 const SIZES = [
-  { id: 'hosting-2c4g', name: '2c4g', priceInr: 199, priceUsd: 2.26 },
-  { id: 'hosting-4c8g', name: '4c8g', priceInr: 399, priceUsd: 4.54 },
-  { id: 'hosting-8c8g', name: '8c8g', priceInr: 599, priceUsd: 6.81 },
+  { id: 'hosting-2c4g', name: '2c4g', priceInr: 199, priceUsd: 2.29 },
+  { id: 'hosting-4c8g', name: '4c8g', priceInr: 399, priceUsd: 4.59 },
+  { id: 'hosting-8c8g', name: '8c8g', priceInr: 599, priceUsd: 6.79 },
 ];
 const PLAN_IDS: Record<string, string> = { 'hosting-2c4g': 'plan_2', 'hosting-4c8g': 'plan_4', 'hosting-8c8g': 'plan_8' };
 

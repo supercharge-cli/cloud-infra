@@ -157,15 +157,15 @@ export default function HomePage() {
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             {[
-              ['2 vCPU · 4 GB', '₹199', '$2.26'],
-              ['4 vCPU · 8 GB', '₹399', '$4.54'],
-              ['8 vCPU · 8 GB', '₹599', '$6.81'],
-              ['16 vCPU · 16 GB', '₹1,199', '$13.63'],
+              ['2 vCPU · 4 GB', '₹199', '$2.29'],
+              ['4 vCPU · 8 GB', '₹399', '$4.59'],
+              ['8 vCPU · 8 GB', '₹599', '$6.79'],
+              ['16 vCPU · 16 GB', '₹1,199', '$13.49'],
             ].map(([name, inr, usd]) => (
               <div key={name} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 text-left">
                 <p className="text-sm text-orange-400">{name}</p>
                 <p className="mt-2 text-2xl font-bold text-white">{inr}<span className="ml-2 text-lg text-zinc-400">{usd}</span></p>
-                <p className="mt-1 text-xs text-zinc-500">30 days · USD is ₹95 per dollar plus 8%</p>
+                <p className="mt-1 text-xs text-zinc-500">Billed monthly</p>
               </div>
             ))}
           </div>
