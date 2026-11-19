@@ -1,20 +1,24 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { LegalPage, LegalSection } from '@/components/legal-page';
+import { GrievanceSection, LegalPage, LegalSection, LegalValue } from '@/components/legal-page';
+import { LEGAL } from '@/lib/legal';
+import { subscriptionBillingConfig } from '@/lib/billing';
 import { BRAND } from '@/lib/brand';
 
 export const metadata: Metadata = {
-  title: 'Terms of Service',
-  description: `Terms of Service for ${BRAND.name} managed AI coding sandboxes.`,
+  title: 'Terms & Conditions',
+  description: `Terms & Conditions for ${BRAND.name} managed AI coding sandboxes.`,
 };
 
-const UPDATED = 'July 20, 2026';
+const UPDATED = 'November 19, 2026';
 
 export default function TermsPage() {
+  const { graceDays, retentionDays } = subscriptionBillingConfig();
   return (
-    <LegalPage title="Terms of Service" updated={UPDATED}>
+    <LegalPage title="Terms & Conditions" updated={UPDATED}>
       <p>
-        These Terms of Service (“Terms”) govern your access to and use of {BRAND.name} (the
+        These Terms &amp; Conditions (“Terms”) are an agreement between you and{' '}
+        <LegalValue value={LEGAL.entityName} /> (“we”, “us”). They govern your access to and use of {BRAND.name} (the
         “Service”), including our website, dashboard, APIs, documentation, and managed cloud
         sandboxes. By creating an account, accessing the Service, or completing a payment, you
         agree to these Terms.
@@ -25,8 +29,8 @@ export default function TermsPage() {
 
       <LegalSection title="1. Who we are">
         <p>
-          {BRAND.name} provides managed AI coding infrastructure: cloud sandboxes (typically 4
-          vCPU / 8 GB class machines) with agent software preinstalled, configuration tooling,
+          {BRAND.name} provides managed AI agent infrastructure: cloud sandboxes in several sizes
+          (from 2 vCPU / 4 GB) with agent software preinstalled, configuration tooling,
           optional Telegram pairing, and billing via our payment processor. Contact:{' '}
           <a href="mailto:hello@vectra.cloud" className="text-orange-400 hover:underline">
             hello@vectra.cloud
@@ -82,29 +86,65 @@ export default function TermsPage() {
         </ul>
       </LegalSection>
 
-      <LegalSection title="4. Billing and payments">
-        <p>
-          Paid plans are charged per instance for a defined access period (for example 30 days)
-          after successful payment through our payment partner (Razorpay). Prices, currencies
-          (INR/USD), and period length are shown at checkout and may be updated from time to time.
-        </p>
+      <LegalSection title="4. Plans, autopay and cancellation">
         <ul className="list-disc space-y-2 pl-5">
-          <li>Sandboxes are not provisioned (or renewed) until payment succeeds.</li>
           <li>
-            Multiple instances require separate payments unless we expressly offer otherwise.
+            Each account gets one free base workspace. Paid sandboxes are monthly subscriptions
+            for the size you choose, billed in advance through our payment partner, Razorpay.
+            Prices and currency are shown before you pay and include or state applicable taxes.
           </li>
           <li>
-            Taxes, FX conversion, and bank fees may apply and are your responsibility where
-            applicable.
+            <strong className="text-zinc-200">Subscriptions renew automatically</strong> each month
+            using the card, UPI Autopay or e-mandate you approved, until you cancel. By subscribing
+            you authorise these recurring charges. Recurring payments follow RBI rules, so your
+            bank or UPI app may ask you to approve the mandate or notify you before charges.
           </li>
           <li>
-            All sales are subject to our{' '}
+            You can cancel anytime from the dashboard billing card. You keep access until the end
+            of the paid period and are not charged again.
+          </li>
+          <li>
+            Size changes: upgrades apply now, downgrades at the next renewal. UPI Autopay and
+            e-mandate subscriptions cannot be changed; cancel and subscribe again.
+          </li>
+          <li>
+            If a renewal fails, access continues for a {graceDays}-day grace period while payment is
+            retried. After that, or when a cancelled subscription reaches its end, the sandbox is
+            paused. A paused workspace is kept for {retentionDays} days and may then be deleted.
+            An upgraded free workspace returns to the free base instead of being paused.
+          </li>
+          <li>
+            Paid periods bought as one-off payments before autopay keep their end date and do not
+            renew unless you subscribe.
+          </li>
+          <li>
+            Charges are not refunded, except as described in our{' '}
             <Link href="/refund" className="text-orange-400 hover:underline">
-              Refund Policy
+              Refund &amp; Cancellation Policy
             </Link>{' '}
-            (strict no-refund / limited exception rules).
+            (including reversal of duplicate or erroneous charges and your statutory rights).
           </li>
         </ul>
+      </LegalSection>
+
+      <LegalSection title="4A. Your own AI provider keys">
+        <p>
+          The Service runs agents with AI model access that you supply (“bring your own key”),
+          such as an API key for OpenAI, Anthropic, OpenRouter, Google, xAI, Pollinations or
+          another provider. You are responsible for:
+        </p>
+        <ul className="list-disc space-y-2 pl-5">
+          <li>having the right to use each key and complying with that provider’s terms;</li>
+          <li>
+            all usage and charges billed by your AI provider, including usage caused by agents,
+            routines or automations you set up. Our subscription price covers the sandbox only;
+          </li>
+          <li>keeping keys secret and revoking any key you think was exposed.</li>
+        </ul>
+        <p>
+          We keep keys on our servers and in your sandbox and use them only to run your agents.
+          We are not liable for provider outages, model output, rate limits or provider charges.
+        </p>
       </LegalSection>
 
       <LegalSection title="5. Acceptable use">
@@ -136,7 +176,7 @@ export default function TermsPage() {
         </ul>
         <p>
           We may investigate and take technical or legal action for violations, including
-          suspension without refund where allowed by our Refund Policy.
+          suspension without refund where allowed by our Refund &amp; Cancellation Policy.
         </p>
       </LegalSection>
 
@@ -217,24 +257,18 @@ export default function TermsPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="14. Contact">
-        <p>
-          Legal and support: {' '}
-          <a href="mailto:hello@vectra.cloud" className="text-orange-400 hover:underline">
-            hello@vectra.cloud
-          </a>
-        </p>
-        <p className="text-sm text-zinc-500">
-          Related:{' '}
-          <Link href="/privacy" className="text-orange-400 hover:underline">
-            Privacy Policy
-          </Link>
-          {' · '}
-          <Link href="/refund" className="text-orange-400 hover:underline">
-            Refund Policy
-          </Link>
-        </p>
-      </LegalSection>
+      <GrievanceSection number={14} />
+
+      <p className="text-sm text-zinc-500">
+        Related:{' '}
+        <Link href="/privacy" className="text-orange-400 hover:underline">
+          Privacy Policy
+        </Link>
+        {' · '}
+        <Link href="/refund" className="text-orange-400 hover:underline">
+          Refund &amp; Cancellation Policy
+        </Link>
+      </p>
     </LegalPage>
   );
 }

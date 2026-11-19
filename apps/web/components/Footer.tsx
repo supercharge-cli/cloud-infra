@@ -70,7 +70,7 @@ export function Footer() {
             <ul className="space-y-2 text-sm">
               <li>
                 <Link href="/terms" className="text-zinc-400 hover:text-orange-400">
-                  Terms of Service
+                  Terms &amp; Conditions
                 </Link>
               </li>
               <li>
@@ -80,7 +80,7 @@ export function Footer() {
               </li>
               <li>
                 <Link href="/refund" className="text-zinc-400 hover:text-orange-400">
-                  Refund Policy
+                  Refund &amp; Cancellation
                 </Link>
               </li>
               <li>

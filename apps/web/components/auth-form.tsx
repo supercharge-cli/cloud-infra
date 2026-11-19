@@ -336,7 +336,7 @@ export function AuthForm({
               <p className="mt-4 text-center text-[11px] leading-relaxed text-zinc-600">
                 By creating an account you agree to our{' '}
                 <Link href={BRAND.terms} className="text-zinc-400 underline-offset-2 hover:underline">
-                  Terms
+                  Terms &amp; Conditions
                 </Link>
                 ,{' '}
                 <Link
@@ -350,9 +350,10 @@ export function AuthForm({
                   href={BRAND.refund}
                   className="text-zinc-400 underline-offset-2 hover:underline"
                 >
-                  Refund Policy
-                </Link>{' '}
-                (sales are final). Use {BRAND.name} only for authorized access.
+                  Refund &amp; Cancellation Policy
+                </Link>
+                . Paid plans renew monthly until you cancel; charges are not refunded. Use{' '}
+                {BRAND.name} only for authorized access.
               </p>
             ) : null}
           </div>

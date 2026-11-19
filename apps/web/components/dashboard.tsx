@@ -1258,7 +1258,7 @@ export function Dashboard({ email }: { email: string }) {
             {creating ? "Opening checkout…" : createLabel}
           </button>
         </div>
-        {chosenAutopay ? <div className="mt-3 max-w-2xl"><AutopayNote /></div> : null}
+        <div className="mt-3 max-w-2xl"><AutopayNote oneOff={!chosenAutopay} /></div>
         <p className="mt-2 text-xs text-zinc-500">
           {freeQuota.limit > 0 ? (
             <>

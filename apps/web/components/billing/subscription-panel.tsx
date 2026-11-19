@@ -133,14 +133,21 @@ export async function startAutopayCheckout(opts: {
   });
 }
 
-export function AutopayNote() {
+export function AutopayNote({ oneOff = false }: { oneOff?: boolean }) {
   return (
     <p className="text-[11px] leading-relaxed text-zinc-500">
-      Autopay renews every month until you cancel. In India it needs a card that supports recurring
-      payments, or UPI Autopay / e-mandate, which you approve once in your bank or UPI app. UPI and
-      e-mandate subscriptions cannot change size; cancel and subscribe to the new size instead.
-      Charges are not refunded; cancelling stops future charges and keeps access until the paid
-      period ends. See the{" "}
+      {oneOff ? (
+        <>One-off payment for one period; it does not renew. Payments are not refunded. </>
+      ) : (
+        <>
+          Autopay renews every month until you cancel. In India it needs a card that supports
+          recurring payments, or UPI Autopay / e-mandate, which you approve once in your bank or UPI
+          app. UPI and e-mandate subscriptions cannot change size; cancel and subscribe to the new
+          size instead. Charges are not refunded; cancelling stops future charges and keeps access
+          until the paid period ends.{" "}
+        </>
+      )}
+      See the{" "}
       <Link href="/refund" className="text-orange-400 hover:underline">
         refund &amp; cancellation policy
       </Link>

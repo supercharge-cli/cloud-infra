@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { LegalPage, LegalSection } from '@/components/legal-page';
+import { GrievanceSection, LegalPage, LegalSection, LegalValue } from '@/components/legal-page';
+import { LEGAL } from '@/lib/legal';
+import { subscriptionBillingConfig } from '@/lib/billing';
 import { BRAND } from '@/lib/brand';
 
 export const metadata: Metadata = {
@@ -8,24 +10,27 @@ export const metadata: Metadata = {
   description: `How ${BRAND.name} collects, uses, and protects personal data.`,
 };
 
-const UPDATED = 'July 20, 2026';
+const UPDATED = 'November 19, 2026';
 
 export default function PrivacyPage() {
+  const { graceDays, retentionDays } = subscriptionBillingConfig();
   return (
     <LegalPage title="Privacy Policy" updated={UPDATED}>
       <p>
-        This Privacy Policy explains how {BRAND.name} (“we”, “us”) collects, uses, stores, and
+        This Privacy Policy explains how <LegalValue value={LEGAL.entityName} />, which operates{' '}
+        {BRAND.name} (“we”, “us”), collects, uses, stores, and
         shares information when you use our website, dashboard, APIs, and managed AI coding
         sandboxes (the “Service”). By using the Service, you acknowledge this policy.
       </p>
 
       <LegalSection title="1. Data controller / contact">
         <p>
-          For privacy requests, email{' '}
+          The data fiduciary / controller is <LegalValue value={LEGAL.entityName} />,{' '}
+          <LegalValue value={LEGAL.registeredAddress} />. For privacy requests, email{' '}
           <a href="mailto:hello@vectra.cloud" className="text-orange-400 hover:underline">
             hello@vectra.cloud
-          </a>
-          . We aim to respond within a reasonable time.
+          </a>{' '}
+          or the grievance officer in section 13.
         </p>
       </LegalSection>
 
@@ -39,12 +44,13 @@ export default function PrivacyPage() {
         <p className="font-medium text-zinc-200">Billing</p>
         <ul className="list-disc space-y-2 pl-5">
           <li>
-            Payment status, plan/instance ids, paid-until dates, order references, currency, and
-            amounts associated with your account.
+            Subscription and payment status, sandbox size, paid-until and next-charge dates,
+            Razorpay subscription, invoice, order and payment ids, currency, and amounts.
           </li>
           <li>
-            Card and bank details are processed by Razorpay (or our payment partner). We do not
-            store full card numbers on our servers.
+            Card, UPI and bank mandate details are collected and processed by Razorpay, our
+            payment partner. We do not receive or store full card numbers, UPI PINs or bank
+            credentials.
           </li>
         </ul>
         <p className="font-medium text-zinc-200">Service configuration</p>
@@ -54,8 +60,10 @@ export default function PrivacyPage() {
             configuration as you provide it).
           </li>
           <li>
-            Secrets you supply (for example LLM API keys, bot tokens) so we can write them into
-            your sandbox and run setup. Treat these as sensitive; only paste keys you control.
+            Secrets you supply (for example your own AI provider API keys and bot tokens) so we
+            can write them into your sandbox and run your agents. Requests your agents send with
+            your key go to that AI provider, which processes them and bills you under its own
+            terms and privacy policy. Only paste keys you control.
           </li>
         </ul>
         <p className="font-medium text-zinc-200">Technical and usage</p>
@@ -132,7 +140,15 @@ export default function PrivacyPage() {
       <LegalSection title="7. Retention">
         <ul className="list-disc space-y-2 pl-5">
           <li>Account data: while your account is active and for a reasonable period after closure for legal, billing, and security needs.</li>
-          <li>Payment records: as required by tax and financial regulations.</li>
+          <li>
+            Paid sandboxes: kept while your subscription is paid. If a renewal fails, the sandbox
+            keeps running for a {graceDays}-day grace period. After that, or once a cancelled
+            subscription reaches the end of its paid period, the sandbox is paused and its files,
+            settings and agent memory are kept for {retentionDays} days. After that the workspace is
+            marked for deletion and may be permanently deleted. Paying again before deletion
+            restores it.
+          </li>
+          <li>Payment and invoice records: as long as tax and financial regulations require (in India, generally at least 8 years).</li>
           <li>Logs: typically short operational windows unless needed for security investigations.</li>
           <li>Destroyed sandboxes: content is deleted according to provider lifecycle; backups may lag for a short period.</li>
         </ul>
@@ -148,9 +164,11 @@ export default function PrivacyPage() {
 
       <LegalSection title="9. Cookies and similar tech">
         <p>
-          We use essential cookies / local storage for authentication and session management.
-          We do not use advertising trackers as a core part of the product. Browser settings can
-          block cookies; some features may stop working if sessions cannot be stored.
+          We use a strictly necessary session cookie to keep you signed in, and browser local
+          storage for preferences such as currency and cached chat state. When you pay, Razorpay
+          Checkout loads from Razorpay and may set its own cookies for fraud prevention and
+          payment processing under Razorpay’s privacy policy. We do not use advertising or
+          cross-site tracking cookies. Blocking cookies stops sign-in from working.
         </p>
       </LegalSection>
 
@@ -181,17 +199,18 @@ export default function PrivacyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="13. Related policies">
-        <p className="text-sm text-zinc-500">
-          <Link href="/terms" className="text-orange-400 hover:underline">
-            Terms of Service
-          </Link>
-          {' · '}
-          <Link href="/refund" className="text-orange-400 hover:underline">
-            Refund Policy
-          </Link>
-        </p>
-      </LegalSection>
+      <GrievanceSection number={13} />
+
+      <p className="text-sm text-zinc-500">
+        Related:{' '}
+        <Link href="/terms" className="text-orange-400 hover:underline">
+          Terms &amp; Conditions
+        </Link>
+        {' · '}
+        <Link href="/refund" className="text-orange-400 hover:underline">
+          Refund &amp; Cancellation Policy
+        </Link>
+      </p>
     </LegalPage>
   );
 }
