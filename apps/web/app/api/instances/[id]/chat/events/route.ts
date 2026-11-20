@@ -1,9 +1,10 @@
 import { proxyInbox, requireChatInstance } from '@/lib/app-chat';
 import { inboxEventStream } from '@/lib/inbox-event-stream';
 import { activeBotChat, prepareBotRequest } from '@/lib/bot-routing';
+import { gatewaySessionFetch, getGatewayUrl } from '@/lib/gateway-client';
 
-export const maxDuration = 55;
-const streamBudgetMs = 40_000;
+export const maxDuration = 300;
+const streamBudgetMs = 270_000;
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -28,6 +29,29 @@ export async function GET(req: Request, ctx: Ctx) {
   const q = new URLSearchParams({ chatId: chatId || 'owner' });
   if (botId) q.set('botId', botId);
   if (since) q.set('since', since);
+
+  const gateway = getGatewayUrl();
+  const wantsDirect = req.headers.get('accept')?.includes('application/json') === true;
+  if (wantsDirect && gateway.startsWith('https://')) {
+    try {
+      const issued = await gatewaySessionFetch(gate.inst.sessionId, '/chat/stream-ticket', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          chatId: chatId || 'owner',
+          ...(botId ? { botId } : {}),
+          ...(since ? { since } : {}),
+        }),
+      }, { sandboxId: gate.inst.sandboxId, runtime: gate.inst.runtime });
+      const issuedBody = await issued.json() as { ticket?: unknown };
+      if (issued.ok && typeof issuedBody.ticket === 'string' && issuedBody.ticket) {
+        const streamUrl = `${gateway.replace(/\/$/, '')}/chat/stream?ticket=${encodeURIComponent(issuedBody.ticket)}`;
+        return Response.json({ streamUrl, chatId: chatId || 'owner' });
+      }
+    } catch {
+      // The Vercel stream below still serves the chat when the gateway has no ticket route yet.
+    }
+  }
 
   try {
     const res = await proxyInbox(gate.inst, `/v1/chat/events?${q.toString()}`, {

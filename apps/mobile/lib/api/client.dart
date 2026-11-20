@@ -878,7 +878,7 @@ class VectraClient {
     });
     final req = http.Request('GET', uri);
     req.headers.addAll({
-      'accept': 'text/event-stream',
+      'accept': 'application/json, text/event-stream',
       if (token != null && token!.isNotEmpty) 'authorization': 'Bearer $token',
     });
     final client = http.Client();
@@ -899,8 +899,19 @@ class VectraClient {
           code: _errorCode(data),
         );
       }
+      final type = res.headers['content-type'] ?? '';
+      if (type.contains('application/json')) {
+        final body = await res.stream.bytesToString();
+        final decoded = jsonDecode(body);
+        final streamUrl = decoded is Map ? decoded['streamUrl'] : null;
+        if (streamUrl is! String || streamUrl.isEmpty) {
+          throw ApiException(502, 'Chat stream URL missing');
+        }
+        yield* _directEvents(Uri.parse(streamUrl), cancellation);
+        return;
+      }
       await for (final event in decodeEventStream(
-        res.stream.timeout(const Duration(seconds: 35)),
+        res.stream.timeout(const Duration(seconds: 70)),
       )) {
         if (cancellation?.isCancelled == true) return;
         yield AppChatEvent(event);
@@ -910,6 +921,36 @@ class VectraClient {
         0,
         'Chat connection stopped responding. Reconnecting…',
       );
+    } finally {
+      removeCancel?.call();
+      client.close();
+    }
+  }
+
+  Stream<AppChatEvent> _directEvents(
+    Uri uri,
+    EventStreamCancellation? cancellation,
+  ) async* {
+    if (uri.scheme != 'https') {
+      throw ApiException(502, 'Chat stream must use HTTPS');
+    }
+    final req = http.Request('GET', uri);
+    req.headers['accept'] = 'text/event-stream';
+    final client = http.Client();
+    final removeCancel = cancellation?.onCancel(client.close);
+    try {
+      if (cancellation?.isCancelled == true) return;
+      final res = await client.send(req).timeout(_sseConnect);
+      if (res.statusCode >= 400) {
+        final body = await res.stream.bytesToString();
+        throw ApiException(res.statusCode, body.isEmpty ? 'Chat stream failed' : body);
+      }
+      await for (final event in decodeEventStream(
+        res.stream.timeout(const Duration(seconds: 70)),
+      )) {
+        if (cancellation?.isCancelled == true) return;
+        yield AppChatEvent(event);
+      }
     } finally {
       removeCancel?.call();
       client.close();
