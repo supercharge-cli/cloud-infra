@@ -6,11 +6,64 @@ import kotlin.test.assertNull
 import kotlin.test.assertFailsWith
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 
 class VectraApiTest {
+    @Test
+    fun chatUsesAStreamTicketWithoutForwardingTheAccountToken() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody(
+                """{"streamUrl":"${server.url("/ticket")}"}""",
+            ))
+            server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody(
+                "data: {\"type\":\"progress\",\"label\":\"Reading\"}\n\ndata: {\"type\":\"done\"}\n\n",
+            ))
+            val api = VectraApi(origin = server.url("/").toString(), token = "saved")
+            assertEquals(listOf("progress", "done"), api.chatEvents("vm", "main", "a", "9").toList().map { it.string("type") })
+            val request = server.takeRequest()
+            assertEquals("/api/instances/vm/chat/events?botId=main&chatId=a&since=9", request.path)
+            assertEquals("Bearer saved", request.getHeader("Authorization"))
+            assertNull(server.takeRequest().getHeader("Authorization"))
+        }
+    }
+
+    @Test
+    fun chatUpdatesOneReplyAndKeepsToolDetailsOutOfTheTranscript() {
+        fun event(raw: String) = Json.parseToJsonElement(raw).jsonObject
+        var state = VectraChatState().start("hello", "local-test")
+        state = state.accept(event("""{"id":"1","type":"user","messageId":"user-1","text":"hello"}"""))
+        state = state.accept(event("""{"id":"2","type":"thinking","label":"Planning","text":"PRIVATE"}"""))
+        assertEquals("Planning", state.label)
+        state = state.accept(event("""{"id":"3","type":"tool","label":"Reading files","text":"RAW"}"""))
+        assertEquals("Reading files", state.label)
+        state = state.accept(event("""{"id":"4","type":"text","messageId":"reply","text":"Part"}"""))
+        state = state.accept(event("""{"id":"5","type":"usage","pct":12}"""))
+        assertEquals(true, state.working)
+        state = state.accept(event("""{"id":"6","type":"text","messageId":"reply","delta":" two"}"""))
+        state = state.accept(event("""{"id":"7","type":"text","messageId":"reply","text":"Part two.","final":true}"""))
+        state = state.accept(event("""{"id":"8","type":"done"}"""))
+        assertEquals(listOf("hello", "Part two."), state.messages.map { it.text })
+        assertEquals(false, state.working)
+        assertNull(state.label)
+    }
+
+    @Test
+    fun workspaceListingDoesNotDuplicateEntriesForTheSamePath() {
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse().setBody(
+                    """{"entries":[{"name":"0","type":"directory"},{"name":"0","type":"directory"},{"name":"body.txt","type":"file"}]}""",
+                ),
+            )
+            val api = VectraApi(origin = server.url("/").toString(), token = "saved")
+            assertEquals(listOf(VectraFile("0", true), VectraFile("body.txt", false)), api.workspaceFiles("vm"))
+        }
+    }
+
     @Test
     fun registrationUsesThePublicAccountEndpoint() {
         MockWebServer().use { server ->
@@ -81,7 +134,7 @@ class VectraApiTest {
             api.wake("vm")
             assertEquals(listOf("github"), api.skills())
             assertEquals("https://pollinations.ai/connect", api.pollenConnect("vm"))
-            assertEquals("order_1", api.createOrder("vm", "hosting-2c4g"))
+            assertEquals("order_1", api.createOrder("hosting-2c4g", "INR", instanceId = "vm").string("orderId"))
             server.enqueue(MockResponse().setHeader("content-type", "application/json").setBody("""{"streamUrl":"${server.url("/chat/stream")}"}"""))
             val request = api.openEvents("vm", "main", "chat-1")
             assertEquals("/chat/stream", request.url.encodedPath)

@@ -16,4 +16,7 @@
     <cache-path
         name="file-previews"
         path="file-previews/" />
+    <cache-path
+        name="vectra-attachments"
+        path="vectra-attachments/" />
 </paths>

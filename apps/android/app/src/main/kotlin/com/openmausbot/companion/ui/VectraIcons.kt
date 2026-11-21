@@ -19,6 +19,14 @@ internal object VectraIcons {
     val Square = stroke("M5 5 H19 A2 2 0 0 1 21 7 V19 A2 2 0 0 1 19 21 H5 A2 2 0 0 1 3 19 V7 A2 2 0 0 1 5 5 Z")
     val Search = stroke("M21 21 L16.66 16.66", circles = listOf(11f to 11f), radius = 8f)
     val Plus = stroke("M5 12 H19", "M12 5 V19")
+    val Close = stroke("M18 6 L6 18", "M6 6 L18 18")
+    val Folder = stroke("M3 7 A2 2 0 0 1 5 5 H9 L11 7 H19 A2 2 0 0 1 21 9 V18 A2 2 0 0 1 19 20 H5 A2 2 0 0 1 3 18 Z")
+    val Monitor = stroke("M4 3 H20 A2 2 0 0 1 22 5 V15 A2 2 0 0 1 20 17 H4 A2 2 0 0 1 2 15 V5 A2 2 0 0 1 4 3 Z", "M12 17 V21 M8 21 H16")
+    val Browser = stroke("M3 5 H21 V19 H3 Z", "M3 9 H21 M6 7 H6 M9 7 H9")
+    val Terminal = stroke("M4 17 L9 12 L4 7", "M12 17 H20")
+    val ChevronDown = stroke("M6 9 L12 15 L18 9")
+    val ChevronRight = stroke("M9 6 L15 12 L9 18")
+    val File = stroke("M6 3 H14 L19 8 V21 H6 Z", "M14 3 V8 H19")
 }
 
 private fun stroke(vararg data: String, circles: List<Pair<Float, Float>> = emptyList(), radius: Float = 1f): ImageVector {

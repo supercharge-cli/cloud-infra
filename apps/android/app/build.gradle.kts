@@ -234,6 +234,7 @@ dependencies {
     // process and hide the origin from someone about to grant full control of a
     // cloud machine. ~200 KB, no transitive weight beyond androidx.core.
     implementation("androidx.browser:browser:1.9.0")
+    implementation("com.razorpay:checkout:1.6.41")
 
     // Pairing QR scanner. CameraX gives the preview and frame pipeline; ML Kit's
     // *bundled* barcode model reads them. Bundled rather than the Play-services

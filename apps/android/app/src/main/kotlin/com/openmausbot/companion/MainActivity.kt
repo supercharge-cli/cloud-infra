@@ -14,6 +14,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.openmausbot.companion.dictation.SpeechDictation
@@ -34,6 +36,15 @@ import com.openmausbot.companion.ui.NotificationPermissionController
 import com.openmausbot.companion.ui.PermissionPreferences
 import com.openmausbot.companion.ui.PermissionRequests
 import com.openmausbot.companion.ui.PendingThreadNavigation
+import com.razorpay.PaymentData
+import com.razorpay.PaymentResultWithDataListener
+
+internal data class VectraPaymentResult(
+    val orderId: String? = null,
+    val paymentId: String? = null,
+    val signature: String? = null,
+    val cancelled: Boolean = false,
+)
 
 /**
  * The single Activity. It owns the permission launchers and the one thing that
@@ -44,9 +55,36 @@ import com.openmausbot.companion.ui.PendingThreadNavigation
  * Connect/disconnect is not here: `OpenMausApp` drives it from
  * `ProcessLifecycleOwner`, which is the Android shape of iOS's `scenePhase`.
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
     private val app: OpenMausApp
         get() = application as OpenMausApp
+
+    internal var vectraCheckoutResult by mutableStateOf<VectraPaymentResult?>(null)
+    internal var vectraPollinationsReturned by mutableStateOf(false)
+    internal var vectraThreadTarget by mutableStateOf<VectraThreadTarget?>(null)
+
+    override fun onPaymentSuccess(paymentId: String?, data: PaymentData?) {
+        vectraCheckoutResult = VectraPaymentResult(data?.orderId, paymentId, data?.signature)
+    }
+
+    override fun onPaymentError(code: Int, message: String?, data: PaymentData?) {
+        vectraCheckoutResult = VectraPaymentResult(cancelled = true)
+    }
+
+    private fun acceptVectraLink(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (intent.action == ACTION_VECTRA_THREAD && uri.scheme == "vectra" && uri.host == "chat") {
+            val workspace = uri.getQueryParameter("workspace")?.takeIf { it.isNotBlank() && it.length < 200 }
+            val bot = uri.getQueryParameter("bot")?.takeIf { it.isNotBlank() && it.length < 200 }
+            val thread = uri.getQueryParameter("thread")?.takeIf { it.isNotBlank() && it.length < 200 }
+            if (workspace != null && bot != null && thread != null) vectraThreadTarget = VectraThreadTarget(workspace, bot, thread)
+        }
+        if (intent.action == Intent.ACTION_VIEW && uri.scheme == "vectra" &&
+            uri.host == "pollinations" && uri.path == "/connected"
+        ) {
+            vectraPollinationsReturned = true
+        }
+    }
 
     /** Notification tap → `(botId, threadId)`; delivered to the UI once. */
     private lateinit var notificationNavigation: PendingThreadNavigation
@@ -191,6 +229,7 @@ class MainActivity : ComponentActivity() {
         )
 
         handleIntent(intent)
+        acceptVectraLink(intent)
 
         setContent {
             val pendingTarget by notificationNavigation.pending.collectAsState()
@@ -214,6 +253,7 @@ class MainActivity : ComponentActivity() {
         // A tap that arrives while the app is already up is always a new request,
         // even for a target that was opened from a notification before.
         handleIntent(intent, fresh = true)
+        acceptVectraLink(intent)
     }
 
     override fun onResume() {
