@@ -50,6 +50,8 @@ internal fun VectraChatHeader(
     title: String,
     mark: Color,
     expanded: Boolean,
+    modelLabel: String,
+    historyEnabled: Boolean,
     onBack: () -> Unit,
     onMenu: (Boolean) -> Unit,
     onAction: (String) -> Unit,
@@ -84,6 +86,15 @@ internal fun VectraChatHeader(
                 Icon(VectraIcons.Ellipsis, contentDescription = "More")
             }
             DropdownMenu(expanded = expanded, onDismissRequest = { onMenu(false) }, containerColor = chipSurface) {
+                DropdownMenuItem(
+                    text = { androidx.compose.foundation.layout.Column {
+                        Text("Provider & model", color = menuText)
+                        if (modelLabel.isNotBlank()) Text(modelLabel, color = menuIcon, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    } },
+                    onClick = { onMenu(false); onAction("Models") },
+                )
+                DropdownMenuItem(text = { Text("Group chat", color = menuText) }, onClick = { onMenu(false); onAction("Group chat") })
+                DropdownMenuItem(text = { Text("History", color = menuText) }, enabled = historyEnabled, onClick = { onMenu(false); onAction("History") })
                 chatActions.forEach { (label, icon) ->
                     DropdownMenuItem(
                         text = { Text(label, color = menuText) },

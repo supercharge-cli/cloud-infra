@@ -744,29 +744,28 @@ fun VectraScreen() {
                 title = agentName,
                 mark = mark,
                 expanded = menuOpen,
+                modelLabel = listOf(configuredProvider, configuredModel).filter(String::isNotBlank).joinToString(" · "),
+                historyEnabled = chatId.isNotBlank(),
                 onBack = ::leaveChat,
                 onMenu = { menuOpen = it },
-                onAction = {
-                    if (it == "Search in chat") finding = true
-                    else {
-                        filesStandalone = false
-                        openTool(it)
+                onAction = { action ->
+                    when (action) {
+                        "Search in chat" -> finding = true
+                        "Models" -> chatTool = VectraChatTool.Models
+                        "Group chat" -> openGroup(workspaceId)
+                        "History" -> chatTool = VectraChatTool.History
+                        else -> {
+                            filesStandalone = false
+                            openTool(action)
+                        }
                     }
                 },
             )
-            if (configuredProvider.isNotBlank() || configuredModel.isNotBlank()) {
-                TextButton(onClick = { chatTool = VectraChatTool.Models }, modifier = Modifier.padding(start = 16.dp)) {
-                    Text(listOf(configuredProvider, configuredModel).filter(String::isNotBlank).joinToString(" · "), maxLines = 1)
-                }
-            }
             if (finding) {
                 VectraTranscriptSearch(chatQuery, { chatQuery = it }, ::closeSearch)
-            } else {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { openGroup(workspaceId) }) { Text("Group chat") }
-                    TextButton(onClick = { chatTool = VectraChatTool.History }, enabled = chatId.isNotBlank()) { Text("History") }
-                    turn.usage?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
-                }
+            }
+            turn.usage?.let {
+                Text(it, modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
             }
             LazyColumn(Modifier.weight(1f).padding(horizontal = 12.dp), state = listState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (loadingChat) item { Text("Loading chat…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
