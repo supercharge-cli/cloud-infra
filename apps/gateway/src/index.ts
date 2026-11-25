@@ -15,6 +15,12 @@ import { LifecycleStore, type LifecycleRecord } from "./lifecycle-store.js";
 import { pluginRuntimeCommand } from "./plugin-runtime-update.js";
 import { githubMcpTokenCommand } from "./github-token-read.js";
 import { deleteAfterKill, killWithPreStop, prepareMigration } from "./pre-stop.js";
+import {
+  SANDBOX_HOST_PORT,
+  attachDecision,
+  issueSandboxSession,
+  sandboxSessionInstall,
+} from "./sandbox-attach.js";
 
 type SandboxLike = {
   sandboxId?: string;
@@ -73,6 +79,9 @@ type SessionRecord = {
   runtime: AgentRuntime;
   workspaceRoot: string;
   syncStageFile: string;
+  /** Raw token stays in this process. Only the hash is safe to persist. */
+  sandboxSessionToken?: string;
+  sandboxSessionHash?: string;
 };
 
 type ExecRequest = {
@@ -858,7 +867,23 @@ async function createSession(input: {
     }
   }
 
-  if (runtime === "supercharge") await refreshMaintenance(session);
+  if (runtime === "supercharge") {
+    const issued = issueSandboxSession();
+    session.sandboxSessionToken = issued.token;
+    session.sandboxSessionHash = issued.hash;
+    const install = sandboxSessionInstall();
+    try {
+      await sandbox.commands?.run(install.command, {
+        stdin: issued.token,
+        timeoutMs: 30_000,
+      });
+    } catch (error) {
+      console.warn(
+        `[vectra-gateway] sandbox host session was not written: ${(error as Error).message}`,
+      );
+    }
+    await refreshMaintenance(session);
+  }
   return session;
 }
 
@@ -2005,6 +2030,26 @@ const server = createServer(async (req, res) => {
           maxContinuousMs,
         },
       });
+      return;
+    }
+
+    const attachMatch = url.pathname.match(/^\/sessions\/([^/]+)\/attach$/);
+    if (method === "POST" && attachMatch) {
+      const session = findSession(decodeURIComponent(attachMatch[1] || ""));
+      if (!session) {
+        sendJson(res, 404, { error: "Supercharge session not found" });
+        return;
+      }
+      const host =
+        session.runtime === "supercharge" && session.sandboxSessionToken
+          ? await resolvePreviewHost(session, SANDBOX_HOST_PORT)
+          : "";
+      const decision = attachDecision({
+        runtime: session.runtime,
+        token: session.sandboxSessionToken,
+        url: host,
+      });
+      sendJson(res, decision.status, decision.body);
       return;
     }
 
