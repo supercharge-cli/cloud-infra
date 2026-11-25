@@ -154,6 +154,17 @@ export type GatewaySession = {
   workspaceRoot?: string;
 };
 
+export async function attachSandboxHost(sessionId: string): Promise<{ url: string; token: string; port: number }> {
+  const res = await gwFetch(`/sessions/${encodeURIComponent(sessionId)}/attach`, { method: "POST" });
+  const text = await res.text();
+  let body: { url?: string; token?: string; port?: number; error?: string } = {};
+  try { body = JSON.parse(text) as typeof body; } catch { /* gateway sent a non-JSON error */ }
+  if (!res.ok || !body.url || !body.token) {
+    throw new Error(body.error || explainGatewayFailure(res.status, text, `${gatewayBase()}/sessions/${sessionId}/attach`));
+  }
+  return { url: body.url, token: body.token, port: body.port || 8788 };
+}
+
 export async function createGatewaySession(opts?: {
   sessionId?: string;
   sandboxId?: string;
