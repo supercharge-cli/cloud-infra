@@ -421,7 +421,7 @@ export function SandboxWorkspace({ instanceId, botId = 'main', sandboxId, runtim
         <div>
           <h3 className="font-semibold text-white">Workspace</h3>
           <p className="mt-0.5 text-xs text-zinc-500">
-            {desktopAvailable ? 'Live Ubuntu VM desktop' : 'Browser'}, terminal, preview, and files. Every agent on this workspace shares this sandbox.
+            {desktopAvailable ? 'Live Ubuntu VM desktop' : 'Browser'}, terminal, preview, and files. Every agent on this workspace shares this sandbox. If nothing is running, the sandbox pauses after 15 minutes and keeps its memory. Connecting, a command, or Take over wakes it.
           </p>
         </div>
         <div className="flex gap-2">
