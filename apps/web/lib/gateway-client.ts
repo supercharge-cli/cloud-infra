@@ -2511,3 +2511,27 @@ export function browserVncWebSocketUrl(sessionId: string, ticket: string): strin
   const base = gatewayBase().replace(/^http:/i, "ws:").replace(/^https:/i, "wss:");
   return `${base}/sessions/${encodeURIComponent(sessionId)}/browser/vnc?ticket=${encodeURIComponent(ticket)}`;
 }
+
+/** Install/start the workspace host on the app port and add one device session. */
+export async function startWorkspaceHost(
+  sessionId: string,
+  opts: { sandboxId?: string; session: string; label: string },
+): Promise<{ url: string; sandboxId?: string; restarted?: boolean; uploaded?: boolean }> {
+  const call = () =>
+    gwFetch(`/sessions/${encodeURIComponent(sessionId)}/workspace-host`, {
+      method: "POST",
+      body: JSON.stringify({ sandboxId: opts.sandboxId, session: opts.session, label: opts.label }),
+    });
+  let res = await call();
+  if (res.status === 404 && opts.sandboxId) {
+    await ensureGatewaySession(sessionId, opts.sandboxId, "supercharge");
+    res = await call();
+  }
+  const data = (await res.json().catch(() => ({}))) as {
+    success?: boolean; url?: string; sandboxId?: string; restarted?: boolean; uploaded?: boolean; message?: string;
+  };
+  if (!res.ok || !data.success || !data.url) {
+    throw new Error(data.message || `Workspace host failed to start (HTTP ${res.status})`);
+  }
+  return { url: data.url, sandboxId: data.sandboxId, restarted: data.restarted, uploaded: data.uploaded };
+}
