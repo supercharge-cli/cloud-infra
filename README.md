@@ -196,7 +196,7 @@ APIs:
 | Variable                             | Default                                          | Purpose                                           |
 | ------------------------------------ | ------------------------------------------------ | ------------------------------------------------- |
 | `XIBECODE_E2B_TEMPLATE`              | `xibecode-full-sandbox`                          | Published XibeCode template id/alias              |
-| `SUPERCHARGE_E2B_TEMPLATE`           | `supercharge-full-sandbox`                       | Published Supercharge template id/alias           |
+| `SUPERCHARGE_E2B_TEMPLATE`           | `vectrabot-workspace`                            | Published Supercharge template id/alias           |
 | `XIBECODE_E2B_ON_TIMEOUT`            | `pause`                                          | `pause` (snapshot) or `kill`                      |
 | `XIBECODE_E2B_AUTO_RESUME`           | `true`                                           | Wake on SDK/HTTP when paused                      |
 | `XIBECODE_E2B_SANDBOX_TIMEOUT_MS`    | `900000` (15m)                                   | Idle before lifecycle pause                       |

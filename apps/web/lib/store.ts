@@ -707,7 +707,7 @@ export async function createInstanceRecord(input: {
     e2bTemplate:
       input.runtime === "supercharge"
         ? process.env.SUPERCHARGE_E2B_TEMPLATE?.trim() ||
-          "supercharge-daemon-sandbox"
+          "vectrabot-workspace"
         : process.env.XIBECODE_E2B_TEMPLATE?.trim() || "xibecode-full-sandbox",
     daemonPort: input.runtime === "supercharge" ? 8790 : undefined,
     status: "running",

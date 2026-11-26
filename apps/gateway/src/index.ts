@@ -131,7 +131,7 @@ const runtimeProfiles: Record<AgentRuntime, RuntimeProfile> = {
     label: "Supercharge",
     template:
       process.env.SUPERCHARGE_E2B_TEMPLATE?.trim() ||
-      "supercharge-daemon-sandbox",
+      "vectrabot-workspace",
     daemonCommand:
       process.env.SUPERCHARGE_SANDBOX_DAEMON_COMMAND?.trim() ||
       "supercharge agent daemon --bind 0.0.0.0:8790",
