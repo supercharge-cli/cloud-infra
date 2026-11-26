@@ -1831,12 +1831,25 @@ export async function restartDaemon(
     "fi",
     // NEVER pkill -f "xibecode daemon" here: the exec shell cmdline contains that
     // string, so pkill kills *this* restart script (signal: terminated / exit 1).
-    `if [ -f ${daemonPidFile} ]; then`,
+    // An attached workspace host owns the app port and reads the saved
+    // settings on every turn, so keep it instead of starting the old daemon.
+    "WORKSPACE_HOST=0",
+    ...(runtime === "supercharge"
+      ? [
+          `HOST_PID="$(cat ${daemonPidFile} 2>/dev/null)"`,
+          'case "$(tr "\\0" " " < /proc/${HOST_PID:-0}/cmdline 2>/dev/null || true)" in',
+          '  */.vectrabot/bin/sandbox-host*) WORKSPACE_HOST=1 ;;',
+          "esac",
+        ]
+      : []),
+    'if [ "$WORKSPACE_HOST" = "1" ]; then',
+    '  echo "workspace host: running (settings apply on the next turn)"',
+    `elif [ -f ${daemonPidFile} ]; then`,
     `  OLD="$(cat ${daemonPidFile} 2>/dev/null)"`,
     '  if [ -n "$OLD" ]; then kill "$OLD" 2>/dev/null || true; sleep 1; kill -9 "$OLD" 2>/dev/null || true; fi',
     `  rm -f ${daemonPidFile}`,
-
     "fi",
+    'if [ "$WORKSPACE_HOST" != "1" ]; then',
     // Kill only real daemon node processes; exclude our shell ($$) and pgrep itself
     `for pid in $(pgrep -f "${daemonMatch}" 2>/dev/null || true); do`,
     '  if [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ]; then',
@@ -1848,6 +1861,7 @@ export async function restartDaemon(
     "sleep 1",
     `nohup ${daemonCommand} >${daemonLogFile} 2>&1 &`,
     `echo $! > ${daemonPidFile}`,
+    "fi",
 
     "OK=0",
     'INBOX="${SUPERAGENT_APP_INBOX_PORT:-${XIBECODE_APP_INBOX_PORT:-8790}}"',
