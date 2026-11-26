@@ -4,7 +4,7 @@ import { test } from "node:test";
 const { attachWorkspace, readSandboxState, writeSandboxState, deviceLabel } = (await import(
   new URL("./workspace-host.ts", import.meta.url).href
 )) as typeof import("./workspace-host");
-const { corsHeaders, isAppRoute } = (await import(new URL("./app-cors.ts", import.meta.url).href)) as typeof import("./app-cors");
+const { corsHeaders, isAppRoute, appOrigins } = (await import(new URL("./app-cors.ts", import.meta.url).href)) as typeof import("./app-cors");
 
 const inst = { id: "inst-1", sessionId: "sess-1", sandboxId: "sbx-1", runtime: "supercharge", status: "paused" };
 
@@ -80,4 +80,31 @@ test("CORS answers only listed origins on the app's routes, without credentials"
   assert.equal(corsHeaders("/api/instances/abc/attach", null, prod), null);
   assert.equal(isAppRoute("/api/instances/abc/computer/vnc-ticket"), true);
   assert.equal(isAppRoute("/api/instances/abc/exec"), false);
+});
+
+test("production CORS accepts a listed tauri://localhost origin and rejects other custom schemes", () => {
+  const prod = {
+    NODE_ENV: "production",
+    VECTRABOT_APP_ORIGINS: "https://app.example.com, tauri://localhost, tauri://evil, javascript:alert(1), http://tauri.localhost",
+  };
+  assert.equal(
+    corsHeaders("/api/instances/abc/attach", "tauri://localhost", prod)?.["access-control-allow-origin"],
+    "tauri://localhost",
+  );
+  assert.equal(
+    corsHeaders("/api/instances/abc/attach", "http://tauri.localhost", prod)?.["access-control-allow-origin"],
+    "http://tauri.localhost",
+  );
+  assert.equal(corsHeaders("/api/instances/abc/attach", "tauri://evil", prod), null);
+  assert.equal(corsHeaders("/api/instances/abc/attach", "javascript:alert(1)", prod), null);
+  assert.equal(
+    corsHeaders("/api/instances/abc/attach", "tauri://localhost", { NODE_ENV: "production", VECTRABOT_APP_ORIGINS: "https://app.example.com" }),
+    null,
+    "unlisted tauri origin is off",
+  );
+  const allowed = appOrigins(prod);
+  assert.equal(allowed.has("tauri://localhost"), true);
+  assert.equal(allowed.has("http://tauri.localhost"), true);
+  assert.equal(allowed.has("tauri://evil"), false);
+  assert.equal(allowed.has("javascript:alert(1)"), false);
 });

@@ -16,7 +16,7 @@ export function appOrigins(env: Record<string, string | undefined> = process.env
   const listed = (env.VECTRABOT_APP_ORIGINS || "")
     .split(",")
     .map((value) => value.trim().replace(/\/$/, ""))
-    .filter((value) => /^https?:\/\/[A-Za-z0-9.-]+(:\d+)?$/.test(value));
+    .filter((value) => /^(?:https?:\/\/[A-Za-z0-9.-]+(?::\d+)?|tauri:\/\/localhost)$/.test(value));
   return new Set(env.NODE_ENV === "production" && env.VECTRABOT_APP_DEV_ORIGINS !== "1" ? listed : [...listed, ...DEV_ORIGINS]);
 }
 
