@@ -1838,7 +1838,8 @@ export async function restartDaemon(
       ? [
           `HOST_PID="$(cat ${daemonPidFile} 2>/dev/null)"`,
           'case "$(tr "\\0" " " < /proc/${HOST_PID:-0}/cmdline 2>/dev/null || true)" in',
-          '  */.vectrabot/bin/sandbox-host*) WORKSPACE_HOST=1 ;;',
+          // The template's own copy (/opt/vectrabot) or the gateway's install.
+          '  */sandbox-host*) WORKSPACE_HOST=1 ;;',
           "esac",
         ]
       : []),

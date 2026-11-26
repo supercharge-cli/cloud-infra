@@ -2033,6 +2033,19 @@ const server = createServer(async (req, res) => {
               '  TOK="${TELEGRAM_BOT_TOKEN:-${XIBECODE_TELEGRAM_BOT_TOKEN:-${SUPERAGENT_TELEGRAM_BOT_TOKEN:-}}}"',
               '  curl -sS -m 10 -X POST "https://api.telegram.org/bot${TOK}/deleteWebhook" -d "drop_pending_updates=false" >/dev/null 2>&1 || true',
               "fi",
+              // An attached workspace host owns the app port and reads the saved
+              // settings on every turn: keep it instead of starting the old daemon.
+              "WORKSPACE_HOST=0",
+              ...(session.runtime === "supercharge"
+                ? [
+                    `HOST_PID="$(cat ${shQuote(profile.pidFile)} 2>/dev/null)"`,
+                    'case "$(tr "\\0" " " < /proc/${HOST_PID:-0}/cmdline 2>/dev/null || true)" in',
+                    // The template's own copy (/opt/vectrabot) or the gateway's install.
+                    '  */sandbox-host*) WORKSPACE_HOST=1 ;;',
+                    "esac",
+                  ]
+                : []),
+              'if [ "$WORKSPACE_HOST" = "1" ]; then echo "workspace host: running"; else',
               // Stop only the configured sandbox daemon. The pidfile avoids matching
               // the restart shell itself; the optional pattern handles legacy templates.
               `if [ -f ${shQuote(profile.pidFile)} ]; then`,
@@ -2050,6 +2063,7 @@ const server = createServer(async (req, res) => {
               "sleep 1",
               `nohup ${profile.daemonCommand} >${shQuote(profile.logFile)} 2>&1 &`,
               `echo $! > ${shQuote(profile.pidFile)}`,
+              "fi",
               "OK=0",
               'INBOX="${SUPERAGENT_APP_INBOX_PORT:-${XIBECODE_APP_INBOX_PORT:-8790}}"',
               "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do",
