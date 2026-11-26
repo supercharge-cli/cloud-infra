@@ -407,6 +407,33 @@ function consumeBrowserVncTicket(ticket: string, sessionId: string): { handoffId
     ? { handoffId: record.handoffId, botId: record.botId } : undefined;
 }
 
+const chatStreamTickets = new Map<string, {
+  sessionId: string;
+  chatId: string;
+  botId?: string;
+  since?: string;
+  expiresAt: number;
+}>();
+
+function issueChatStreamTicket(record: {
+  sessionId: string;
+  chatId: string;
+  botId?: string;
+  since?: string;
+}): string {
+  for (const [key, item] of chatStreamTickets) if (item.expiresAt <= Date.now()) chatStreamTickets.delete(key);
+  if (chatStreamTickets.size >= 4096) throw new Error("Too many outstanding chat streams");
+  const ticket = randomBytes(32).toString("base64url");
+  chatStreamTickets.set(ticket, { ...record, expiresAt: Date.now() + 60_000 });
+  return ticket;
+}
+
+function consumeChatStreamTicket(ticket: string) {
+  const record = chatStreamTickets.get(ticket);
+  chatStreamTickets.delete(ticket);
+  return record && record.expiresAt > Date.now() ? record : undefined;
+}
+
 async function readJson<T>(req: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -1555,12 +1582,103 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (method === "GET" && url.pathname === "/chat/stream") {
+      const record = consumeChatStreamTicket(url.searchParams.get("ticket") || "");
+      const session = record ? sessions.get(record.sessionId) : undefined;
+      if (!record || !session) {
+        sendJson(res, 401, { success: false, error: true, message: "Chat stream ticket expired" });
+        return;
+      }
+      const q = new URLSearchParams({ chatId: record.chatId });
+      if (record.botId) q.set("botId", record.botId);
+      if (record.since) q.set("since", record.since);
+      try {
+        const base = await resolvePreviewHost(session, 8790);
+        const headers = new Headers({ accept: "text/event-stream" });
+        for (const [name, value] of Object.entries(daemonAuthorizationHeaders())) headers.set(name, value);
+        const upstream = await fetch(`${base.replace(/\/$/, "")}/v1/chat/events?${q.toString()}`, { headers });
+        if (!upstream.ok || !upstream.body) {
+          const detail = await upstream.text().catch(() => "");
+          sendJson(res, upstream.status || 502, { success: false, error: true, message: detail.slice(0, 300) || "Chat stream unavailable" });
+          return;
+        }
+        res.writeHead(upstream.status, {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache, no-transform",
+          connection: "keep-alive",
+          "x-accel-buffering": "no",
+        });
+        const reader = upstream.body.getReader();
+        let closed = false;
+        const ping = setInterval(() => {
+          if (!res.writableEnded) res.write(": ping\n\n");
+        }, 15_000);
+        const stop = () => {
+          if (closed) return;
+          closed = true;
+          clearInterval(ping);
+          void reader.cancel().catch(() => undefined);
+        };
+        req.on("close", stop);
+        try {
+          while (!closed) {
+            const { done, value } = await reader.read();
+            if (done || closed) break;
+            res.write(Buffer.from(value));
+          }
+        } finally {
+          stop();
+          if (!res.writableEnded) res.end();
+        }
+      } catch (error) {
+        if (!res.headersSent) {
+          sendJson(res, 502, { success: false, error: true, message: (error as Error).message });
+        } else if (!res.writableEnded) {
+          res.end();
+        }
+      }
+      return;
+    }
+
     if (!isAuthorized(req)) {
       sendJson(res, 401, {
         success: false,
         error: true,
         message: "Unauthorized",
       });
+      return;
+    }
+
+    const chatTicketMatch = url.pathname.match(/^\/sessions\/([^/]+)\/chat\/stream-ticket$/);
+    if (method === "POST" && chatTicketMatch) {
+      const sessionId = decodeURIComponent(chatTicketMatch[1] || "");
+      const session = sessions.get(sessionId);
+      if (!session) {
+        sendJson(res, 404, { success: false, error: true, message: "Session not found" });
+        return;
+      }
+      const body = await readJson<{ chatId?: unknown; botId?: unknown; since?: unknown }>(req);
+      const chatId = typeof body.chatId === "string" ? body.chatId : "";
+      const botId = typeof body.botId === "string" ? body.botId : undefined;
+      const since = typeof body.since === "string" ? body.since : undefined;
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(chatId)) {
+        sendJson(res, 400, { success: false, error: true, message: "Invalid conversation ID" });
+        return;
+      }
+      if (botId && !/^[A-Za-z0-9_-]{1,128}$/.test(botId)) {
+        sendJson(res, 400, { success: false, error: true, message: "Invalid bot ID" });
+        return;
+      }
+      if (since && !/^\d{1,20}$/.test(since)) {
+        sendJson(res, 400, { success: false, error: true, message: "Invalid event cursor" });
+        return;
+      }
+      try {
+        const ticket = issueChatStreamTicket({ sessionId, chatId, botId, since });
+        sendJson(res, 200, { success: true, ticket, expiresInSeconds: 60 });
+      } catch (error) {
+        sendJson(res, 503, { success: false, error: true, message: (error as Error).message });
+      }
       return;
     }
 

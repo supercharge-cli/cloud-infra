@@ -12,8 +12,13 @@ import {
   RefreshCw,
   Save,
   Share2,
+  TerminalSquare,
+  AppWindow,
+  Settings,
 } from 'lucide-react';
 import { BrowserHandoffView } from './browser-handoff-view';
+import { WorkspaceTerminal } from './workspace-terminal';
+import { WorkspaceSettings } from './workspace-settings';
 import './browser-control.css';
 
 type WorkspaceEntry = {
@@ -63,7 +68,10 @@ function frameData(event: BrowserEvent): string | null {
 }
 
 export function SandboxWorkspace({ instanceId, botId = 'main', sandboxId, runtime = 'xibecode', disabled = false, onContinue }: Props) {
-  const [tab, setTab] = useState<'browser' | 'files'>('browser');
+  const [tab, setTab] = useState<'browser' | 'terminal' | 'preview' | 'files' | 'settings'>('browser');
+  const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+  const [previewPort, setPreviewPort] = useState('3000');
+  const [previewUrl, setPreviewUrl] = useState('');
   const [directory, setDirectory] = useState('/home/user/workspace');
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [selectedPath, setSelectedPath] = useState('');
@@ -134,6 +142,18 @@ export function SandboxWorkspace({ instanceId, botId = 'main', sandboxId, runtim
   useEffect(() => {
     if (tab === 'files' && !disabled) void loadDirectory(directory);
   }, [directory, disabled, loadDirectory, tab]);
+
+  useEffect(() => {
+    if (disabled) return;
+    const controller = new AbortController();
+    void fetch(`/api/instances/${encodeURIComponent(instanceId)}/bots`, { signal: controller.signal })
+      .then(async (res) => (res.ok ? res.json() : { bots: [] }))
+      .then((data: { bots?: { id: string; name: string }[] }) => {
+        if (!controller.signal.aborted) setAgents(Array.isArray(data.bots) ? data.bots : []);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [disabled, instanceId]);
 
   useEffect(() => {
     if (disabled) return;
@@ -370,9 +390,29 @@ export function SandboxWorkspace({ instanceId, botId = 'main', sandboxId, runtim
     finally { handoffPending.current = false; if (mounted.current) setHandoffBusy(false); }
   }
 
+  async function openPreview() {
+    const port = Number(previewPort);
+    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+      setMessage('Preview port must be between 1 and 65535');
+      return;
+    }
+    const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/preview?port=${port}`);
+    const data = await res.json();
+    if (!res.ok || !data.host) {
+      setMessage(data.error || 'Preview is not available');
+      setPreviewUrl('');
+      return;
+    }
+    setPreviewUrl(String(data.host));
+    setMessage('');
+  }
+
   const tabs = [
     { id: 'browser' as const, label: runtime === 'supercharge' && desktopAvailable ? 'Desktop' : 'Browser', icon: Monitor },
+    { id: 'terminal' as const, label: 'Terminal', icon: TerminalSquare },
+    { id: 'preview' as const, label: 'Preview', icon: AppWindow },
     { id: 'files' as const, label: 'Files', icon: File },
+    { id: 'settings' as const, label: 'Settings', icon: Settings },
   ];
 
   return (
@@ -381,7 +421,7 @@ export function SandboxWorkspace({ instanceId, botId = 'main', sandboxId, runtim
         <div>
           <h3 className="font-semibold text-white">Workspace</h3>
           <p className="mt-0.5 text-xs text-zinc-500">
-            {desktopAvailable ? 'Live Ubuntu VM desktop' : 'Browser'} visibility and file sharing for this sandbox. The terminal remains available in the Command pane above.
+            {desktopAvailable ? 'Live Ubuntu VM desktop' : 'Browser'}, terminal, preview, and files. Every agent on this workspace shares this sandbox. If nothing is running, the sandbox pauses after 15 minutes and keeps its memory. Connecting, a command, or Take over wakes it.
           </p>
         </div>
         <div className="flex gap-2">
@@ -408,7 +448,32 @@ export function SandboxWorkspace({ instanceId, botId = 'main', sandboxId, runtim
         </div>
       </div>
 
+      {agents.length > 0 ? (
+        <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-zinc-400">
+          {agents.map((agent) => (
+            <span key={agent.id} className={`rounded-full border px-2 py-0.5 ${agent.id === botId ? 'border-sky-700 text-sky-300' : 'border-zinc-800'}`}>
+              {agent.name}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       {message ? <p className="mb-3 rounded-lg border border-zinc-800 bg-black px-3 py-2 text-xs text-zinc-300">{message}</p> : null}
+
+      {tab === 'terminal' ? <WorkspaceTerminal instanceId={instanceId} disabled={disabled} /> : null}
+      {tab === 'settings' ? <WorkspaceSettings instanceId={instanceId} disabled={disabled} /> : null}
+      {tab === 'preview' ? (
+        <div className="overflow-hidden rounded-xl border border-zinc-800 bg-black">
+          <div className="flex gap-2 border-b border-zinc-800 p-2">
+            <input value={previewPort} onChange={(event) => setPreviewPort(event.target.value)} className="w-24 rounded border border-zinc-800 bg-black px-2 py-1 text-xs text-zinc-200" />
+            <button type="button" onClick={() => void openPreview()} className="rounded bg-sky-700 px-3 py-1 text-xs text-white">Open preview</button>
+            {[3000, 5173, 8080].map((port) => (
+              <button key={port} type="button" onClick={() => { setPreviewPort(String(port)); }} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300">{port}</button>
+            ))}
+          </div>
+          {previewUrl ? <iframe title="Sandbox preview" src={previewUrl} className="h-[540px] w-full bg-white" sandbox="allow-scripts allow-forms allow-same-origin allow-downloads" /> : <p className="p-6 text-sm text-zinc-500">Choose the port your agent is serving.</p>}
+        </div>
+      ) : null}
 
       {tab === 'browser' ? (
         <div className="overflow-hidden rounded-xl border border-zinc-800 bg-black">
@@ -457,7 +522,7 @@ export function SandboxWorkspace({ instanceId, botId = 'main', sandboxId, runtim
             <button type="button" disabled={disabled || handoffBusy} onClick={() => void takeOver()}>Take over</button>
           </footer>}
         </div>
-      ) : (
+      ) : tab === 'files' ? (
         <>
           <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-zinc-500">
             {previewHosts.app ? <a href={previewHosts.app} target="_blank" rel="noreferrer" className="rounded border border-zinc-800 px-2 py-1 hover:border-sky-700 hover:text-sky-300">App API · {previewHosts.app}</a> : null}
@@ -500,7 +565,7 @@ export function SandboxWorkspace({ instanceId, botId = 'main', sandboxId, runtim
           </div>
           </div>
         </>
-      )}
+      ) : null}
       {controlOpen && typeof document !== 'undefined' && createPortal(
         <div className="browser-control-overlay" role="dialog" aria-modal="true" aria-label="Control desktop">
           {handoffWsUrl && !finishOpen
