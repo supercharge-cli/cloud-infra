@@ -8,6 +8,24 @@
 #   docker build -t vectra-gateway ./apps/gateway
 #   docker run --env-file apps/gateway/.env -p 8787:8787 vectra-gateway
 
+# The vectrabot workspace host the gateway installs in each Supercharge
+# sandbox, built from a pinned public commit (git checks the content hash).
+# The gateway uses /app/sandbox-host when VECTRABOT_HOST_BINARY/URL are unset.
+FROM golang:1.23-alpine AS host
+
+ARG VECTRABOT_REPO=https://github.com/supercharge-cli/vectrabot.git
+ARG VECTRABOT_SHA=b8b7fdc7b7afa7e00daf76f711cc7b8471b8fe91
+
+RUN apk add --no-cache git ca-certificates
+WORKDIR /src
+RUN git init -q . \
+  && git fetch -q --depth 1 "$VECTRABOT_REPO" "$VECTRABOT_SHA" \
+  && git checkout -q FETCH_HEAD \
+  && test "$(git rev-parse HEAD)" = "$VECTRABOT_SHA"
+WORKDIR /src/backend
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o /out/sandbox-host . \
+  && sha256sum /out/sandbox-host
+
 FROM node:20-alpine AS builder
 
 WORKDIR /app
@@ -26,6 +44,7 @@ ENV NODE_ENV=production
 COPY package.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=host /out/sandbox-host /app/sandbox-host
 
 RUN mkdir -p /var/lib/vectra-gateway/lifecycle && chown -R node:node /app /var/lib/vectra-gateway
 

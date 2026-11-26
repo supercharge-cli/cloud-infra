@@ -103,5 +103,8 @@ test("the binary must be a Linux executable and match a pinned digest", async ()
     (async () => new Response(elf)) as typeof fetch,
   );
   assert.equal(fetched.sha256, ok.sha256);
-  await assert.rejects(loadHostBinary({}), /not configured/);
+  await assert.rejects(loadHostBinary({}, fetch, join(dir, "missing")), /not configured/);
+  // With no env, the copy baked into the image is used.
+  const baked = await loadHostBinary({}, fetch, join(dir, "ok"));
+  assert.equal(baked.sha256, ok.sha256);
 });

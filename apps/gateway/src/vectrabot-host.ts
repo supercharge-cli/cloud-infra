@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
 /**
@@ -15,6 +16,9 @@ export const HOST_MAX_SESSIONS = 8;
 
 export type HostBinary = { bytes: Buffer; sha256: string };
 
+/** Where the gateway image bakes the host (see Dockerfile). */
+export const BAKED_HOST_BINARY = "/app/sandbox-host";
+
 let cached: { key: string; binary: HostBinary } | undefined;
 
 function sha256(bytes: Buffer): string {
@@ -23,14 +27,17 @@ function sha256(bytes: Buffer): string {
 
 /**
  * Load the host binary from VECTRABOT_HOST_BINARY (a file in the gateway image)
- * or VECTRABOT_HOST_URL, which must match VECTRABOT_HOST_SHA256.
+ * or VECTRABOT_HOST_URL, which must match VECTRABOT_HOST_SHA256. With neither
+ * set, the copy the Dockerfile bakes at /app/sandbox-host is used.
  */
 export async function loadHostBinary(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
+  baked: string = BAKED_HOST_BINARY,
 ): Promise<HostBinary> {
-  const file = env.VECTRABOT_HOST_BINARY?.trim();
   const url = env.VECTRABOT_HOST_URL?.trim();
+  // With nothing configured, use the copy baked into the gateway image.
+  const file = env.VECTRABOT_HOST_BINARY?.trim() || (!url && existsSync(baked) ? baked : undefined);
   const expected = env.VECTRABOT_HOST_SHA256?.trim().toLowerCase();
   const key = JSON.stringify([file, url, expected]);
   if (cached?.key === key) return cached.binary;
