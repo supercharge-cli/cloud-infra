@@ -15,6 +15,7 @@ import { LifecycleStore, type LifecycleRecord } from "./lifecycle-store.js";
 import { pluginRuntimeCommand } from "./plugin-runtime-update.js";
 import { githubMcpTokenCommand } from "./github-token-read.js";
 import { deleteAfterKill, killWithPreStop, prepareMigration } from "./pre-stop.js";
+import { HOST_BIN, HOST_PORT, hostDigestCommand, hostStartScript, loadHostBinary, validLabel, validSessionToken } from "./vectrabot-host.js";
 
 type SandboxLike = {
   sandboxId?: string;
@@ -1891,6 +1892,75 @@ const server = createServer(async (req, res) => {
     }
 
     // Explicit wake/resume (dashboard button, ops, after idle pause)
+    // Install (if needed) and run the workspace host on the app port, adding one
+    // device session. The caller generates the session; it is never logged.
+    const hostMatch = url.pathname.match(/^\/sessions\/([^/]+)\/workspace-host$/);
+    if (method === "POST" && hostMatch) {
+      const sessionId = decodeURIComponent(hostMatch[1] || "");
+      const body = await readJson<{ sandboxId?: string; session?: unknown; label?: unknown }>(req).catch(
+        () => ({}) as { sandboxId?: string; session?: unknown; label?: unknown },
+      );
+      if (!validSessionToken(body.session)) {
+        sendJson(res, 400, { success: false, error: true, message: "A generated session is required" });
+        return;
+      }
+      let session = sessions.get(sessionId);
+      if (!session && body.sandboxId) {
+        session = await createSession({ sessionId, sandboxId: body.sandboxId, strategy: "sandbox_full", runtime: "supercharge" });
+      }
+      if (!session) {
+        sendJson(res, 404, { success: false, error: true, message: `Session not found: ${sessionId} (pass sandboxId to reattach)` });
+        return;
+      }
+      if (session.runtime !== "supercharge") {
+        sendJson(res, 409, { success: false, error: true, message: "The workspace host runs only in Supercharge sandboxes" });
+        return;
+      }
+      try {
+        const binary = await loadHostBinary();
+        const status = await ensureSandboxRunning(session);
+        await touchSession(session);
+        const run = session.sandbox.commands?.run;
+        if (!run) throw new Error("sandbox commands are unavailable");
+        const installed = await run.call(session.sandbox.commands, hostDigestCommand, { timeoutMs: 30_000 });
+        let uploaded = false;
+        if (String(installed.stdout || "").trim() !== binary.sha256) {
+          await writeSandboxBytes(session.sandbox, `${HOST_BIN}.next`, binary.bytes);
+          await run.call(session.sandbox.commands, `chmod 755 ${shQuote(HOST_BIN)}.next && mv -f ${shQuote(HOST_BIN)}.next ${shQuote(HOST_BIN)}`, { timeoutMs: 30_000 });
+          uploaded = true;
+        }
+        const cloudToken = daemonAuthorizationHeaders().authorization?.replace(/^Bearer\s+/i, "") || "";
+        const started = await run.call(session.sandbox.commands, hostStartScript(), {
+          timeoutMs: 60_000,
+          envs: {
+            VECTRABOT_NEW_SESSION: body.session,
+            VECTRABOT_NEW_LABEL: validLabel(body.label),
+            VECTRABOT_CLOUD_TOKEN: cloudToken,
+            VECTRABOT_WANT_SHA: binary.sha256,
+          },
+        }).catch((error: { result?: Record<string, unknown> }) => error.result || { stdout: "" });
+        const out = String(started.stdout || "");
+        if (!out.includes("HOST_OK")) {
+          sendJson(res, 502, { success: false, error: true, message: "Workspace host did not start", logs: out.slice(-1500) });
+          return;
+        }
+        sendJson(res, 200, {
+          success: true,
+          sessionId: session.sessionId,
+          sandboxId: session.sandboxId,
+          state: status.state,
+          resumed: status.resumed,
+          url: (await resolvePreviewHost(session, HOST_PORT)).replace(/\/$/, ""),
+          uploaded,
+          restarted: out.includes("HOST_STARTED"),
+          hostSha256: binary.sha256,
+        });
+      } catch (e) {
+        sendJson(res, 502, { success: false, error: true, message: (e as Error).message.slice(0, 300) });
+      }
+      return;
+    }
+
     const wakeMatch = url.pathname.match(/^\/sessions\/([^/]+)\/wake$/);
     if (method === "POST" && wakeMatch) {
       const sessionId = decodeURIComponent(wakeMatch[1] || "");
