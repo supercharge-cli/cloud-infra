@@ -131,7 +131,7 @@ const runtimeProfiles: Record<AgentRuntime, RuntimeProfile> = {
     label: "Supercharge",
     template:
       process.env.SUPERCHARGE_E2B_TEMPLATE?.trim() ||
-      "vectrabot-workspace",
+      "tj5cby1f1jpplu8w0j41",
     daemonCommand:
       process.env.SUPERCHARGE_SANDBOX_DAEMON_COMMAND?.trim() ||
       "supercharge agent daemon --bind 0.0.0.0:8790",
@@ -700,18 +700,35 @@ const SANDBOX_SIZES = new Set(["2:4096", "4:8192", "8:8192", "16:16384"]);
 // Each sold size is its own template. E2B fixes CPU and memory when the
 // template is built, so creating a sandbox from the 4 vCPU image cannot
 // become the 2, 8, or 16 vCPU plan.
-const SANDBOX_TEMPLATES: Record<string, string> = {
-  "2:4096": process.env.SUPERCHARGE_E2B_TEMPLATE_2C4G?.trim() || "vectrabot-2c4g",
-  "4:8192": process.env.SUPERCHARGE_E2B_TEMPLATE?.trim() || "vectrabot-workspace",
-  "8:8192": process.env.SUPERCHARGE_E2B_TEMPLATE_8C8G?.trim() || "vectrabot-8c8g",
-  "16:16384": process.env.SUPERCHARGE_E2B_TEMPLATE_16C16G?.trim() || "vectrabot-16c16g",
+// Sandbox.create accepts the template id. The short alias resolves on
+// /templates/aliases but the create call returns 404 for that same name.
+const SANDBOX_TEMPLATE_IDS: Record<string, string> = {
+  "vectrabot-2c4g": "3pm4a7z8z29ozwm4i0ez",
+  "iotserver24/vectrabot-2c4g": "3pm4a7z8z29ozwm4i0ez",
+  "vectrabot-workspace": "tj5cby1f1jpplu8w0j41",
+  "iotserver24/vectrabot-workspace": "tj5cby1f1jpplu8w0j41",
+  "vectrabot-8c8g": "z5fq5btre1x7ehjedekp",
+  "iotserver24/vectrabot-8c8g": "z5fq5btre1x7ehjedekp",
+  "vectrabot-16c16g": "5o7js6fgphvem7te9mtn",
+  "iotserver24/vectrabot-16c16g": "5o7js6fgphvem7te9mtn",
 };
+
+const SANDBOX_TEMPLATES: Record<string, string> = {
+  "2:4096": process.env.SUPERCHARGE_E2B_TEMPLATE_2C4G?.trim() || "3pm4a7z8z29ozwm4i0ez",
+  "4:8192": process.env.SUPERCHARGE_E2B_TEMPLATE?.trim() || "tj5cby1f1jpplu8w0j41",
+  "8:8192": process.env.SUPERCHARGE_E2B_TEMPLATE_8C8G?.trim() || "z5fq5btre1x7ehjedekp",
+  "16:16384": process.env.SUPERCHARGE_E2B_TEMPLATE_16C16G?.trim() || "5o7js6fgphvem7te9mtn",
+};
+
+function sandboxTemplate(name: string): string {
+  return SANDBOX_TEMPLATE_IDS[name] || name;
+}
 
 function templateForSize(runtime: AgentRuntime, cpuCount?: number, memoryMB?: number): string {
   const profile = runtimeProfile(runtime);
   if (runtime !== "supercharge") return profile.template;
   const key = `${cpuCount ?? 4}:${memoryMB ?? 8192}`;
-  return SANDBOX_TEMPLATES[key] || profile.template;
+  return sandboxTemplate(SANDBOX_TEMPLATES[key] || profile.template);
 }
 
 function sandboxSize(cpuCount?: number, memoryMB?: number): { cpuCount: number; memoryMB: number } | undefined {
