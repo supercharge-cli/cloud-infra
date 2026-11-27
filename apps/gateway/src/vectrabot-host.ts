@@ -107,7 +107,8 @@ export function hostStartScript(): string {
     "pkill -f '[s]upercharge agent daemon' 2>/dev/null || true",
     "for i in $(seq 1 20); do ss -ltn 2>/dev/null | grep -q ':" + HOST_PORT + " ' || break; sleep 0.25; done",
     // Start from a clean slate: the host must not inherit this call's one-off values.
-    'env -u VECTRABOT_NEW_SESSION -u VECTRABOT_NEW_LABEL -u VECTRABOT_WANT_SHA VECTRABOT_HOST_ADDR=0.0.0.0:' + HOST_PORT + ' VECTRABOT_WORKSPACE=/home/user/workspace VECTRABOT_SESSION_FILE="$D/sessions" VECTRABOT_PIDFILE=/tmp/supercharge-daemon.pid VECTRABOT_CLOUD_TOKEN="$(cat "$D/cloud-token")" setsid nohup "$BIN" >"$D/host.log" 2>&1 < /dev/null &',
+    'if [ -z "${E2B_SANDBOX_ID:-}" ] && [ -f /run/e2b/.E2B_SANDBOX_ID ]; then E2B_SANDBOX_ID=$(tr -d " \\n" < /run/e2b/.E2B_SANDBOX_ID); export E2B_SANDBOX_ID; fi',
+    'env -u VECTRABOT_NEW_SESSION -u VECTRABOT_NEW_LABEL -u VECTRABOT_WANT_SHA VECTRABOT_HOST_ADDR=0.0.0.0:' + HOST_PORT + ' VECTRABOT_WORKSPACE=/home/user/workspace VECTRABOT_SESSION_FILE="$D/sessions" VECTRABOT_PIDFILE=/tmp/supercharge-daemon.pid VECTRABOT_CLOUD_TOKEN="$(cat "$D/cloud-token")" SUPERAGENT_BROWSER_SIDECAR_PORT="${SUPERAGENT_BROWSER_SIDECAR_PORT:-9223}" setsid nohup "$BIN" >"$D/host.log" 2>&1 < /dev/null &',
     'echo $! > "$D/host.pid"',
     'printf "%s" "$VECTRABOT_WANT_SHA" > "$D/host.sha"',
     "for i in $(seq 1 60); do if healthy; then echo HOST_STARTED; echo HOST_OK; exit 0; fi; sleep 0.25; done",
