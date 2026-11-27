@@ -14,7 +14,7 @@
 FROM golang:1.23-alpine AS host
 
 ARG VECTRABOT_REPO=https://github.com/supercharge-cli/vectrabot.git
-ARG VECTRABOT_SHA=8cdb3a4812993664dc6ac98c0adee26fcc90c3d1
+ARG VECTRABOT_SHA=c709742ae10788df4bd35d34764998f4474c43c6
 
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
