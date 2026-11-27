@@ -697,6 +697,23 @@ async function touchSession(session: SessionRecord): Promise<void> {
 
 const SANDBOX_SIZES = new Set(["2:4096", "4:8192", "8:8192", "16:16384"]);
 
+// Each sold size is its own template. E2B fixes CPU and memory when the
+// template is built, so creating a sandbox from the 4 vCPU image cannot
+// become the 2, 8, or 16 vCPU plan.
+const SANDBOX_TEMPLATES: Record<string, string> = {
+  "2:4096": process.env.SUPERCHARGE_E2B_TEMPLATE_2C4G?.trim() || "vectrabot-2c4g",
+  "4:8192": process.env.SUPERCHARGE_E2B_TEMPLATE?.trim() || "vectrabot-workspace",
+  "8:8192": process.env.SUPERCHARGE_E2B_TEMPLATE_8C8G?.trim() || "vectrabot-8c8g",
+  "16:16384": process.env.SUPERCHARGE_E2B_TEMPLATE_16C16G?.trim() || "vectrabot-16c16g",
+};
+
+function templateForSize(runtime: AgentRuntime, cpuCount?: number, memoryMB?: number): string {
+  const profile = runtimeProfile(runtime);
+  if (runtime !== "supercharge") return profile.template;
+  const key = `${cpuCount ?? 4}:${memoryMB ?? 8192}`;
+  return SANDBOX_TEMPLATES[key] || profile.template;
+}
+
 function sandboxSize(cpuCount?: number, memoryMB?: number): { cpuCount: number; memoryMB: number } | undefined {
   if (!cpuCount && !memoryMB) return undefined;
   const key = `${cpuCount}:${memoryMB}`;
@@ -761,8 +778,9 @@ async function createSession(input: {
     //   lifecycle: { onTimeout: 'pause', autoResume: true }
     // Default onTimeout is 'kill' — without lifecycle, idle sandboxes die permanently.
     const size = sandboxSize(input.cpuCount, input.memoryMB);
+    const template = templateForSize(runtime, size?.cpuCount, size?.memoryMB);
     sandbox = (await Sandbox.create({
-      template: profile.template,
+      template,
       timeoutMs: sandboxTimeoutMs,
       lifecycle: sandboxLifecycle,
       ...(size ? { cpuCount: size.cpuCount, memoryMB: size.memoryMB } : {}),
@@ -776,7 +794,7 @@ async function createSession(input: {
         lifecycle?: { onTimeout?: string; autoResume?: boolean };
       };
       console.log(
-        `[agent-gateway] created runtime=${runtime} sandbox=${sandboxId} template=${profile.template}` +
+        `[agent-gateway] created runtime=${runtime} sandbox=${sandboxId} template=${template}` +
           ` state=${info.state ?? "?"} cpu=${info.cpuCount ?? "?"} memMB=${info.memoryMB ?? "?"}` +
           ` lifecycle.onTimeout=${info.lifecycle?.onTimeout ?? sandboxLifecycle.onTimeout}` +
           ` autoResume=${info.lifecycle?.autoResume ?? sandboxLifecycle.autoResume}`,

@@ -20,6 +20,9 @@ const template = Template({ fileContextPath: here })
     [
       "printf 'user ALL=(root) NOPASSWD: /opt/vectrabot/lockdown.sh\\n' > /etc/sudoers.d/vectrabot-lockdown",
       "chmod 440 /etc/sudoers.d/vectrabot-lockdown",
+      "curl -fsSL --retry 5 -o /usr/local/bin/supercharge https://github.com/supercharge-cli/supercharge-releases/releases/download/v1.4.44/supercharge-linux-x86_64",
+      "chmod 755 /usr/local/bin/supercharge",
+      "ln -sfn supercharge /usr/local/bin/sc",
       "/usr/local/bin/supercharge --version",
     ],
     { user: "root" },
