@@ -25,7 +25,6 @@ import {
 import type { Instance } from "@/lib/store";
 import { SandboxWorkspace } from "@/components/sandbox-workspace";
 import { ManagedMcpCard } from "@/components/managed-mcp";
-import { AgentChats } from '@/components/agent-chats';
 import { AutopayNote, startAutopayCheckout, SubscriptionPanel } from '@/components/billing/subscription-panel';
 
 type AgentRuntime = "xibecode" | "supercharge";
@@ -148,7 +147,6 @@ export function Dashboard({ email }: { email: string }) {
   const [plans, setPlans] = useState<Array<{ id: string; name: string; priceInr: number; priceUsd: number; autopay?: boolean }>>([]);
   const [billingCfg, setBillingCfg] = useState<{ graceDays?: number; retentionDays?: number }>({});
   const [planId, setPlanId] = useState("hosting-2c4g");
-  const [chatMode, setChatMode] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [config, setConfig] = useState<ConfigView | null>(null);
   const [pairing, setPairing] = useState<PairingView | null>(null);
@@ -281,7 +279,6 @@ export function Dashboard({ email }: { email: string }) {
       const sp = new URLSearchParams(window.location.search);
       const pre = sp.get("selected");
       if (pre) setSelected(pre);
-      if (sp.get("billing")) setChatMode(false);
     } catch {
       /* ignore */
     }
@@ -1141,17 +1138,12 @@ export function Dashboard({ email }: { email: string }) {
   ];
 
   const selectedInst = instances.find((i) => i.id === selected);
-  const chatInstance = selectedInst?.runtime === 'supercharge' ? selectedInst : instances.find((instance) => instance.runtime === 'supercharge');
-  if (!loading && chatMode && chatInstance) {
-    return <AgentChats key={chatInstance.id} workspace={chatInstance} onSettings={() => { setChatMode(false); void loadDetail(chatInstance.id); }} />;
-  }
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-white">Workspace settings</h1>
-          {chatInstance && <button type="button" className="mt-3 text-sm text-emerald-300 hover:underline" onClick={() => setChatMode(true)}>Back to agent chats</button>}
           <p className="mt-1 text-sm text-zinc-400">
             Signed in as <span className="text-zinc-200">{email}</span> · plan{" "}
             <span className="text-orange-400">{BRAND.plan.label}</span>
