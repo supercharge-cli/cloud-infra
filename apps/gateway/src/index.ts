@@ -15,7 +15,7 @@ import { LifecycleStore, type LifecycleRecord } from "./lifecycle-store.js";
 import { pluginRuntimeCommand } from "./plugin-runtime-update.js";
 import { githubMcpTokenCommand } from "./github-token-read.js";
 import { deleteAfterKill, killWithPreStop, prepareMigration } from "./pre-stop.js";
-import { HOST_BIN, HOST_PORT, hostDigestCommand, hostStartScript, loadHostBinary, validLabel, validSessionToken } from "./vectrabot-host.js";
+import { HOST_BIN, HOST_PORT, HOST_DIR, hostDigestCommand, hostStartScript, loadHostBinary, validLabel, validSessionToken } from "./vectrabot-host.js";
 
 type SandboxLike = {
   sandboxId?: string;
@@ -2071,16 +2071,30 @@ const server = createServer(async (req, res) => {
       }
       try {
         const binary = await loadHostBinary();
-        const status = await ensureSandboxRunning(session);
         await touchSession(session);
         const run = session.sandbox.commands?.run;
         if (!run) throw new Error("sandbox commands are unavailable");
-        const installed = await run.call(session.sandbox.commands, hostDigestCommand, { timeoutMs: 30_000 });
+        // Skip the in-sandbox digest check when the host is already healthy
+        // with this exact binary — a warm attach needs no round-trips.
         let uploaded = false;
-        if (String(installed.stdout || "").trim() !== binary.sha256) {
-          await writeSandboxBytes(session.sandbox, `${HOST_BIN}.next`, binary.bytes);
-          await run.call(session.sandbox.commands, `chmod 755 ${shQuote(HOST_BIN)}.next && mv -f ${shQuote(HOST_BIN)}.next ${shQuote(HOST_BIN)}`, { timeoutMs: 30_000 });
-          uploaded = true;
+        let running = false;
+        try {
+          const probe = await run.call(session.sandbox.commands, `curl -sf -m 2 http://127.0.0.1:${HOST_PORT}/health 2>/dev/null | grep -q sandbox-host && cat ${HOST_DIR}/host.sha 2>/dev/null`, { timeoutMs: 5_000 });
+          if (String(probe.stdout || "").trim() === binary.sha256) {
+            running = true;
+            uploaded = true;
+          }
+        } catch {
+          /* cold sandbox: fall through to install/start */
+        }
+        if (!running) {
+          const installed = await run.call(session.sandbox.commands, hostDigestCommand, { timeoutMs: 30_000 });
+          uploaded = String(installed.stdout || "").trim() === binary.sha256;
+          if (!uploaded) {
+            await writeSandboxBytes(session.sandbox, `${HOST_BIN}.next`, binary.bytes);
+            await run.call(session.sandbox.commands, `chmod 755 ${shQuote(HOST_BIN)}.next && mv -f ${shQuote(HOST_BIN)}.next ${shQuote(HOST_BIN)}`, { timeoutMs: 30_000 });
+            uploaded = true;
+          }
         }
         const cloudToken = daemonAuthorizationHeaders().authorization?.replace(/^Bearer\s+/i, "") || "";
         const started = await run.call(session.sandbox.commands, hostStartScript(), {
@@ -2101,8 +2115,8 @@ const server = createServer(async (req, res) => {
           success: true,
           sessionId: session.sessionId,
           sandboxId: session.sandboxId,
-          state: status.state,
-          resumed: status.resumed,
+          state: running ? "running" : "started",
+          resumed: false,
           url: (await resolvePreviewHost(session, HOST_PORT)).replace(/\/$/, ""),
           uploaded,
           restarted: out.includes("HOST_STARTED"),
