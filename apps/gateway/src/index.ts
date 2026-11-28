@@ -703,21 +703,21 @@ const SANDBOX_SIZES = new Set(["2:4096", "4:8192", "8:8192", "16:16384"]);
 // Sandbox.create accepts the template id. The short alias resolves on
 // /templates/aliases but the create call returns 404 for that same name.
 const SANDBOX_TEMPLATE_IDS: Record<string, string> = {
-  "vectrabot-2c4g": "3pm4a7z8z29ozwm4i0ez",
-  "anishs-project-34f4/vectrabot-2c4g": "3pm4a7z8z29ozwm4i0ez",
-  "vectrabot-workspace": "tj5cby1f1jpplu8w0j41",
-  "anishs-project-34f4/vectrabot-workspace": "tj5cby1f1jpplu8w0j41",
-  "vectrabot-8c8g": "z5fq5btre1x7ehjedekp",
-  "anishs-project-34f4/vectrabot-8c8g": "z5fq5btre1x7ehjedekp",
-  "vectrabot-16c16g": "5o7js6fgphvem7te9mtn",
-  "anishs-project-34f4/vectrabot-16c16g": "5o7js6fgphvem7te9mtn",
+  "vectrabot-2c4g": "diljnuuwzgantt0rcxnn",
+  "anishs-project-34f4/vectrabot-2c4g": "diljnuuwzgantt0rcxnn",
+  "vectrabot-workspace": "40fipp0lkda0llck7a8l",
+  "anishs-project-34f4/vectrabot-workspace": "40fipp0lkda0llck7a8l",
+  "vectrabot-8c8g": "e9audeqyndp3nl2pq72z",
+  "anishs-project-34f4/vectrabot-8c8g": "e9audeqyndp3nl2pq72z",
+  "vectrabot-16c16g": "zaz2e9qaa8inkpoa6rf3",
+  "anishs-project-34f4/vectrabot-16c16g": "zaz2e9qaa8inkpoa6rf3",
 };
 
 const SANDBOX_TEMPLATES: Record<string, string> = {
-  "2:4096": process.env.SUPERCHARGE_E2B_TEMPLATE_2C4G?.trim() || "3pm4a7z8z29ozwm4i0ez",
-  "4:8192": process.env.SUPERCHARGE_E2B_TEMPLATE?.trim() || "tj5cby1f1jpplu8w0j41",
-  "8:8192": process.env.SUPERCHARGE_E2B_TEMPLATE_8C8G?.trim() || "z5fq5btre1x7ehjedekp",
-  "16:16384": process.env.SUPERCHARGE_E2B_TEMPLATE_16C16G?.trim() || "5o7js6fgphvem7te9mtn",
+  "2:4096": process.env.SUPERCHARGE_E2B_TEMPLATE_2C4G?.trim() || "diljnuuwzgantt0rcxnn",
+  "4:8192": process.env.SUPERCHARGE_E2B_TEMPLATE?.trim() || "40fipp0lkda0llck7a8l",
+  "8:8192": process.env.SUPERCHARGE_E2B_TEMPLATE_8C8G?.trim() || "e9audeqyndp3nl2pq72z",
+  "16:16384": process.env.SUPERCHARGE_E2B_TEMPLATE_16C16G?.trim() || "zaz2e9qaa8inkpoa6rf3",
 };
 
 function sandboxTemplate(name: string): string {
