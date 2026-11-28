@@ -8,7 +8,7 @@ The PC app is the OpenMausBot Electron app. The phone app is their Android app. 
 
 Cloud-infra is the control plane. Sign-in and payment stay on our website. There is no second login. One paid workspace is one E2B sandbox. Chats and workspace files are stored on our side so a recreated sandbox comes back with the same work. That snapshot is not built yet.
 
-Inside the sandbox, `apps/sandbox-host` is our Go server. It has no web page. It runs the Supercharge CLI only. The apps connect straight to the sandbox after our cloud mints a session.
+Inside the sandbox, the Go host from the `vectrabot` repo (`backend/`) is our server. The gateway builds it from a pinned commit; it is no longer kept in this repo. It has no web page. It runs the Supercharge CLI only. The apps connect straight to the sandbox after our cloud mints a session.
 
 ## Attach
 
