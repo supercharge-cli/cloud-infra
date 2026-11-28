@@ -22,11 +22,22 @@ export async function POST(req: Request, ctx: Ctx) {
   const botId = computerBotId(body.botId);
   if (!botId) return NextResponse.json({ error: "Invalid botId" }, { status: 400 });
   try {
-    if (botId !== "main" && action === "start") {
+    if (action === "start") {
       const status = await proxyInbox(gate.inst, `/v1/computer/status?${computerBotQuery(botId)}`);
-      if (!status.ok) return NextResponse.json({ error: "Agent desktop unavailable" }, { status: status.status });
-      if (!matchesComputerBot(await status.json(), botId)) {
-        return NextResponse.json({ error: "Agent desktop identity unavailable" }, { status: 409 });
+      const state = await status.json().catch(() => ({})) as { handoff?: boolean; handoffId?: string };
+      if (botId !== "main") {
+        if (!status.ok) return NextResponse.json({ error: "Agent desktop unavailable" }, { status: status.status });
+        if (!matchesComputerBot(state, botId)) {
+          return NextResponse.json({ error: "Agent desktop identity unavailable" }, { status: 409 });
+        }
+      }
+      const held = typeof state.handoffId === "string" ? state.handoffId : "";
+      if (status.ok && state.handoff === true && held && held !== body.handoffId) {
+        await proxyInbox(gate.inst, "/v1/computer/handoff", {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ action: "stop", handoffId: held, botId }),
+        });
       }
     }
     const upstream = await proxyInbox(gate.inst, "/v1/computer/handoff", {
