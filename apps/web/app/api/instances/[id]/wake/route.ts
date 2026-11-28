@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getPlan, hasInstanceAccess } from "@/lib/billing";
-import { wakeSession } from "@/lib/gateway-client";
+import { wakeSession, getSandboxState } from "@/lib/gateway-client";
 import { ensureInbox } from "@/lib/app-chat";
 import { getInstance, updateInstance } from "@/lib/store";
 import { applySystemUpdate, getSystemVersionInfo } from "@/lib/system-update";
@@ -36,13 +36,21 @@ export async function POST(_req: Request, ctx: Ctx) {
   }
 
   try {
+    // Fast path: an already-running sandbox needs only the wake. Version
+    // checks and the inbox bootstrap each cost a sandbox round-trip and are
+    // only worth doing when something was actually resumed or started.
+    const preState = inst.sandboxId
+      ? await getSandboxState(inst.sandboxId).catch(() => null)
+      : null;
+    const wasRunning = preState?.state === "running";
     const result = await wakeSession(inst.sessionId, {
       sandboxId: inst.sandboxId,
       runtime: inst.runtime || "xibecode",
       restartDaemon: inst.runtime !== "supercharge",
     });
     const logs = [...(result.logs || [])];
-    if (result.ok && inst.runtime === "supercharge") {
+    const didWork = !wasRunning || result.resumed === true;
+    if (result.ok && inst.runtime === "supercharge" && (didWork || !wasRunning)) {
       const system = await getSystemVersionInfo(inst.sessionId, inst.sandboxId).catch(
         () => null,
       );
